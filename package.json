@@ -1,0 +1,15 @@
+{
+  "name": "hospital-management-system",
+  "version": "1.0.0",
+  "description": "Modern Hospital Management System",
+  "scripts": {
+    "server": "node server/index.js",
+    "client": "cd client && npm run dev",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "db:setup": "node server/config/setup.js",
+    "db:seed": "node server/config/seed.js"
+  },
+  "dependencies": {
+    "concurrently": "^8.2.0"
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+_old_modules/
+.env
+.env.*
+*.db-shm
+*.db-wal
+dist/
+.DS_Store
+*.log
+.vscode/
+coverage/
+npm-debug.log*

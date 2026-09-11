@@ -1,0 +1,420 @@
+<template>
+  <div class="reports-page">
+    <div class="page-header">
+      <div class="tabs-inline">
+        <button :class="{ active: activeTab === 'overview' }" @click="switchTab('overview')">Overview</button>
+        <button :class="{ active: activeTab === 'financial' }" @click="switchTab('financial')">Financial</button>
+        <button :class="{ active: activeTab === 'patients' }" @click="switchTab('patients')">Patient Stats</button>
+      </div>
+    </div>
+
+    <!-- Overview Tab -->
+    <div v-if="activeTab === 'overview'">
+      <div v-if="loadingOverview" class="loading-spinner">
+        <div class="spinner"></div>
+        <p>Loading dashboard data...</p>
+      </div>
+      <template v-else>
+        <div v-if="!stats.totalPatients && stats.totalPatients !== 0" class="empty-state">
+          <span class="empty-icon">&#128202;</span>
+          <h3>No Overview Data</h3>
+          <p>Dashboard data will appear here once available.</p>
+        </div>
+        <template v-else>
+          <div class="stats-grid">
+            <div class="stats-card" style="border-left: 4px solid #0d9488;">
+              <div class="stats-value">{{ stats.totalPatients || 0 }}</div>
+              <div class="stats-label">Total Active Patients</div>
+            </div>
+            <div class="stats-card" style="border-left: 4px solid #3b82f6;">
+              <div class="stats-value">{{ stats.totalDoctors || 0 }}</div>
+              <div class="stats-label">Active Doctors</div>
+            </div>
+            <div class="stats-card" style="border-left: 4px solid #8b5cf6;">
+              <div class="stats-value">{{ stats.todayAppointments || 0 }}</div>
+              <div class="stats-label">Today's Appointments</div>
+            </div>
+            <div class="stats-card" style="border-left: 4px solid #10b981;">
+              <div class="stats-value">{{ formatCurrency(stats.monthlyRevenue || 0) }}</div>
+              <div class="stats-label">Monthly Revenue</div>
+            </div>
+          </div>
+          <div class="card" style="margin-top:20px">
+            <div class="card-header"><h3>Weekly Appointment Trend</h3></div>
+            <div class="card-body">
+              <div v-if="weeklyStats.length" class="chart-bars">
+                <div v-for="day in weeklyStats" :key="day.date" class="bar-group">
+                  <div class="bar" :style="{ height: Math.max((day.count / maxWeekly) * 120, 8) + 'px' }">
+                    <span class="bar-label">{{ day.count }}</span>
+                  </div>
+                  <div class="bar-day">{{ formatDay(day.date) }}</div>
+                  <div class="bar-sub">
+                    <span class="completed">{{ day.completed }}</span>/
+                    <span class="cancelled">{{ day.cancelled }}</span>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="empty-state">
+                <span class="empty-icon">&#128197;</span>
+                <h3>No Weekly Data</h3>
+                <p>Weekly appointment trends will appear here.</p>
+              </div>
+            </div>
+          </div>
+        </template>
+      </template>
+    </div>
+
+    <!-- Financial Tab -->
+    <div v-if="activeTab === 'financial'">
+      <div class="filter-bar">
+        <select v-model="period" @change="loadFinancial">
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+        <input type="number" v-model="year" :min="2020" :max="2030" @change="loadFinancial" />
+      </div>
+
+      <div v-if="loadingFinancial" class="loading-spinner">
+        <div class="spinner"></div>
+        <p>Loading financial data...</p>
+      </div>
+      <template v-else>
+        <div class="financial-summary">
+          <div class="summary-card summary-revenue">
+            <div class="summary-label">Total Revenue</div>
+            <div class="summary-value">{{ formatCurrency(totalRevenue) }}</div>
+          </div>
+          <div class="summary-card summary-expenses">
+            <div class="summary-label">Total Expenses</div>
+            <div class="summary-value">{{ formatCurrency(totalExpenses) }}</div>
+          </div>
+          <div class="summary-card summary-net">
+            <div class="summary-label">Net Income</div>
+            <div class="summary-value" :class="netIncome >= 0 ? 'positive' : 'negative'">{{ formatCurrency(netIncome) }}</div>
+          </div>
+        </div>
+
+        <div class="report-grid">
+          <div class="card">
+            <div class="card-header"><h3>Revenue by Period</h3></div>
+            <div class="card-body">
+              <div v-if="financial.revenue && financial.revenue.length">
+                <div v-for="(r, idx) in groupedRevenue" :key="idx" class="report-row">
+                  <span class="row-label">{{ r.period }}</span>
+                  <span class="row-value">{{ formatCurrency(r.revenue) }}</span>
+                  <span class="row-sub">{{ r.transaction_count }} transactions</span>
+                </div>
+              </div>
+              <div v-else class="empty-state">
+                <span class="empty-icon">&#128176;</span>
+                <h3>No Revenue Data</h3>
+                <p>Revenue by period will appear here.</p>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3>Revenue by Category</h3></div>
+            <div class="card-body">
+              <div v-if="financial.topServices && financial.topServices.length">
+                <div v-for="s in financial.topServices" :key="s.category" class="report-row">
+                  <span class="row-label">{{ formatCategory(s.category) }}</span>
+                  <span class="row-value">{{ formatCurrency(s.total_revenue) }}</span>
+                  <span class="row-sub">{{ s.count }} items</span>
+                </div>
+              </div>
+              <div v-else class="empty-state">
+                <span class="empty-icon">&#128203;</span>
+                <h3>No Service Data</h3>
+                <p>Revenue by category will appear here.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Patient Stats Tab -->
+    <div v-if="activeTab === 'patients'">
+      <div v-if="loadingPatients" class="loading-spinner">
+        <div class="spinner"></div>
+        <p>Loading patient statistics...</p>
+      </div>
+      <div v-else-if="!hasPatientData" class="empty-state">
+        <span class="empty-icon">&#128100;</span>
+        <h3>No Patient Statistics</h3>
+        <p>Patient statistics will appear here once data is available.</p>
+      </div>
+      <div v-else class="report-grid">
+        <div class="card">
+          <div class="card-header"><h3>By Gender</h3></div>
+          <div class="card-body">
+            <div v-for="g in patientStats.byGender" :key="g.gender" class="report-row">
+              <span class="row-label">{{ g.gender }}</span>
+              <span class="row-value">{{ g.count }}</span>
+              <div class="progress-wrap">
+                <div class="progress-bar">
+                  <div class="progress-fill" :style="{ width: (g.count / totalPatients * 100) + '%', background: g.gender === 'male' ? '#3b82f6' : '#ec4899' }"></div>
+                </div>
+                <span class="progress-pct">{{ Math.round(g.count / totalPatients * 100) }}%</span>
+              </div>
+            </div>
+            <div v-if="!patientStats.byGender || !patientStats.byGender.length" class="empty-state-sm">
+              <p>No gender data available.</p>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>By Age Group</h3></div>
+          <div class="card-body">
+            <div v-for="a in patientStats.byAge" :key="a.age_group" class="report-row">
+              <span class="row-label">{{ a.age_group }}</span>
+              <span class="row-value">{{ a.count }}</span>
+              <div class="progress-wrap">
+                <div class="progress-bar">
+                  <div class="progress-fill" :style="{ width: (a.count / totalPatients * 100) + '%', background: '#0d9488' }"></div>
+                </div>
+                <span class="progress-pct">{{ Math.round(a.count / totalPatients * 100) }}%</span>
+              </div>
+            </div>
+            <div v-if="!patientStats.byAge || !patientStats.byAge.length" class="empty-state-sm">
+              <p>No age data available.</p>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>By Blood Type</h3></div>
+          <div class="card-body">
+            <div v-for="b in patientStats.byBloodType" :key="b.blood_type" class="report-row">
+              <span class="row-label">{{ b.blood_type }}</span>
+              <span class="row-value">{{ b.count }}</span>
+              <div class="progress-wrap">
+                <div class="progress-bar">
+                  <div class="progress-fill" :style="{ width: (b.count / totalPatients * 100) + '%', background: '#8b5cf6' }"></div>
+                </div>
+                <span class="progress-pct">{{ Math.round(b.count / totalPatients * 100) }}%</span>
+              </div>
+            </div>
+            <div v-if="!patientStats.byBloodType || !patientStats.byBloodType.length" class="empty-state-sm">
+              <p>No blood type data available.</p>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>Top Diagnoses</h3></div>
+          <div class="card-body">
+            <div v-for="(d, idx) in patientStats.topDiagnoses" :key="d.diagnosis" class="report-row">
+              <span class="row-label">
+                <span class="diagnosis-rank">{{ idx + 1 }}</span>
+                {{ d.diagnosis }}
+              </span>
+              <span class="row-value">{{ d.count }}</span>
+              <div class="progress-wrap">
+                <div class="progress-bar">
+                  <div class="progress-fill" :style="{ width: (d.count / maxDiagnosisCount * 100) + '%', background: '#f59e0b' }"></div>
+                </div>
+                <span class="progress-pct">{{ Math.round(d.count / maxDiagnosisCount * 100) }}%</span>
+              </div>
+            </div>
+            <div v-if="!patientStats.topDiagnoses || !patientStats.topDiagnoses.length" class="empty-state-sm">
+              <p>No diagnosis data yet.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { ref, computed, onMounted } from 'vue'
+import axios from 'axios'
+import { useToast } from '../../store/toast'
+import { formatDate, formatCurrency } from '../../utils/helpers'
+
+export default {
+  name: 'Reports',
+  setup() {
+    const toast = useToast()
+    const activeTab = ref('overview')
+    const stats = ref({})
+    const weeklyStats = ref([])
+    const period = ref('monthly')
+    const year = ref(new Date().getFullYear())
+    const financial = ref({ revenue: [], expenses: [], topServices: [] })
+    const patientStats = ref({ byGender: [], byAge: [], byBloodType: [], topDiagnoses: [] })
+    const loadingOverview = ref(false)
+    const loadingFinancial = ref(false)
+    const loadingPatients = ref(false)
+
+    const maxWeekly = computed(() => Math.max(...weeklyStats.value.map(d => d.count), 1))
+    const totalPatients = computed(() => patientStats.value.byGender.reduce((s, g) => s + g.count, 0) || 1)
+    const maxDiagnosisCount = computed(() => {
+      if (!patientStats.value.topDiagnoses || !patientStats.value.topDiagnoses.length) return 1
+      return Math.max(...patientStats.value.topDiagnoses.map(d => d.count), 1)
+    })
+
+    const hasPatientData = computed(() => {
+      return (patientStats.value.byGender && patientStats.value.byGender.length) ||
+        (patientStats.value.byAge && patientStats.value.byAge.length) ||
+        (patientStats.value.byBloodType && patientStats.value.byBloodType.length) ||
+        (patientStats.value.topDiagnoses && patientStats.value.topDiagnoses.length)
+    })
+
+    const totalRevenue = computed(() => {
+      return groupedRevenue.value.reduce((s, r) => s + r.revenue, 0)
+    })
+
+    const totalExpenses = computed(() => {
+      if (!financial.value.expenses || !financial.value.expenses.length) return 0
+      return financial.value.expenses.reduce((s, e) => s + parseFloat(e.total || 0), 0)
+    })
+
+    const netIncome = computed(() => totalRevenue.value - totalExpenses.value)
+
+    const groupedRevenue = computed(() => {
+      const map = {}
+      financial.value.revenue.forEach(r => {
+        if (!map[r.period]) map[r.period] = { period: r.period, revenue: 0, transaction_count: 0 }
+        map[r.period].revenue += parseFloat(r.revenue)
+        map[r.period].transaction_count += r.transaction_count
+      })
+      return Object.values(map).sort((a, b) => b.period.localeCompare(a.period))
+    })
+
+    const formatDay = (d) => new Date(d).toLocaleDateString('en', { weekday: 'short' })
+    const formatCategory = (c) => c ? c.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) : ''
+
+    const loadDashboard = async () => {
+      loadingOverview.value = true
+      try {
+        const { data } = await axios.get('/api/reports/dashboard')
+        stats.value = data.stats
+        weeklyStats.value = data.weeklyStats || []
+      } catch (e) {
+        toast.error('Failed to load dashboard data')
+      } finally {
+        loadingOverview.value = false
+      }
+    }
+
+    const loadFinancial = async () => {
+      loadingFinancial.value = true
+      try {
+        const { data } = await axios.get('/api/reports/financial', { params: { period: period.value, year: year.value } })
+        financial.value = data
+      } catch (e) {
+        toast.error('Failed to load financial data')
+      } finally {
+        loadingFinancial.value = false
+      }
+    }
+
+    const loadPatientStats = async () => {
+      loadingPatients.value = true
+      try {
+        const { data } = await axios.get('/api/reports/patients')
+        patientStats.value = data
+      } catch (e) {
+        toast.error('Failed to load patient statistics')
+      } finally {
+        loadingPatients.value = false
+      }
+    }
+
+    const switchTab = (tab) => {
+      activeTab.value = tab
+      if (tab === 'overview' && !stats.value.totalPatients && stats.value.totalPatients !== 0) loadDashboard()
+      if (tab === 'financial' && !financial.value.revenue.length) loadFinancial()
+      if (tab === 'patients' && !patientStats.value.byGender.length) loadPatientStats()
+    }
+
+    onMounted(loadDashboard)
+    return {
+      activeTab, stats, weeklyStats, period, year, financial, patientStats,
+      maxWeekly, totalPatients, maxDiagnosisCount, hasPatientData,
+      totalRevenue, totalExpenses, netIncome, groupedRevenue,
+      formatDate, formatCurrency, formatDay, formatCategory,
+      loadFinancial, loadPatientStats, switchTab,
+      loadingOverview, loadingFinancial, loadingPatients
+    }
+  }
+}
+</script>
+
+<style scoped>
+.page-header { margin-bottom: 20px; }
+.tabs-inline { display: flex; gap: 0; }
+.tabs-inline button { padding: 10px 20px; border: 1px solid #e2e8f0; background: white; cursor: pointer; font-size: 14px; transition: all 0.2s; }
+.tabs-inline button:first-child { border-radius: 8px 0 0 8px; }
+.tabs-inline button:last-child { border-radius: 0 8px 8px 0; }
+.tabs-inline button.active { background: #0d9488; color: white; border-color: #0d9488; }
+.tabs-inline button:hover:not(.active) { background: #f0fdfa; border-color: #0d9488; color: #0d9488; }
+
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.stats-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); transition: transform 0.2s, box-shadow 0.2s; }
+.stats-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+.stats-value { font-size: 24px; font-weight: 700; color: #1e293b; }
+.stats-label { font-size: 13px; color: #64748b; margin-top: 4px; }
+
+.chart-bars { display: flex; align-items: flex-end; gap: 16px; height: 180px; padding: 20px 0; }
+.bar-group { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; }
+.bar { width: 100%; max-width: 50px; background: linear-gradient(180deg, #0d9488, #14b8a6); border-radius: 4px 4px 0 0; position: relative; min-height: 8px; display: flex; align-items: flex-start; justify-content: center; padding-top: 4px; transition: height 0.4s ease; }
+.bar-label { color: white; font-size: 11px; font-weight: 600; }
+.bar-day { font-size: 12px; color: #64748b; }
+.bar-sub { font-size: 10px; color: #94a3b8; }
+.completed { color: #10b981; }
+.cancelled { color: #ef4444; }
+
+.filter-bar { display: flex; gap: 12px; margin-bottom: 20px; }
+.filter-bar select, .filter-bar input { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; }
+.filter-bar select:focus, .filter-bar input:focus { border-color: #0d9488; }
+
+.financial-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px; }
+.summary-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); text-align: center; }
+.summary-card.summary-revenue { border-top: 3px solid #10b981; }
+.summary-card.summary-expenses { border-top: 3px solid #ef4444; }
+.summary-card.summary-net { border-top: 3px solid #3b82f6; }
+.summary-label { font-size: 13px; color: #64748b; margin-bottom: 6px; font-weight: 500; }
+.summary-value { font-size: 22px; font-weight: 700; color: #1e293b; }
+.summary-value.positive { color: #10b981; }
+.summary-value.negative { color: #ef4444; }
+
+.report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.report-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
+.report-row:last-child { border-bottom: none; }
+.row-label { flex: 1; font-size: 14px; color: #334155; display: flex; align-items: center; gap: 8px; }
+.row-value { font-weight: 600; font-size: 14px; color: #1e293b; min-width: 80px; text-align: right; }
+.row-sub { font-size: 12px; color: #94a3b8; min-width: 80px; text-align: right; }
+
+.progress-wrap { flex: 1.5; display: flex; align-items: center; gap: 8px; }
+.progress-bar { flex: 1; height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+.progress-pct { font-size: 11px; font-weight: 600; color: #64748b; min-width: 32px; text-align: right; }
+
+.diagnosis-rank { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #f1f5f9; font-size: 11px; font-weight: 700; color: #64748b; flex-shrink: 0; }
+
+.empty-state { text-align: center; padding: 48px 20px; }
+.empty-icon { font-size: 48px; display: block; margin-bottom: 12px; opacity: 0.6; }
+.empty-state h3 { font-size: 16px; font-weight: 600; color: #475569; margin: 0 0 6px; }
+.empty-state p { font-size: 13px; color: #94a3b8; margin: 0; }
+
+.empty-state-sm { text-align: center; padding: 20px; color: #94a3b8; font-size: 13px; }
+
+.loading-spinner { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; }
+.spinner { width: 36px; height: 36px; border: 3px solid #e2e8f0; border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-spinner p { color: #94a3b8; font-size: 14px; margin: 0; }
+
+.card { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden; }
+.card-header { padding: 16px 20px; border-bottom: 1px solid #f1f5f9; }
+.card-header h3 { margin: 0; font-size: 15px; font-weight: 600; color: #1e293b; }
+.card-body { padding: 16px 20px; }
+
+.text-muted { color: #94a3b8; text-align: center; padding: 20px; }
+
+@media (max-width: 768px) {
+  .stats-grid, .report-grid, .financial-summary { grid-template-columns: 1fr; }
+}
+</style>
