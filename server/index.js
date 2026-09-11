@@ -49,6 +49,11 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// JSON 404 for unknown API routes
+app.use('/api', (req, res) => {
+  res.status(404).json({ message: `Route not found: ${req.method} ${req.originalUrl}` });
+});
+
 // Serve Vue.js frontend in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../client/dist')));
