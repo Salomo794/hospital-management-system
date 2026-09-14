@@ -11,6 +11,12 @@
           <option value="cancelled">Cancelled</option>
         </select>
         <input type="date" v-model="dateFilter" @change="page = 1; loadAppointments()" />
+        <select v-model="doctorFilter" @change="page = 1; loadAppointments()">
+          <option value="">All Doctors</option>
+          <option v-for="d in doctors" :key="d.id" :value="d.id">
+            Dr. {{ d.first_name }} {{ d.last_name }}
+          </option>
+        </select>
       </div>
       <button class="btn btn-primary" @click="showModal = true">+ New Appointment</button>
     </div>
@@ -330,6 +336,7 @@ export default {
     const clearFilters = () => {
       statusFilter.value = ''
       dateFilter.value = ''
+      doctorFilter.value = ''
       page.value = 1
       loadAppointments()
     }
@@ -341,7 +348,7 @@ export default {
 
     return {
       appointments, doctors, total, page, limit,
-      statusFilter, dateFilter, showModal, saving, formError,
+      statusFilter, dateFilter, doctorFilter, showModal, saving, formError,
       patientSearch, patientResults, availableSlots, today, form,
       loadingAppointments, loadingSlots, searchingPatients,
       loadAppointments, searchPatients, selectPatient, clearPatient,

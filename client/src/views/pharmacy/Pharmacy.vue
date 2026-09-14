@@ -13,7 +13,7 @@
 
     <div v-if="view === 'medicines'">
       <div class="search-filters">
-        <input type="text" v-model="search" placeholder="Search medicines..." @input="loadMedicines" />
+        <input type="text" v-model="search" placeholder="Search medicines..." @input="debouncedLoadMedicines" />
         <select v-model="categoryFilter" @change="loadMedicines">
           <option value="">All Categories</option>
           <option>Analgesic</option><option>Antibiotic</option><option>Antihistamine</option>
@@ -215,7 +215,7 @@
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
-import { formatDate, formatCurrency } from '../../utils/helpers'
+import { formatDate, formatCurrency, debounce } from '../../utils/helpers'
 
 export default {
   name: 'Pharmacy',
@@ -258,6 +258,7 @@ export default {
         loadingMedicines.value = false
       }
     }
+    const debouncedLoadMedicines = debounce(loadMedicines, 300)
 
     const loadAlerts = async () => {
       loadingAlerts.value = true
@@ -348,7 +349,7 @@ export default {
     return {
       view, medicines, search, categoryFilter, lowStockOnly, showAddModal, lowStock, expired, medForm,
       loadingMedicines, loadingAlerts, savingMedicine,
-      loadMedicines, loadAlerts, addMedicine, formatDate, formatCurrency,
+      loadMedicines, debouncedLoadMedicines, loadAlerts, addMedicine, formatDate, formatCurrency,
       showDispenseModal, dispensing, loadingPrescriptions, prescriptionSearch,
       filteredPrescriptionItems, selectedPrescriptionItem, dispenseForm,
       openDispenseModal, closeDispenseModal, filterPrescriptionItems, selectPrescriptionItem,
