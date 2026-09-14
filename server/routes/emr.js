@@ -85,6 +85,16 @@ router.get('/:id', authenticate, async (req, res) => {
        LEFT JOIN prescription_items pi ON pr.id = pi.prescription_id
        WHERE pr.medical_record_id = ? GROUP BY pr.id`, [req.params.id]
     );
+    for (const pr of prescriptions) {
+      const [items] = await pool.query(
+        `SELECT pi.id, pi.dosage, pi.frequency, pi.duration, pi.quantity, pi.instructions,
+          m.name as medicine_name
+         FROM prescription_items pi
+         LEFT JOIN medicines m ON pi.medicine_id = m.id
+         WHERE pi.prescription_id = ? ORDER BY pi.id`, [pr.id]
+      );
+      pr.items = items;
+    }
     const [labOrders] = await pool.query(
       `SELECT lo.*, GROUP_CONCAT(lt.name, ', ') as test_names
        FROM lab_orders lo
@@ -92,6 +102,16 @@ router.get('/:id', authenticate, async (req, res) => {
        LEFT JOIN lab_tests lt ON loi.lab_test_id = lt.id
        WHERE lo.medical_record_id = ? GROUP BY lo.id`, [req.params.id]
     );
+    for (const lo of labOrders) {
+      const [tests] = await pool.query(
+        `SELECT lt.id, lt.name, lt.category, loi.result_value, loi.result_unit,
+          loi.reference_range, loi.is_abnormal
+         FROM lab_order_items loi
+         JOIN lab_tests lt ON loi.lab_test_id = lt.id
+         WHERE loi.lab_order_id = ? ORDER BY loi.id`, [lo.id]
+      );
+      lo.tests = tests;
+    }
     res.json({ ...rows[0], prescriptions, lab_orders: labOrders });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });

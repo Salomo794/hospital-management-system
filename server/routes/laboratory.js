@@ -108,7 +108,7 @@ router.post('/orders', authenticate, authorize('doctor', 'admin', 'nurse'), asyn
 router.get('/orders/:id', authenticate, async (req, res) => {
   try {
     const [order] = await pool.query(
-      `SELECT lo.*, p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn, p.gender as patient_gender,
+      `SELECT lo.*, p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn as patient_mrn, p.gender as patient_gender,
         p.date_of_birth as patient_dob,
         u.first_name as doctor_first_name, u.last_name as doctor_last_name
         FROM lab_orders lo JOIN patients p ON lo.patient_id = p.id JOIN users u ON lo.doctor_id = u.id WHERE lo.id = ?`,
@@ -120,7 +120,6 @@ router.get('/orders/:id', authenticate, async (req, res) => {
         t.first_name as technician_first_name, t.last_name as technician_last_name
         FROM lab_order_items loi
         JOIN lab_tests lt ON loi.lab_test_id = lt.id
-        LEFT JOIN users u ON loi.technician_id = u.id
         LEFT JOIN users t ON loi.technician_id = t.id WHERE loi.lab_order_id = ?`,
       [req.params.id]
     );

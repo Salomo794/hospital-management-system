@@ -7,7 +7,9 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "setup": "node config/setup.js",
-    "seed": "node config/seed.js"
+    "seed": "node config/seed.js",
+    "test": "node tests/smoke.test.js",
+    "db:backup": "node scripts/backup-db.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
