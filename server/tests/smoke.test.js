@@ -16,7 +16,7 @@ if (!fs.existsSync(envFile)) {
 
 const server = spawn(process.execPath, ['index.js'], {
   cwd: SERVER_DIR,
-  env: { ...process.env, PORT: '5001' },
+  env: { ...process.env, PORT: '5001', NODE_ENV: 'test' },
   stdio: ['ignore', 'pipe', 'pipe']
 });
 
@@ -54,8 +54,8 @@ async function req(method, url, body) {
   return { status: res.status, json };
 }
 
-const CHECKS = [
-  ['GET', '/health', null],
+// [method, url, body, expectedStatus=2xx]. expectedStatus can be a number or range.
+const POSITIVE = [
   ['POST', '/auth/login', { email: 'admin@hospital.com', password: 'password123' }],
   ['GET', '/auth/me', null],
   ['GET', '/users', null],
@@ -93,9 +93,41 @@ const CHECKS = [
   ['POST', '/ai/chat', { message: 'revenue this month' }]
 ];
 
-async function main() {
-  let passed = 0, failed = 0;
+// Negative checks prove validation + error handling actually protect the API.
+const NEGATIVE = [
+  ['POST', '/auth/login', { email: 'admin@hospital.com' }, 400],                      // missing password -> validation blocks
+  ['POST', '/auth/login', { email: 'not-an-email', password: 'password123' }, 400],    // bad email -> validation blocks
+  ['POST', '/ai/chat', {}, 400],                                                       // missing message -> no more 500
+  ['POST', '/patients', { first_name: '' }, 400],                                      // missing required fields -> validation
+  ['POST', '/appointments', { patient_id: 'x' }, 400],                                 // bad patient id -> validation
+  ['POST', '/billing', { patient_id: 1 }, 400],                                        // missing items -> validation
+  ['POST', '/laboratory/orders', { patient_id: 1 }, 400],                              // missing test_ids -> validation
+  ['GET', '/patients/not-a-number', null, 400]                                         // invalid id param -> validation
+];
 
+async function run(checks, getToken) {
+  let passed = 0, failed = 0;
+  for (const [method, url, body, expected] of checks) {
+    try {
+      const r = await req(method, url, body);
+      const ok = expected !== undefined
+        ? r.status === expected
+        : r.status >= 200 && r.status < 300;
+      if (ok) passed++;
+      else {
+        failed++;
+        console.log(`FAIL ${method} ${url} -> ${r.status} (expected ${expected || '2xx'})`);
+      }
+      if (getToken && url === '/auth/login' && r.status >= 200 && r.status < 300) token = r.json.token;
+    } catch (e) {
+      failed++;
+      console.log(`ERR  ${method} ${url} -> ${e.message}`);
+    }
+  }
+  return { passed, failed };
+}
+
+async function main() {
   if (!(await waitUp())) {
     console.error('FATAL: API server did not start.');
     console.error(serverLog.slice(0, 2000));
@@ -103,23 +135,11 @@ async function main() {
     process.exit(1);
   }
 
-  for (const [method, url, body] of CHECKS) {
-    if (url === '/health') continue; // already validated by waitUp
-    try {
-      const r = await req(method, url, body);
-      const ok = r.status >= 200 && r.status < 300;
-      if (ok) passed++;
-      else {
-        failed++;
-        console.log(`FAIL ${method} ${url} -> ${r.status}`);
-      }
-      if (url === '/auth/login' && ok) token = r.json.token;
-    } catch (e) {
-      failed++;
-      console.log(`ERR  ${method} ${url} -> ${e.message}`);
-    }
-  }
+  const pos = await run(POSITIVE, true);
+  const neg = await run(NEGATIVE, false);
 
+  const passed = pos.passed + neg.passed;
+  const failed = pos.failed + neg.failed;
   console.log(`\nSmoke test complete: ${passed} passed, ${failed} failed.`);
   server.kill();
   process.exit(failed > 0 ? 1 : 0);

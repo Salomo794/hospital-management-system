@@ -3,10 +3,13 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { validateEMR, validatePrescription } = require('../middleware/validation');
+const audit = require('../utils/audit');
 
 // Get medical records for a patient
 router.get('/patient/:patientId', authenticate, async (req, res) => {
   try {
+    // Role-based access: doctors/nurses can view; receptionist/pharmacist restrictions are business rules left open
     const [rows] = await pool.query(
       `SELECT mr.*, u.first_name as doctor_first_name, u.last_name as doctor_last_name, s.name as specialty_name
        FROM medical_records mr
@@ -41,26 +44,37 @@ router.get('/prescriptions/:medicalRecordId', authenticate, async (req, res) => 
   }
 });
 
-router.post('/prescriptions', authenticate, authorize('doctor', 'admin'), async (req, res) => {
+// Create prescription (atomic - prescription + items)
+router.post('/prescriptions', authenticate, authorize('doctor', 'admin'), validatePrescription, async (req, res) => {
+  let conn;
   try {
     const { medical_record_id, patient_id, items, notes } = req.body;
     const uuid = uuidv4();
-    const prescription_number = `RX-${Date.now().toString(36).toUpperCase()}`;
-    const [result] = await pool.query(
+    const prescription_number = `RX-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 1000)}`;
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [result] = await conn.query(
       'INSERT INTO prescriptions (uuid, prescription_number, medical_record_id, patient_id, doctor_id, notes) VALUES (?,?,?,?,?,?)',
       [uuid, prescription_number, medical_record_id, patient_id, req.user.id, notes]
     );
-    if (items && items.length > 0) {
-      for (const item of items) {
-        await pool.query(
-          'INSERT INTO prescription_items (prescription_id, medicine_id, dosage, frequency, duration, quantity, instructions) VALUES (?,?,?,?,?,?,?)',
-          [result.insertId, item.medicine_id, item.dosage, item.frequency, item.duration, item.quantity, item.instructions]
-        );
-      }
+    for (const item of items) {
+      await conn.query(
+        'INSERT INTO prescription_items (prescription_id, medicine_id, dosage, frequency, duration, quantity, instructions) VALUES (?,?,?,?,?,?,?)',
+        [result.insertId, item.medicine_id, item.dosage, item.frequency, item.duration, item.quantity, item.instructions]
+      );
     }
+    await conn.commit();
+    conn.release();
+    conn = null;
+
+    await audit.create(req.user.id, 'prescriptions', result.insertId, { prescription_number, patient_id }, req.ip);
     const [newRx] = await pool.query('SELECT * FROM prescriptions WHERE id = ?', [result.insertId]);
     res.status(201).json(newRx[0]);
   } catch (error) {
+    if (conn) {
+      try { await conn.rollback(); conn = null; } catch (e) { /* ignore */ }
+    }
     console.error(error);
     res.status(500).json({ message: 'Server error' });
   }
@@ -119,7 +133,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // Create medical record
-router.post('/', authenticate, authorize('doctor', 'admin'), async (req, res) => {
+router.post('/', authenticate, authorize('doctor', 'admin'), validateEMR, async (req, res) => {
   try {
     const { patient_id, appointment_id, chief_complaint, history_of_present_illness,
       vital_signs, physical_examination, diagnosis, treatment_plan, notes } = req.body;
@@ -135,6 +149,7 @@ router.post('/', authenticate, authorize('doctor', 'admin'), async (req, res) =>
     if (appointment_id) {
       await pool.query("UPDATE appointments SET status = 'completed' WHERE id = ?", [appointment_id]);
     }
+    await audit.create(req.user.id, 'medical_records', result.insertId, { patient_id, chief_complaint }, req.ip);
     const [newRecord] = await pool.query('SELECT * FROM medical_records WHERE id = ?', [result.insertId]);
     res.status(201).json(newRecord[0]);
   } catch (error) {
@@ -158,8 +173,15 @@ router.put('/:id', authenticate, authorize('doctor', 'admin'), async (req, res) 
       }
     });
     if (updates.length === 0) return res.status(400).json({ message: 'Nothing to update' });
+    const [old] = await pool.query('SELECT * FROM medical_records WHERE id = ?', [req.params.id]);
+    if (old.length === 0) return res.status(404).json({ message: 'Record not found' });
+    // Doctors can only edit their own records
+    if (req.user.role === 'doctor' && old[0].doctor_id !== req.user.id) {
+      return res.status(403).json({ message: 'You can only edit your own medical records' });
+    }
     values.push(req.params.id);
     await pool.query(`UPDATE medical_records SET ${updates.join(', ')} WHERE id = ?`, values);
+    await audit.update(req.user.id, 'medical_records', req.params.id, old[0], req.body, req.ip);
     const [updated] = await pool.query('SELECT * FROM medical_records WHERE id = ?', [req.params.id]);
     res.json(updated[0]);
   } catch (error) {

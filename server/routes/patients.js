@@ -1,15 +1,18 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { validatePatient, validateIdParam } = require('../middleware/validation');
+const audit = require('../utils/audit');
 
-// Generate MRN
+// Generate MRN (cryptographically random, collision-resistant)
 function generateMRN() {
   const prefix = 'MRN';
-  const timestamp = Date.now().toString(36).toUpperCase();
-  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-  return `${prefix}-${timestamp.slice(-4)}${random}`;
+  const ts = Date.now().toString(36).toUpperCase().slice(-4);
+  const random = crypto.randomBytes(3).toString('hex').toUpperCase();
+  return `${prefix}-${ts}${random}`;
 }
 
 // Get all patients with search, filter, pagination
@@ -37,7 +40,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // Get patient by ID
-router.get('/:id', authenticate, async (req, res) => {
+router.get('/:id', authenticate, validateIdParam, async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM patients WHERE id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ message: 'Patient not found' });
@@ -48,7 +51,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // Create patient
-router.post('/', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), async (req, res) => {
+router.post('/', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), validatePatient, async (req, res) => {
   try {
     const { first_name, last_name, date_of_birth, gender, blood_type, phone, email, address,
       emergency_contact_name, emergency_contact_phone, insurance_provider, insurance_number,
@@ -64,6 +67,7 @@ router.post('/', authenticate, authorize('admin', 'receptionist', 'doctor', 'nur
         emergency_contact_name, emergency_contact_phone, insurance_provider, insurance_number,
         allergies, chronic_conditions]
     );
+    await audit.create(req.user.id, 'patients', result.insertId, { mrn, first_name, last_name }, req.ip);
     const [newPatient] = await pool.query('SELECT * FROM patients WHERE id = ?', [result.insertId]);
     res.status(201).json(newPatient[0]);
   } catch (error) {
@@ -73,7 +77,7 @@ router.post('/', authenticate, authorize('admin', 'receptionist', 'doctor', 'nur
 });
 
 // Update patient
-router.put('/:id', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), async (req, res) => {
+router.put('/:id', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), validateIdParam, async (req, res) => {
   try {
     const fields = ['first_name','last_name','date_of_birth','gender','blood_type','phone','email','address',
       'emergency_contact_name','emergency_contact_phone','insurance_provider','insurance_number',
@@ -84,8 +88,11 @@ router.put('/:id', authenticate, authorize('admin', 'receptionist', 'doctor', 'n
       if (req.body[f] !== undefined) { updates.push(`${f} = ?`); values.push(req.body[f]); }
     });
     if (updates.length === 0) return res.status(400).json({ message: 'No fields to update' });
+    const [old] = await pool.query('SELECT * FROM patients WHERE id = ?', [req.params.id]);
+    if (old.length === 0) return res.status(404).json({ message: 'Patient not found' });
     values.push(req.params.id);
     await pool.query(`UPDATE patients SET ${updates.join(', ')} WHERE id = ?`, values);
+    await audit.update(req.user.id, 'patients', req.params.id, old[0], req.body, req.ip);
     const [updated] = await pool.query('SELECT * FROM patients WHERE id = ?', [req.params.id]);
     res.json(updated[0]);
   } catch (error) {
@@ -94,10 +101,12 @@ router.put('/:id', authenticate, authorize('admin', 'receptionist', 'doctor', 'n
 });
 
 // Delete (deactivate) patient
-router.delete('/:id', authenticate, authorize('admin', 'receptionist'), async (req, res) => {
+router.delete('/:id', authenticate, authorize('admin', 'receptionist'), validateIdParam, async (req, res) => {
   try {
+    const [old] = await pool.query('SELECT * FROM patients WHERE id = ?', [req.params.id]);
+    if (old.length === 0) return res.status(404).json({ message: 'Patient not found' });
     const [result] = await pool.query('UPDATE patients SET status = ? WHERE id = ?', ['inactive', req.params.id]);
-    if (result.affectedRows === 0) return res.status(404).json({ message: 'Patient not found' });
+    await audit.delete(req.user.id, 'patients', req.params.id, old[0], req.ip);
     res.json({ message: 'Patient deactivated' });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
@@ -105,7 +114,7 @@ router.delete('/:id', authenticate, authorize('admin', 'receptionist'), async (r
 });
 
 // Get patient medical history
-router.get('/:id/history', authenticate, async (req, res) => {
+router.get('/:id/history', authenticate, validateIdParam, async (req, res) => {
   try {
     const [appointments] = await pool.query(
       `SELECT a.*, u.first_name as doctor_first_name, u.last_name as doctor_last_name

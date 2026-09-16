@@ -3,6 +3,8 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { validateAppointment, validateAppointmentStatus } = require('../middleware/validation');
+const audit = require('../utils/audit');
 
 function generateAppointmentNumber() {
   const prefix = 'APT';
@@ -31,7 +33,7 @@ router.get('/', authenticate, async (req, res) => {
     if (date) { query += ' AND a.appointment_date = ?'; params.push(date); }
     if (from_date) { query += ' AND a.appointment_date >= ?'; params.push(from_date); }
     if (to_date) { query += ' AND a.appointment_date <= ?'; params.push(to_date); }
-    // Role-based filtering
+    // Role-based filtering: doctors only ever see their own appointments
     if (req.user.role === 'doctor') {
       query += ' AND a.doctor_id = ?';
       params.push(req.user.id);
@@ -52,6 +54,7 @@ router.get('/', authenticate, async (req, res) => {
 router.get('/slots/:doctorId', authenticate, async (req, res) => {
   try {
     const { date } = req.query;
+    if (!date) return res.status(400).json({ message: 'Date query parameter is required' });
     const allSlots = ['09:00','09:30','10:00','10:30','11:00','11:30','12:00','14:00','14:30','15:00','15:30','16:00','16:30'];
     const [booked] = await pool.query(
       `SELECT appointment_time FROM appointments WHERE doctor_id = ? AND appointment_date = ? AND status NOT IN ('cancelled','no_show')`,
@@ -80,6 +83,9 @@ router.get('/:id', authenticate, async (req, res) => {
       [req.params.id]
     );
     if (rows.length === 0) return res.status(404).json({ message: 'Appointment not found' });
+    if (req.user.role === 'doctor' && rows[0].doctor_id !== req.user.id) {
+      return res.status(403).json({ message: 'You can only view your own appointments' });
+    }
     res.json(rows[0]);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
@@ -87,7 +93,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // Create appointment
-router.post('/', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), async (req, res) => {
+router.post('/', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), validateAppointment, async (req, res) => {
   try {
     const { patient_id, doctor_id, appointment_date, appointment_time, type, reason, notes } = req.body;
     // Check for conflicts
@@ -110,6 +116,7 @@ router.post('/', authenticate, authorize('admin', 'receptionist', 'doctor', 'nur
       `INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, 'appointment', 'New Appointment', ?, ?)`,
       [doctor_id, `New ${type || 'consultation'} appointment booked for ${appointment_date}`, `/appointments/${result.insertId}`]
     );
+    await audit.create(req.user.id, 'appointments', result.insertId, { appointment_number, patient_id, doctor_id, appointment_date }, req.ip);
     const [newAppt] = await pool.query('SELECT * FROM appointments WHERE id = ?', [result.insertId]);
     res.status(201).json(newAppt[0]);
   } catch (error) {
@@ -119,29 +126,44 @@ router.post('/', authenticate, authorize('admin', 'receptionist', 'doctor', 'nur
 });
 
 // Update appointment status
-router.put('/:id', authenticate, async (req, res) => {
+router.put('/:id', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), validateAppointmentStatus, async (req, res) => {
   try {
+    const [target] = await pool.query('SELECT * FROM appointments WHERE id = ?', [req.params.id]);
+    if (target.length === 0) return res.status(404).json({ message: 'Appointment not found' });
+    // Doctors can only update their own appointments
+    if (req.user.role === 'doctor' && target[0].doctor_id !== req.user.id) {
+      return res.status(403).json({ message: 'You can only update your own appointments' });
+    }
     const { status, notes } = req.body;
     const updates = [];
     const values = [];
     if (status) { updates.push('status = ?'); values.push(status); }
-    if (notes) { updates.push('notes = ?'); values.push(notes); }
+    if (notes !== undefined) { updates.push('notes = ?'); values.push(notes); }
     if (updates.length === 0) return res.status(400).json({ message: 'Nothing to update' });
     values.push(req.params.id);
     await pool.query(`UPDATE appointments SET ${updates.join(', ')} WHERE id = ?`, values);
+    await audit.update(req.user.id, 'appointments', req.params.id, { status: target[0].status }, { status }, req.ip);
     const [updated] = await pool.query('SELECT * FROM appointments WHERE id = ?', [req.params.id]);
     res.json(updated[0]);
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
 // Cancel appointment
-router.put('/:id/cancel', authenticate, async (req, res) => {
+router.put('/:id/cancel', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), async (req, res) => {
   try {
+    const [target] = await pool.query('SELECT * FROM appointments WHERE id = ?', [req.params.id]);
+    if (target.length === 0) return res.status(404).json({ message: 'Appointment not found' });
+    if (req.user.role === 'doctor' && target[0].doctor_id !== req.user.id) {
+      return res.status(403).json({ message: 'You can only cancel your own appointments' });
+    }
     await pool.query("UPDATE appointments SET status = 'cancelled' WHERE id = ?", [req.params.id]);
+    await audit.delete(req.user.id, 'appointments', req.params.id, { status: target[0].status }, req.ip);
     res.json({ message: 'Appointment cancelled' });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: 'Server error' });
   }
 });

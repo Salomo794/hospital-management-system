@@ -5,6 +5,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 
+const { startAutoAlerts } = require('./utils/autoAlerts');
+
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const patientRoutes = require('./routes/patients');
@@ -18,6 +20,8 @@ const billingRoutes = require('./routes/billing');
 const reportRoutes = require('./routes/reports');
 const notificationRoutes = require('./routes/notifications');
 const aiRoutes = require('./routes/ai');
+const admissionRoutes = require('./routes/admissions');
+const auditRoutes = require('./routes/audit');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -43,6 +47,8 @@ app.use('/api/billing', billingRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/admissions', admissionRoutes);
+app.use('/api/audit', auditRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -54,6 +60,15 @@ app.use('/api', (req, res) => {
   res.status(404).json({ message: `Route not found: ${req.method} ${req.originalUrl}` });
 });
 
+// Central error handler - keeps responses consistent and prevents leaks
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  if (res.headersSent) return next(err);
+  const status = err.status || 500;
+  res.status(status).json({ message: status === 500 ? 'Internal server error' : err.message });
+});
+
 // Serve Vue.js frontend in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../client/dist')));
@@ -62,8 +77,26 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Hospital Management System API running on port ${PORT}`);
 });
+
+// Graceful shutdown
+function shutdown(signal) {
+  console.log(`\n${signal} received, shutting down gracefully...`);
+  server.close(() => {
+    console.log('HTTP server closed.');
+    process.exit(0);
+  });
+  // Force exit if connections linger
+  setTimeout(() => process.exit(0), 5000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Automated background alerts (low stock, expiries, overdue bills)
+if (process.env.NODE_ENV !== 'test') {
+  startAutoAlerts();
+}
 
 module.exports = app;

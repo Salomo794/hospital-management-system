@@ -15,7 +15,7 @@
             <span class="text-muted">MRN: {{ patient.mrn }} | {{ patient.gender }} | DOB: {{ formatDate(patient.date_of_birth) }}</span>
           </div>
         </div>
-        <button class="btn btn-primary" @click="showEditModal = true">Edit Profile</button>
+        <button class="btn btn-primary" @click="openEdit">Edit Profile</button>
       </div>
 
       <div class="detail-grid">
@@ -125,6 +125,101 @@
           </div>
         </div>
       </div>
+
+      <!-- Edit Profile Modal -->
+      <div class="modal-overlay" v-if="showEditModal" @click.self="showEditModal = false">
+        <div class="modal">
+          <div class="modal-header">
+            <h3>Edit Patient Profile</h3>
+            <button class="modal-close" @click="showEditModal = false">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="alert alert-danger" v-if="editError">{{ editError }}</div>
+            <form @submit.prevent="saveEdit">
+              <div class="form-row">
+                <div class="form-group">
+                  <label>First Name *</label>
+                  <input v-model="editForm.first_name" required />
+                </div>
+                <div class="form-group">
+                  <label>Last Name *</label>
+                  <input v-model="editForm.last_name" required />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Date of Birth *</label>
+                  <input type="date" v-model="editForm.date_of_birth" required />
+                </div>
+                <div class="form-group">
+                  <label>Gender *</label>
+                  <select v-model="editForm.gender" required>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Blood Type</label>
+                  <select v-model="editForm.blood_type">
+                    <option value="">Unknown</option>
+                    <option v-for="bt in bloodTypes" :key="bt" :value="bt">{{ bt }}</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Phone</label>
+                  <input v-model="editForm.phone" placeholder="e.g. +1 555 123 4567" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Email</label>
+                <input type="email" v-model="editForm.email" />
+              </div>
+              <div class="form-group">
+                <label>Address</label>
+                <input v-model="editForm.address" />
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Emergency Contact Name</label>
+                  <input v-model="editForm.emergency_contact_name" />
+                </div>
+                <div class="form-group">
+                  <label>Emergency Contact Phone</label>
+                  <input v-model="editForm.emergency_contact_phone" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Insurance Provider</label>
+                  <input v-model="editForm.insurance_provider" />
+                </div>
+                <div class="form-group">
+                  <label>Insurance Number</label>
+                  <input v-model="editForm.insurance_number" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Allergies</label>
+                <textarea v-model="editForm.allergies" rows="2" placeholder="e.g. Penicillin, peanuts"></textarea>
+              </div>
+              <div class="form-group">
+                <label>Chronic Conditions</label>
+                <textarea v-model="editForm.chronic_conditions" rows="2" placeholder="e.g. Hypertension, Type 2 diabetes"></textarea>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @click="showEditModal = false">Cancel</button>
+                <button type="submit" class="btn btn-primary" :disabled="savingEdit">
+                  <span v-if="savingEdit" class="spinner-small"></span>
+                  {{ savingEdit ? 'Saving...' : 'Save Changes' }}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -136,6 +231,8 @@ import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { formatDate, formatTime, formatCurrency, getStatusColor } from '../../utils/helpers'
 
+const BLOOD_TYPES = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+
 export default {
   name: 'PatientDetail',
   setup() {
@@ -146,6 +243,44 @@ export default {
     const tab = ref('records')
     const showEditModal = ref(false)
     const loading = ref(true)
+    const editForm = ref({})
+    const editError = ref('')
+    const savingEdit = ref(false)
+    const bloodTypes = BLOOD_TYPES
+
+    const openEdit = () => {
+      const p = patient.value
+      editForm.value = {
+        first_name: p.first_name, last_name: p.last_name, date_of_birth: p.date_of_birth,
+        gender: p.gender, blood_type: p.blood_type || '', phone: p.phone || '', email: p.email || '',
+        address: p.address || '', emergency_contact_name: p.emergency_contact_name || '',
+        emergency_contact_phone: p.emergency_contact_phone || '',
+        insurance_provider: p.insurance_provider || '', insurance_number: p.insurance_number || '',
+        allergies: p.allergies || '', chronic_conditions: p.chronic_conditions || ''
+      }
+      editError.value = ''
+      showEditModal.value = true
+    }
+
+    const saveEdit = async () => {
+      if (!editForm.value.first_name || !editForm.value.last_name || !editForm.value.date_of_birth || !editForm.value.gender) {
+        editError.value = 'Please fill in all required fields'
+        return
+      }
+      savingEdit.value = true
+      editError.value = ''
+      try {
+        const { data } = await axios.put(`/api/patients/${route.params.id}`, editForm.value)
+        patient.value = data
+        showEditModal.value = false
+        toast.success('Patient profile updated successfully')
+      } catch (e) {
+        editError.value = e.response?.data?.message || 'Error updating patient profile'
+        toast.error(editError.value)
+      } finally {
+        savingEdit.value = false
+      }
+    }
 
     onMounted(async () => {
       const id = route.params.id
@@ -163,7 +298,7 @@ export default {
       }
     })
 
-    return { patient, history, tab, showEditModal, loading, formatDate, formatTime, formatCurrency, getStatusColor }
+    return { patient, history, tab, showEditModal, loading, editForm, editError, savingEdit, bloodTypes, openEdit, saveEdit, formatDate, formatTime, formatCurrency, getStatusColor }
   }
 }
 </script>
@@ -202,5 +337,17 @@ export default {
 
 .text-muted { color: #94a3b8; font-size: 12px; }
 .text-danger { color: #ef4444; }
+
+.spinner-small {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
 @media (max-width: 768px) { .detail-grid { grid-template-columns: 1fr; } .info-grid { grid-template-columns: 1fr; } }
 </style>

@@ -368,6 +368,39 @@ async function seed() {
     }
     console.log('  Notifications seeded');
 
+    // --- Admissions ---
+    const [existingAdmissions] = await conn.query('SELECT COUNT(*) as count FROM admissions');
+    if (existingAdmissions[0].count === 0) {
+      const wards = ['Ward A', 'Ward B', 'ICU', 'Maternity', 'Pediatrics'];
+      const admissions = [
+        { patientIdx: 2, doctorId: doctorUserId1, ward: 'ICU', bed: 'ICU-101', diagnosis: 'Acute COPD exacerbation', treatment: 'Oxygen therapy, bronchodilators, steroids', status: 'admitted', daysAgo: 1 },
+        { patientIdx: 4, doctorId: doctorUserId1, ward: 'Ward A', bed: 'A-104', diagnosis: 'Atrial Fibrillation monitoring', treatment: 'Rate control, anticoagulation', status: 'admitted', daysAgo: 2 },
+        { patientIdx: 9, doctorId: doctorUserId2, ward: 'Ward B', bed: 'B-112', diagnosis: 'Congestive Heart Failure', treatment: 'Diuretics, ACE inhibitors, monitoring', status: 'admitted', daysAgo: 0 },
+        { patientIdx: 7, doctorId: doctorUserId2, ward: 'Pediatrics', bed: 'P-203', diagnosis: 'Severe asthma attack', treatment: 'Nebulizer, observation', status: 'transferred', daysAgo: 3 },
+        { patientIdx: 0, doctorId: doctorUserId1, ward: 'Ward A', bed: 'A-101', diagnosis: 'Hypertensive crisis', treatment: 'BP management, observation', status: 'discharged', daysAgo: 5 },
+        { patientIdx: 5, doctorId: doctorUserId2, ward: 'Ward B', bed: 'B-101', diagnosis: 'Pneumonia', treatment: 'IV antibiotics, fluids', status: 'discharged', daysAgo: 8 },
+      ];
+      for (const a of admissions) {
+        const uuid = uuidv4();
+        const today = new Date();
+        const admDate = new Date(today);
+        admDate.setDate(admDate.getDate() - a.daysAgo);
+        const dateStr = admDate.toISOString().slice(0, 10);
+        const admissionNumber = `ADM-${dateStr.replace(/-/g, '')}-${String(Math.floor(100 + Math.random() * 900))}`;
+        const dischargeDate = a.status === 'discharged'
+          ? admDate.toISOString().slice(0, 10)
+          : null;
+        await conn.query(
+          `INSERT INTO admissions (uuid, admission_number, patient_id, doctor_id, ward, bed_number, admission_date, discharge_date, diagnosis, treatment_plan, status, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [uuid, admissionNumber, patientIds[a.patientIdx], a.doctorId, a.ward, a.bed,
+           `${dateStr} 09:00:00`, dischargeDate ? `${dischargeDate} 16:30:00` : null,
+           a.diagnosis, a.treatment, a.status, a.status === 'admitted' ? 'Expected to stay for monitoring' : null]
+        );
+      }
+    }
+    console.log('  Admissions seeded');
+
     await conn.commit();
     console.log('\nDatabase seeded successfully!');
     console.log('\nDemo login credentials (password: password123):');

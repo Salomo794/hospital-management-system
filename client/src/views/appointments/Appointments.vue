@@ -79,8 +79,8 @@
         <div v-else class="empty-state">
           <div class="empty-icon">📅</div>
           <h4>No appointments found</h4>
-          <p v-if="statusFilter || dateFilter">Try adjusting your filters or </p>
-          <button v-if="statusFilter || dateFilter" class="btn btn-sm btn-secondary" @click="clearFilters">Clear Filters</button>
+          <p v-if="statusFilter || dateFilter || doctorFilter">Try adjusting your filters, or:</p>
+          <button v-if="statusFilter || dateFilter || doctorFilter" class="btn btn-sm btn-secondary" @click="clearFilters">Clear Filters</button>
           <p v-else>No appointments have been scheduled yet.</p>
         </div>
       </template>
@@ -196,6 +196,7 @@ export default {
     const limit = ref(20)
     const statusFilter = ref('')
     const dateFilter = ref('')
+    const doctorFilter = ref('')
     const showModal = ref(false)
     const saving = ref(false)
     const formError = ref('')
@@ -226,6 +227,7 @@ export default {
         const params = { page: page.value, limit: limit.value }
         if (statusFilter.value) params.status = statusFilter.value
         if (dateFilter.value) params.date = dateFilter.value
+        if (doctorFilter.value) params.doctor_id = doctorFilter.value
         const { data } = await axios.get('/api/appointments', { params })
         appointments.value = data.appointments
         total.value = data.total

@@ -2,10 +2,18 @@ import { defineStore } from 'pinia'
 import axios from 'axios'
 
 export const useAuthStore = defineStore('auth', {
-  state: () => ({
-    user: JSON.parse(localStorage.getItem('user')),
-    token: localStorage.getItem('token')
-  }),
+  state: () => {
+    let user = null
+    try {
+      user = JSON.parse(localStorage.getItem('user'))
+    } catch {
+      user = null
+    }
+    return {
+      user,
+      token: localStorage.getItem('token')
+    }
+  },
   getters: {
     isAuthenticated: (state) => !!state.token,
     userRole: (state) => state.user?.role,

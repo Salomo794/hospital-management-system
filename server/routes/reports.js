@@ -7,7 +7,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 router.get('/dashboard', authenticate, async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
-    const [totalPatients] = await pool.query('SELECT COUNT(*) as count FROM patients WHERE status = "active"');
+    const [totalPatients] = await pool.query("SELECT COUNT(*) as count FROM patients WHERE status = 'active'");
     const [totalDoctors] = await pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'doctor' AND is_active = TRUE");
     const [todayAppointments] = await pool.query('SELECT COUNT(*) as count FROM appointments WHERE appointment_date = ?', [today]);
     const [pendingAppointments] = await pool.query("SELECT COUNT(*) as count FROM appointments WHERE status = 'scheduled' AND appointment_date >= ?", [today]);
@@ -62,15 +62,18 @@ router.get('/dashboard', authenticate, async (req, res) => {
 router.get('/financial', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { period = 'monthly', year = new Date().getFullYear() } = req.query;
-    let groupBy, dateFormat;
+    let groupBy, dateFormat, expenseGroupBy;
     if (period === 'daily') {
       groupBy = 'DATE(payment_date)';
+      expenseGroupBy = 'DATE(it.created_at)';
       dateFormat = '%Y-%m-%d';
     } else if (period === 'weekly') {
       groupBy = "strftime('%Y%W', payment_date)";
+      expenseGroupBy = "strftime('%Y%W', it.created_at)";
       dateFormat = '%x-W%v';
     } else {
       groupBy = "strftime('%Y-%m', payment_date)";
+      expenseGroupBy = "strftime('%Y-%m', it.created_at)";
       dateFormat = '%Y-%m';
     }
     const [revenue] = await pool.query(
@@ -80,11 +83,12 @@ router.get('/financial', authenticate, authorize('admin'), async (req, res) => {
         GROUP BY ${groupBy}, payment_method ORDER BY period`,
       [year]
     );
+
     const [expenses] = await pool.query(
-      `SELECT ${groupBy} as period, SUM(total) as expenses, category
+      `SELECT ${expenseGroupBy} as period, SUM(it.quantity * m.cost_price) as expenses, m.category
         FROM inventory_transactions it JOIN medicines m ON it.medicine_id = m.id
         WHERE it.transaction_type = 'purchase' AND CAST(strftime('%Y', it.created_at) AS INTEGER) = ?
-        GROUP BY ${groupBy}, category ORDER BY period`,
+        GROUP BY ${expenseGroupBy}, m.category ORDER BY period`,
       [year]
     );
     const [topServices] = await pool.query(

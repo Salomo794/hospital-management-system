@@ -72,25 +72,30 @@
           </div>
         </div>
 
-        <div class="card">
+        <div class="card chart-card">
           <div class="card-header">
             <h3>Weekly Overview</h3>
           </div>
           <div class="card-body">
-            <div v-if="weeklyStats.length" class="chart-placeholder">
-              <div class="bar-chart">
-                <div v-for="day in weeklyStats" :key="day.date" class="bar-group">
-                  <div class="bar" :style="{ height: Math.max((day.count / maxWeekly * 120), 4) + 'px' }">
-                    <span class="bar-value">{{ day.count }}</span>
-                  </div>
-                  <div class="bar-label">{{ formatDay(day.date) }}</div>
-                </div>
-              </div>
-            </div>
+            <Bar v-if="weeklyChartData.labels.length" :data="weeklyChartData" :options="weeklyChartOptions" style="max-height: 260px;" />
             <div v-else class="empty-state">
               <span class="empty-icon">&#128200;</span>
               <h3>No Weekly Data</h3>
               <p>Weekly appointment overview will appear here.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card chart-card">
+          <div class="card-header">
+            <h3>Appointment Status</h3>
+          </div>
+          <div class="card-body">
+            <Doughnut v-if="statusChartData.labels.length" :data="statusChartData" :options="statusChartOptions" style="max-height: 260px;" />
+            <div v-else class="empty-state">
+              <span class="empty-icon">&#128200;</span>
+              <h3>No Status Data</h3>
+              <p>Appointment status breakdown will appear here.</p>
             </div>
           </div>
         </div>
@@ -138,9 +143,14 @@ import { ref, onMounted, computed } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { formatDate, formatCurrency, formatTime, getStatusColor } from '../../utils/helpers'
+import { Bar, Doughnut } from 'vue-chartjs'
+import { Chart as ChartJS, Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, ArcElement } from 'chart.js'
+
+ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, ArcElement)
 
 export default {
   name: 'Dashboard',
+  components: { Bar, Doughnut },
   setup() {
     const toast = useToast()
     const stats = ref({})
@@ -150,6 +160,43 @@ export default {
     const loading = ref(false)
 
     const maxWeekly = computed(() => Math.max(...weeklyStats.value.map(d => d.count), 1))
+
+    const weeklyChartData = computed(() => ({
+      labels: weeklyStats.value.map(d => formatDay(d.date)),
+      datasets: [{
+        label: 'Appointments',
+        data: weeklyStats.value.map(d => d.count),
+        backgroundColor: '#0d9488',
+        borderRadius: 6
+      }]
+    }))
+
+    const weeklyChartOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+    }
+
+    const statusChartData = computed(() => {
+      const counts = {}
+      recentAppointments.value.forEach(a => {
+        const key = a.status ? a.status.replace('_', ' ') : 'unknown'
+        counts[key] = (counts[key] || 0) + 1
+      })
+      return {
+        labels: Object.keys(counts),
+        datasets: [{
+          data: Object.values(counts),
+          backgroundColor: ['#2563eb', '#0d9488', '#ef4444', '#f59e0b', '#8b5cf6', '#64748b']
+        }]
+      }
+    })
+
+    const statusChartOptions = {
+      responsive: true,
+      maintainAspectRatio: false
+    }
 
     const statsCards = computed(() => [
       { label: 'Total Patients', value: stats.value.totalPatients || 0, rawValue: stats.value.totalPatients || 0, icon: '👥', color: '#0d9488' },
@@ -179,7 +226,7 @@ export default {
       }
     })
 
-    return { statsCards, recentAppointments, recentPatients, weeklyStats, maxWeekly, loading, formatDate, formatCurrency, formatTime, formatDay, getStatusColor }
+    return { statsCards, recentAppointments, recentPatients, weeklyStats, maxWeekly, loading, weeklyChartData, weeklyChartOptions, statusChartData, statusChartOptions, formatDate, formatCurrency, formatTime, formatDay, getStatusColor }
   }
 }
 </script>
