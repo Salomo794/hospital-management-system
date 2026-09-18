@@ -3,10 +3,6 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
-const {
-  validateLabOrder, validateLabResults, validateLabTest
-} = require('../middleware/validation');
-const audit = require('../utils/audit');
 
 function generateOrderNumber() {
   const prefix = 'LAB';
@@ -14,55 +10,6 @@ function generateOrderNumber() {
   const datePart = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
   const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
   return `${prefix}-${datePart}-${rand}`;
-}
-
-// Numeric abnormal-detection: parse reference ranges of the forms
-// "70-100", "70 - 100 mg/dL", "<5.0", ">10", "4.5-11.0 10^9/L", "negative"
-// Returns { isAbnormal, flag } where flag is a compact clinical notation:
-//   CRITICAL_H / CRITICAL_L - dangerously out of range (red alert)
-//   H / L                 - above / below reference
-//   NORMAL                - within reference
-//   UNKNOWN               - non-numeric or qualitative result
-function evaluateAbnormal(resultValue, referenceRange) {
-  if (!resultValue || !referenceRange) return { isAbnormal: false, flag: 'UNKNOWN' };
-  const val = parseFloat(String(resultValue).replace(',', '.'));
-  if (isNaN(val)) return { isAbnormal: false, flag: 'UNKNOWN' };
-
-  const range = String(referenceRange).trim().toLowerCase();
-  const rangeMatch = range.match(/([\d.]+)\s*(?:-|–|to|−)\s*([\d.]+)/);
-  const lessthan = range.match(/<\s*([\d.]+)/);
-  const greaterthan = range.match(/>\s*([\d.]+)/);
-  const lessthanEq = range.match(/≤\s*([\d.]+)/);
-  const greaterthanEq = range.match(/≥\s*([\d.]+)/);
-
-  let bounds = null;
-  if (rangeMatch) bounds = { low: parseFloat(rangeMatch[1]), high: parseFloat(rangeMatch[2]) };
-
-  const isAbnormal = (() => {
-    if (bounds) return val < bounds.low || val > bounds.high;
-    if (lessthan) return val >= parseFloat(lessthan[1]);
-    if (lessthanEq) return val > parseFloat(lessthanEq[1]);
-    if (greaterthan) return val <= parseFloat(greaterthan[1]);
-    if (greaterthanEq) return val < parseFloat(greaterthanEq[1]);
-    // Qualitative results like "negative", "positive", "normal" - no numeric judgement
-    return false;
-  })();
-
-  let flag = 'NORMAL';
-  if (isAbnormal && bounds) {
-    const spread = bounds.high - bounds.low;
-    // Values beyond ~1.5x the normal spread past the boundary are flagged critical.
-    if (val > bounds.high + spread * 1.5) flag = 'CRITICAL_H';
-    else if (val < bounds.low - spread * 1.5) flag = 'CRITICAL_L';
-    else if (val > bounds.high) flag = 'H';
-    else flag = 'L';
-  } else if (isAbnormal && greaterthan) {
-    flag = 'L';
-  } else if (isAbnormal && lessthan) {
-    flag = 'H';
-  }
-
-  return { isAbnormal, flag };
 }
 
 // Get all lab tests
@@ -82,15 +29,13 @@ router.get('/tests', authenticate, async (req, res) => {
 });
 
 // Add lab test
-router.post('/tests', authenticate, authorize('admin'), validateLabTest, async (req, res) => {
+router.post('/tests', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { name, category, description, normal_range, unit, price, turnaround_time } = req.body;
-    
     const [result] = await pool.query(
       'INSERT INTO lab_tests (name, category, description, normal_range, unit, price, turnaround_time) VALUES (?,?,?,?,?,?,?)',
       [name, category, description, normal_range, unit, price, turnaround_time || '24 hours']
     );
-    await audit.create(req.user.id, 'lab_tests', result.insertId, { name, category }, req.ip);
     const [newTest] = await pool.query('SELECT * FROM lab_tests WHERE id = ?', [result.insertId]);
     res.status(201).json(newTest[0]);
   } catch (error) {
@@ -105,8 +50,6 @@ router.get('/orders', authenticate, async (req, res) => {
     const offset = (page - 1) * limit;
     let query = `SELECT lo.*, p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn,
       u.first_name as doctor_first_name, u.last_name as doctor_last_name,
-      (SELECT COUNT(*) FROM lab_order_items flagct WHERE flagct.lab_order_id = lo.id AND flagct.result_flag IN ('H','L','CRITICAL_H','CRITICAL_L')) as abnormal_count,
-      (SELECT COUNT(*) FROM lab_order_items flagcc WHERE flagcc.lab_order_id = lo.id AND flagcc.result_flag IN ('CRITICAL_H','CRITICAL_L')) as critical_count,
       GROUP_CONCAT(lt.name, ', ') as test_names
       FROM lab_orders lo
       JOIN patients p ON lo.patient_id = p.id
@@ -116,11 +59,6 @@ router.get('/orders', authenticate, async (req, res) => {
     const params = [];
     if (status) { query += ' AND lo.status = ?'; params.push(status); }
     if (patient_id) { query += ' AND lo.patient_id = ?'; params.push(patient_id); }
-    // Lab technicians and doctors are restricted to relevant orders
-    if (req.user.role === 'doctor') {
-      query += ' AND lo.doctor_id = ?';
-      params.push(req.user.id);
-    }
     query += ' GROUP BY lo.id';
     const [countRes] = await pool.query(query.replace(/SELECT lo\.[\s\S]*?FROM lab_orders lo/, 'SELECT COUNT(*) as total FROM lab_orders lo').replace(/GROUP BY lo.id/, ''), params);
     query += ' ORDER BY lo.order_date DESC LIMIT ? OFFSET ?';
@@ -133,36 +71,22 @@ router.get('/orders', authenticate, async (req, res) => {
   }
 });
 
-// Create lab order (atomic: order + items + notifications)
-router.post('/orders', authenticate, authorize('doctor', 'admin', 'nurse'), validateLabOrder, async (req, res) => {
-  let conn;
+// Create lab order
+router.post('/orders', authenticate, authorize('doctor', 'admin', 'nurse'), async (req, res) => {
   try {
     const { patient_id, medical_record_id, test_ids, priority, clinical_notes } = req.body;
     const uuid = uuidv4();
     const order_number = generateOrderNumber();
-
-    // Verify all requested tests exist before inserting anything
-    const [tests] = await pool.query(
-      `SELECT * FROM lab_tests WHERE id IN (${test_ids.map(() => '?').join(',')}) AND is_active = TRUE`,
-      test_ids
-    );
-    if (tests.length !== new Set(test_ids.map(Number)).size) {
-      return res.status(400).json({ message: 'One or more test IDs are invalid or inactive' });
-    }
-    const testById = Object.fromEntries(tests.map(t => [String(t.id), t]));
-
-    conn = await pool.getConnection();
-    await conn.beginTransaction();
-    const [result] = await conn.query(
+    const [result] = await pool.query(
       `INSERT INTO lab_orders (uuid, order_number, patient_id, doctor_id, medical_record_id, priority, clinical_notes)
        VALUES (?,?,?,?,?,?,?)`,
       [uuid, order_number, patient_id, req.user.id, medical_record_id || null, priority || 'routine', clinical_notes]
     );
     for (const testId of test_ids) {
-      const test = testById[String(testId)];
-      await conn.query(
+      const [test] = await pool.query('SELECT * FROM lab_tests WHERE id = ?', [testId]);
+      await pool.query(
         'INSERT INTO lab_order_items (lab_order_id, lab_test_id, reference_range, result_unit) VALUES (?,?,?,?)',
-        [result.insertId, testId, test?.normal_range, test?.unit]
+        [result.insertId, testId, test[0]?.normal_range, test[0]?.unit]
       );
     }
     // Notify lab technicians
@@ -173,16 +97,8 @@ router.post('/orders', authenticate, authorize('doctor', 'admin', 'nurse'), vali
         [tech.id, `New ${priority || 'routine'} lab order: ${order_number}`, `/laboratory/orders/${result.insertId}`]
       );
     }
-    await conn.commit();
-    conn.release();
-    conn = null;
-
-    await audit.create(req.user.id, 'lab_orders', result.insertId, { order_number, patient_id, test_ids }, req.ip);
     res.status(201).json({ id: result.insertId, uuid, order_number });
   } catch (error) {
-    if (conn) {
-      try { await conn.rollback(); conn = null; } catch (e) { /* ignore */ }
-    }
     console.error(error);
     res.status(500).json({ message: 'Server error' });
   }
@@ -192,77 +108,52 @@ router.post('/orders', authenticate, authorize('doctor', 'admin', 'nurse'), vali
 router.get('/orders/:id', authenticate, async (req, res) => {
   try {
     const [order] = await pool.query(
-      `SELECT lo.*, p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn as patient_mrn, p.gender as patient_gender,
+      `SELECT lo.*, p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn, p.gender as patient_gender,
         p.date_of_birth as patient_dob,
         u.first_name as doctor_first_name, u.last_name as doctor_last_name
         FROM lab_orders lo JOIN patients p ON lo.patient_id = p.id JOIN users u ON lo.doctor_id = u.id WHERE lo.id = ?`,
       [req.params.id]
     );
     if (order.length === 0) return res.status(404).json({ message: 'Order not found' });
-    if (req.user.role === 'doctor' && order[0].doctor_id !== req.user.id) {
-      return res.status(403).json({ message: 'You can only view your own lab orders' });
-    }
     const [items] = await pool.query(
       `SELECT loi.*, lt.name as test_name, lt.normal_range, lt.unit as test_unit, lt.category,
         t.first_name as technician_first_name, t.last_name as technician_last_name
         FROM lab_order_items loi
         JOIN lab_tests lt ON loi.lab_test_id = lt.id
+        LEFT JOIN users u ON loi.technician_id = u.id
         LEFT JOIN users t ON loi.technician_id = t.id WHERE loi.lab_order_id = ?`,
       [req.params.id]
     );
-    // Back-fill the flag notation for stored rows that predate the feature.
-    for (const item of items) {
-      if (!item.result_flag || item.result_flag === 'NORMAL' && item.is_abnormal) {
-        const { is_abnormal, flag } = evaluateAbnormal(item.result_value, item.reference_range);
-        item.is_abnormal = is_abnormal ? 1 : 0;
-        item.result_flag = flag;
-      }
-    }
-    const abnormalCount = items.filter(i => i.is_abnormal).length;
-    const criticalCount = items.filter(i => i.result_flag && i.result_flag.startsWith('CRITICAL')).length;
-    res.json({ ...order[0], items, abnormal_count: abnormalCount, critical_count: criticalCount });
+    res.json({ ...order[0], items });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Update lab results (atomic - results + order status + notifications)
-router.put('/orders/:id/results', authenticate, authorize('lab_technician', 'admin'), validateLabResults, async (req, res) => {
-  let conn;
+// Update lab results
+router.put('/orders/:id/results', authenticate, authorize('lab_technician', 'admin'), async (req, res) => {
   try {
     const { items } = req.body;
-    const [check] = await pool.query('SELECT * FROM lab_orders WHERE id = ?', [req.params.id]);
-    if (check.length === 0) return res.status(404).json({ message: 'Order not found' });
-
-    conn = await pool.getConnection();
-    await conn.beginTransaction();
     for (const item of items) {
-      const { is_abnormal, flag } = evaluateAbnormal(item.result_value, item.reference_range);
-      await conn.query(
-        `UPDATE lab_order_items SET result_value=?, result_unit=?, reference_range=?, is_abnormal=?, result_flag=?, notes=?, technician_id=?, result_date=datetime('now') WHERE id=?`,
-        [item.result_value, item.result_unit, item.reference_range, is_abnormal ? 1 : 0, flag, item.notes, req.user.id, item.id]
+      const is_abnormal = item.result_value && item.reference_range ?
+        !item.reference_range.includes(item.result_value) : false;
+      await pool.query(
+        `UPDATE lab_order_items SET result_value=?, result_unit=?, reference_range=?, is_abnormal=?, notes=?, technician_id=?, result_date=datetime('now') WHERE id=?`,
+        [item.result_value, item.result_unit, item.reference_range, is_abnormal, item.notes, req.user.id, item.id]
       );
     }
     // Update order status
-    await conn.query("UPDATE lab_orders SET status = 'completed', completed_date = datetime('now') WHERE id = ?", [req.params.id]);
+    await pool.query("UPDATE lab_orders SET status = 'completed', completed_date = datetime('now') WHERE id = ?", [req.params.id]);
     // Notify requesting doctor
-    const [order] = await conn.query('SELECT doctor_id FROM lab_orders WHERE id = ?', [req.params.id]);
+    const [order] = await pool.query('SELECT doctor_id FROM lab_orders WHERE id = ?', [req.params.id]);
     if (order.length > 0) {
-      await conn.query(
+      await pool.query(
         'INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, "lab", "Lab Results Ready", ?, ?)',
-        [order[0].doctor_id, `Lab results for order #${req.params.id} are ready`, `/laboratory/orders/${req.params.id}`]
+        [order[0].doctor_id, `Lab results for order are ready`, `/laboratory/orders/${req.params.id}`]
       );
     }
-    await conn.commit();
-    conn.release();
-    conn = null;
-
-    await audit.update(req.user.id, 'lab_orders', req.params.id, { status: check[0].status }, { status: 'completed' }, req.ip);
     res.json({ message: 'Results updated successfully' });
   } catch (error) {
-    if (conn) {
-      try { await conn.rollback(); conn = null; } catch (e) { /* ignore */ }
-    }
     console.error(error);
     res.status(500).json({ message: 'Server error' });
   }

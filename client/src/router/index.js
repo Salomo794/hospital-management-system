@@ -27,10 +27,8 @@ const routes = [
       { path: 'billing', name: 'Billing', component: () => import('../views/billing/Billing.vue') },
       { path: 'billing/:id', name: 'BillDetail', component: () => import('../views/billing/BillDetail.vue') },
       { path: 'reports', name: 'Reports', component: () => import('../views/reports/Reports.vue') },
-      { path: 'admissions', name: 'Admissions', component: () => import('../views/admissions/Admissions.vue') },
       { path: 'ai-assistant', name: 'AI Assistant', component: () => import('../views/ai/AIAssistant.vue') },
       { path: 'users', name: 'Users', component: () => import('../views/dashboard/Users.vue') },
-      { path: 'audit-log', name: 'Audit Log', component: () => import('../views/audit/AuditLog.vue') },
     ]
   }
 ]

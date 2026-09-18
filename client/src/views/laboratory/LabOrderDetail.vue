@@ -43,15 +43,7 @@
     </div>
 
     <div class="card">
-      <div class="card-header">
-        <h3>Test Results ({{ order.items.length }})</h3>
-        <span v-if="order.critical_count" class="critical-summary">
-          <span class="badge badge-danger">{{ order.critical_count }} critical</span>
-        </span>
-        <span v-else-if="order.abnormal_count" class="critical-summary">
-          <span class="badge badge-warning">{{ order.abnormal_count }} abnormal</span>
-        </span>
-      </div>
+      <div class="card-header"><h3>Test Results ({{ order.items.length }})</h3></div>
       <div class="card-body">
 
         <div v-if="loading" class="loading-state">
@@ -72,7 +64,8 @@
                 <h4>{{ item.test_name }}</h4>
                 <span class="badge badge-info">{{ item.category }}</span>
               </div>
-              <span class="flag-badge" :class="'flag-' + flagClass(getFlag(item))">{{ flagLabel(getFlag(item)) }}</span>
+              <span v-if="isAbnormal(item)" class="abnormal-badge">ABNORMAL</span>
+              <span v-else-if="item.result_value" class="normal-badge">Normal</span>
             </div>
 
             <div class="result-card-body">
@@ -164,34 +157,15 @@ export default {
     }
 
     const isAbnormal = (item) => {
-      const flag = getFlag(item)
-      return flag === 'H' || flag === 'L' || flag === 'CRITICAL_H' || flag === 'CRITICAL_L'
-    }
-
-    const getFlag = (item) => {
-      if (item.flag === 'CRITICAL_H' || item.flag === 'CRITICAL_L') return item.flag
+      if (!item.result_value || !item.reference_range) return false
       const val = parseFloat(item.result_value)
-      if (!item.reference_range || isNaN(val)) return 'NORMAL'
+      if (isNaN(val)) return false
       const match = item.reference_range.match(/([\d.]+)\s*[-–]\s*([\d.]+)/)
-      if (!match) return 'NORMAL'
+      if (!match) return false
       const low = parseFloat(match[1])
       const high = parseFloat(match[2])
-      if (val < low) return 'L'
-      if (val > high) return 'H'
-      return 'NORMAL'
+      return val < low || val > high
     }
-
-    const FLAG_META = {
-      CRITICAL_H: { label: 'Critical High', cls: 'danger' },
-      CRITICAL_L: { label: 'Critical Low', cls: 'danger' },
-      H: { label: 'High', cls: 'warning' },
-      L: { label: 'Low', cls: 'warning' },
-      NORMAL: { label: 'Normal', cls: 'success' },
-      UNKNOWN: { label: 'Unknown', cls: 'gray' }
-    }
-
-    const flagLabel = (flag) => (FLAG_META[flag] || FLAG_META.UNKNOWN).label
-    const flagClass = (flag) => (FLAG_META[flag] || FLAG_META.UNKNOWN).cls
 
     const submitResults = async () => {
       saving.value = true
@@ -223,7 +197,7 @@ export default {
 
     return {
       order, saving, loading, error,
-      priorityClass, isAbnormal, getFlag, flagLabel, flagClass,
+      priorityClass, isAbnormal,
       formatDate, getStatusColor, submitResults
     }
   }
@@ -451,21 +425,6 @@ export default {
   padding: 3px 10px;
   border-radius: 4px;
 }
-
-.flag-badge {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 3px 10px;
-  border-radius: 4px;
-}
-.flag-danger { color: #dc2626; background: #fee2e2; }
-.flag-warning { color: #b45309; background: #fef3c7; }
-.flag-success { color: #16a34a; background: #dcfce7; }
-.flag-gray { color: #64748b; background: #f1f5f9; }
-
-.critical-summary { display: flex; gap: 6px; }
 
 .normal-badge {
   font-size: 11px;

@@ -2,8 +2,6 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
-const { validateDoctorProfile } = require('../middleware/validation');
-const audit = require('../utils/audit');
 
 // Get specialties - MUST be before /:id routes
 router.get('/specialties/all', authenticate, async (req, res) => {
@@ -44,7 +42,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // Create or update doctor profile - MUST be before /:id
-router.post('/profile', authenticate, authorize('admin'), validateDoctorProfile, async (req, res) => {
+router.post('/profile', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { user_id, specialty_id, license_number, qualification, years_of_experience, consultation_fee, bio, schedule } = req.body;
     const [existing] = await pool.query('SELECT id FROM doctor_profiles WHERE user_id = ?', [user_id]);
@@ -53,14 +51,11 @@ router.post('/profile', authenticate, authorize('admin'), validateDoctorProfile,
         `UPDATE doctor_profiles SET specialty_id=?, license_number=?, qualification=?, years_of_experience=?, consultation_fee=?, bio=?, schedule=? WHERE user_id=?`,
         [specialty_id, license_number, qualification, years_of_experience, consultation_fee, bio, JSON.stringify(schedule), user_id]
       );
-      await audit.update(req.user.id, 'doctor_profiles', existing[0].id, null, { user_id, license_number }, req.ip);
     } else {
       await pool.query(
         `INSERT INTO doctor_profiles (user_id, specialty_id, license_number, qualification, years_of_experience, consultation_fee, bio, schedule) VALUES (?,?,?,?,?,?,?,?)`,
         [user_id, specialty_id, license_number, qualification, years_of_experience, consultation_fee, bio, JSON.stringify(schedule)]
       );
-      const [row] = await pool.query('SELECT id FROM doctor_profiles WHERE user_id = ?', [user_id]);
-      await audit.create(req.user.id, 'doctor_profiles', row[0]?.id, { user_id, license_number }, req.ip);
     }
     res.json({ message: 'Doctor profile saved' });
   } catch (error) {

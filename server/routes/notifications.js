@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate } = require('../middleware/auth');
-const { validateIdParam } = require('../middleware/validation');
 
 // Get notifications
 router.get('/', authenticate, async (req, res) => {
@@ -22,7 +21,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // Mark as read
-router.put('/:id/read', authenticate, validateIdParam, async (req, res) => {
+router.put('/:id/read', authenticate, async (req, res) => {
   try {
     await pool.query('UPDATE notifications SET is_read = TRUE WHERE id = ? AND user_id = ?',
       [req.params.id, req.user.id]);

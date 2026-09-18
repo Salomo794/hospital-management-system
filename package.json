@@ -7,8 +7,7 @@
     "client": "cd client && npm run dev",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "db:setup": "node server/config/setup.js",
-    "db:seed": "node server/config/seed.js",
-    "db:backup": "node server/scripts/backup-db.js"
+    "db:seed": "node server/config/seed.js"
   },
   "dependencies": {
     "concurrently": "^8.2.0"

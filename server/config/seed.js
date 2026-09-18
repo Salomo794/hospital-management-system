@@ -1,7 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 const pool = require('./database');
-const { classifyTriage } = require('../utils/triage');
 
 async function seed() {
   const conn = await pool.getConnection();
@@ -261,58 +260,6 @@ async function seed() {
     }
     console.log('  Prescriptions seeded');
 
-    // --- Dispensing history (feeds the smart reorder / stock-out prediction) ---
-    // Simulates ~30 days of real pharmacy traffic so the stock forecast and
-    // reorder suggestions surface meaningful, non-trivial results.
-    const [existingTransactions] = await conn.query('SELECT COUNT(*) as count FROM inventory_transactions');
-    if (existingTransactions[0].count === 0) {
-      const meds = [
-        { name: 'Lisinopril 10mg', daily: 14 },
-        { name: 'Metformin 500mg', daily: 22 },
-        { name: 'Aspirin 81mg', daily: 18 },
-        { name: 'Metoprolol 50mg', daily: 12 },
-        { name: 'Warfarin 5mg', daily: 6 },
-        { name: 'Glipizide 5mg', daily: 8 },
-        { name: 'Amlodipine 5mg', daily: 9 },
-        { name: 'Ciprofloxacin 500mg', daily: 3 },
-        { name: 'Ibuprofen 400mg', daily: 16 },
-        { name: 'Acetaminophen 500mg', daily: 20 },
-      ];
-      const [medRows] = await conn.query('SELECT id, name, stock_quantity, min_stock_level FROM medicines');
-      const medMap = {};
-      medRows.forEach(m => { medMap[m.name] = { id: m.id, stock: m.stock_quantity, min: m.min_stock_level }; });
-      const pharmUser = userIds[5] || userIds[0];
-      let txNo = 1;
-      for (const m of meds) {
-        const med = medMap[m.name];
-        if (!med) continue;
-        for (let day = 1; day <= 30; day++) {
-          const qty = Math.max(m.daily - (day % 4), Math.round(m.daily * 0.7));
-          await conn.query(
-            `INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, reference_number, notes, performed_by, created_at)
-             VALUES (?, 'dispense', ?, ?, 'Daily dispensing', ?, datetime('now', ?))`,
-            [med.id, qty, `RX-DS-${String(txNo++).padStart(4, '0')}`, pharmUser, `-${day} days`]
-          );
-        }
-        // Stress a couple of fast movers right to the edge of their min stock.
-        if (m.name === 'Metformin 500mg' || m.name === 'Amlodipine 5mg') {
-          const extra = Math.max(0, med.stock - med.min + 5);
-          await conn.query('UPDATE medicines SET stock_quantity = ? WHERE id = ?', [med.stock - extra, med.id]);
-          await conn.query(
-            `INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, reference_number, notes, performed_by, created_at)
-             VALUES (?, 'dispense', ?, ?, 'Bulk dispensing', ?, datetime('now', '-1 day'))`,
-            [med.id, extra, `RX-BULK-${med.id}`, pharmUser]
-          );
-        }
-      }
-      // Mark the seeded prescription items as dispensed too.
-      await conn.query(
-        `UPDATE prescription_items SET dispensed = TRUE, dispensed_date = datetime('now', '-2 days')
-         WHERE id IN (SELECT id FROM prescription_items LIMIT 8)`
-      );
-    }
-    console.log('  Dispensing history seeded');
-
     // --- Lab Tests ---
     const [existingLabTests] = await conn.query('SELECT COUNT(*) as count FROM lab_tests');
     if (existingLabTests[0].count === 0) {
@@ -343,10 +290,6 @@ async function seed() {
     if (existingLabOrders[0].count === 0) {
       const [labTestRows] = await conn.query('SELECT id FROM lab_tests ORDER BY id LIMIT 5');
       const statuses = ['ordered', 'in_progress', 'completed', 'completed', 'ordered'];
-      const ranges = ['4.5 - 11.0', '40 - 100', '70 - 99', '0.6 - 1.2', '3.5 - 5.0'];
-      const results = ['', '', '210', '1.6', ''];
-      const resultUnits = ['x10^3/uL', 'mg/dL', 'mg/dL', 'mg/dL', 'mEq/L'];
-      const resultFlags = [null, null, 'CRITICAL_H', 'H', null];
       for (let i = 0; i < 5; i++) {
         const uuid = uuidv4();
         const today = new Date().toISOString().split('T')[0].replace(/-/g, '');
@@ -359,9 +302,9 @@ async function seed() {
            i === 0 ? 'Fasting required' : null]
         );
         await conn.query(
-          `INSERT INTO lab_order_items (lab_order_id, lab_test_id, reference_range, result_unit, result_value, result_flag)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [result.insertId, labTestRows[i].id, ranges[i], resultUnits[i], results[i] || null, resultFlags[i]]
+          `INSERT INTO lab_order_items (lab_order_id, lab_test_id, reference_range, result_unit)
+           VALUES (?, ?, ?, ?)`,
+          [result.insertId, labTestRows[i].id, 'See reference range', '']
         );
       }
     }
@@ -424,41 +367,6 @@ async function seed() {
       }
     }
     console.log('  Notifications seeded');
-
-    // --- Admissions ---
-    const [existingAdmissions] = await conn.query('SELECT COUNT(*) as count FROM admissions');
-    if (existingAdmissions[0].count === 0) {
-      const wards = ['Ward A', 'Ward B', 'ICU', 'Maternity', 'Pediatrics'];
-      const admissions = [
-        { patientIdx: 2, doctorId: doctorUserId1, ward: 'ICU', bed: 'ICU-101', diagnosis: 'Acute COPD exacerbation', treatment: 'Oxygen therapy, bronchodilators, steroids', status: 'admitted', daysAgo: 1, complaint: 'Severe shortness of breath, wheezing at rest', severity: 'critical' },
-        { patientIdx: 4, doctorId: doctorUserId1, ward: 'Ward A', bed: 'A-104', diagnosis: 'Atrial Fibrillation monitoring', treatment: 'Rate control, anticoagulation', status: 'admitted', daysAgo: 2, complaint: 'Palpitations and dizziness, irregular pulse', severity: 'high' },
-        { patientIdx: 9, doctorId: doctorUserId2, ward: 'Ward B', bed: 'B-112', diagnosis: 'Congestive Heart Failure', treatment: 'Diuretics, ACE inhibitors, monitoring', status: 'admitted', daysAgo: 0, complaint: 'Swollen legs and difficulty catching breath', severity: 'high' },
-        { patientIdx: 7, doctorId: doctorUserId2, ward: 'Pediatrics', bed: 'P-203', diagnosis: 'Severe asthma attack', treatment: 'Nebulizer, observation', status: 'transferred', daysAgo: 3, complaint: 'Wheezing after exercise, peak flow low', severity: 'moderate' },
-        { patientIdx: 0, doctorId: doctorUserId1, ward: 'Ward A', bed: 'A-101', diagnosis: 'Hypertensive crisis', treatment: 'BP management, observation', status: 'discharged', daysAgo: 5, complaint: 'Severe headache, blood pressure 190/110', severity: 'critical' },
-        { patientIdx: 5, doctorId: doctorUserId2, ward: 'Ward B', bed: 'B-101', diagnosis: 'Pneumonia', treatment: 'IV antibiotics, fluids', status: 'discharged', daysAgo: 8, complaint: 'Fever, productive cough, chest pain', severity: 'moderate' },
-      ];
-      for (const a of admissions) {
-        const uuid = uuidv4();
-        const today = new Date();
-        const admDate = new Date(today);
-        admDate.setDate(admDate.getDate() - a.daysAgo);
-        const dateStr = admDate.toISOString().slice(0, 10);
-        const admissionNumber = `ADM-${dateStr.replace(/-/g, '')}-${String(Math.floor(100 + Math.random() * 900))}`;
-        const dischargeDate = a.status === 'discharged'
-          ? admDate.toISOString().slice(0, 10)
-          : null;
-        const { triageScore, triageSeverity } = classifyTriage(a.complaint, a.diagnosis, a.severity);
-        await conn.query(
-          `INSERT INTO admissions (uuid, admission_number, patient_id, doctor_id, ward, bed_number, admission_date, discharge_date, diagnosis, treatment_plan, status, chief_complaint, triage_severity, triage_score, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [uuid, admissionNumber, patientIds[a.patientIdx], a.doctorId, a.ward, a.bed,
-           `${dateStr} 09:00:00`, dischargeDate ? `${dischargeDate} 16:30:00` : null,
-           a.diagnosis, a.treatment, a.status, a.complaint, triageSeverity, triageScore,
-           a.status === 'admitted' ? 'Expected to stay for monitoring' : null]
-        );
-      }
-    }
-    console.log('  Admissions seeded');
 
     await conn.commit();
     console.log('\nDatabase seeded successfully!');

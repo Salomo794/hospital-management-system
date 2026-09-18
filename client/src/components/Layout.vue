@@ -105,15 +105,6 @@
           <span class="nav-text" v-show="!sidebarCollapsed">Reports</span>
         </router-link>
         <router-link 
-          to="/admissions" 
-          class="nav-item" 
-          :class="{ active: $route.path.startsWith('/admissions') }"
-          @click="closeMobileSidebar"
-        >
-          <span class="nav-icon">&#127973;</span>
-          <span class="nav-text" v-show="!sidebarCollapsed">Admissions</span>
-        </router-link>
-        <router-link 
           to="/ai-assistant" 
           class="nav-item" 
           :class="{ active: $route.path.startsWith('/ai') }"
@@ -131,16 +122,6 @@
         >
           <span class="nav-icon">&#9881;</span>
           <span class="nav-text" v-show="!sidebarCollapsed">User Management</span>
-        </router-link>
-        <router-link 
-          v-if="authStore.userRole === 'admin'" 
-          to="/audit-log" 
-          class="nav-item" 
-          :class="{ active: $route.path === '/audit-log' }"
-          @click="closeMobileSidebar"
-        >
-          <span class="nav-icon">&#128221;</span>
-          <span class="nav-text" v-show="!sidebarCollapsed">Audit Log</span>
         </router-link>
       </nav>
     </aside>
@@ -234,8 +215,6 @@ export default {
         '/laboratory': 'Laboratory Management',
         '/billing': 'Billing & Payments',
         '/reports': 'Reports & Analytics',
-        '/admissions': 'Admissions',
-        '/audit-log': 'Audit Log',
         '/ai-assistant': 'AI Assistant',
         '/users': 'User Management'
       }

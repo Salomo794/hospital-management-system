@@ -7,8 +7,6 @@ const sqlite = new Database(dbPath);
 // Enable WAL mode for better performance
 sqlite.pragma('journal_mode = WAL');
 sqlite.pragma('foreign_keys = ON');
-// Wait for the lock instead of throwing "database is locked" under concurrent access
-sqlite.pragma('busy_timeout = 5000');
 
 // MySQL2-compatible pool interface
 const pool = {

@@ -1,20 +1,5 @@
 const pool = require('./database');
 
-// Adds a column to an existing table if it does not already exist.
-// Lets the schema evolve on already-seeded databases without wiping data.
-async function ensureColumn(conn, table, column, ddl) {
-  const [res] = await conn.query(
-    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`,
-    [table]
-  );
-  const createSql = (res && res[0] && res[0].sql) || '';
-  const exists = new RegExp(`(^|\\s|,)\\s*"?"?${column}"?"?\\s`).test(createSql);
-  if (!exists) {
-    await conn.query(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
-    console.log(`  + added column ${table}.${column}`);
-  }
-}
-
 async function setup() {
   const conn = await pool.getConnection();
 
@@ -216,7 +201,6 @@ async function setup() {
       result_unit TEXT,
       reference_range TEXT,
       is_abnormal INTEGER DEFAULT 0,
-      result_flag TEXT DEFAULT 'NORMAL',
       notes TEXT,
       technician_id INTEGER,
       result_date TEXT,
@@ -332,20 +316,11 @@ async function setup() {
       diagnosis TEXT,
       treatment_plan TEXT,
       status TEXT DEFAULT 'admitted',
-      chief_complaint TEXT,
-      triage_severity TEXT DEFAULT 'low' CHECK(triage_severity IN ('critical','high','moderate','low')),
-      triage_score INTEGER DEFAULT 0,
       notes TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
       FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE
     )`);
-
-    // --- Schema migrations for already-existing databases ---
-    await ensureColumn(conn, 'admissions', 'chief_complaint', 'chief_complaint TEXT');
-    await ensureColumn(conn, 'admissions', 'triage_severity', "triage_severity TEXT DEFAULT 'low'");
-    await ensureColumn(conn, 'admissions', 'triage_score', 'triage_score INTEGER DEFAULT 0');
-    await ensureColumn(conn, 'lab_order_items', 'result_flag', "result_flag TEXT DEFAULT 'NORMAL'");
 
     console.log('All tables created successfully (SQLite)!');
   } catch (error) {

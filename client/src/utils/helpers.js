@@ -50,14 +50,7 @@ export function getStatusColor(status) {
     transferred: 'warning',
     final: 'success',
     draft: 'warning',
-    amended: 'info',
-    critical: 'danger',
-    high: 'warning',
-    moderate: 'info',
-    low: 'success',
-    normal: 'success',
-    over: 'danger',
-    under: 'warning'
+    amended: 'info'
   }
   return map[status] || 'info'
 }

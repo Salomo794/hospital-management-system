@@ -3,8 +3,6 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
-const { validateBilling, validatePayment } = require('../middleware/validation');
-const audit = require('../utils/audit');
 
 function generateBillNumber() {
   const prefix = 'BIL';
@@ -68,9 +66,8 @@ router.get('/:id', authenticate, async (req, res) => {
   }
 });
 
-// Create bill (atomic - bill + items)
-router.post('/', authenticate, authorize('admin', 'receptionist'), validateBilling, async (req, res) => {
-  let conn;
+// Create bill
+router.post('/', authenticate, authorize('admin', 'receptionist'), async (req, res) => {
   try {
     const { patient_id, appointment_id, items, discount, tax, payment_method, due_date, notes } = req.body;
     const uuid = uuidv4();
@@ -79,10 +76,7 @@ router.post('/', authenticate, authorize('admin', 'receptionist'), validateBilli
     const discountAmount = discount || 0;
     const taxAmount = tax || (total_amount - discountAmount) * 0.10;
     const net_amount = total_amount - discountAmount + taxAmount;
-
-    conn = await pool.getConnection();
-    await conn.beginTransaction();
-    const [result] = await conn.query(
+    const [result] = await pool.query(
       `INSERT INTO bills (uuid, bill_number, patient_id, appointment_id, total_amount, discount, tax,
         net_amount, payment_method, due_date, notes, created_by)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -90,42 +84,30 @@ router.post('/', authenticate, authorize('admin', 'receptionist'), validateBilli
         net_amount, payment_method, due_date, notes, req.user.id]
     );
     for (const item of items) {
-      await conn.query(
+      await pool.query(
         'INSERT INTO bill_items (bill_id, description, category, reference_id, quantity, unit_price, total) VALUES (?,?,?,?,?,?,?)',
         [result.insertId, item.description, item.category, item.reference_id || null,
           item.quantity || 1, item.unit_price, (item.quantity || 1) * item.unit_price]
       );
     }
-    await conn.commit();
-    conn.release();
-    conn = null;
-
-    await audit.create(req.user.id, 'bills', result.insertId, { bill_number, patient_id, net_amount }, req.ip);
     const [newBill] = await pool.query('SELECT * FROM bills WHERE id = ?', [result.insertId]);
     const [newItems] = await pool.query('SELECT * FROM bill_items WHERE bill_id = ?', [result.insertId]);
     res.status(201).json({ ...newBill[0], items: newItems });
   } catch (error) {
-    if (conn) {
-      try { await conn.rollback(); conn = null; } catch (e) { /* ignore */ }
-    }
     console.error(error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Record payment (atomic - payment insert + bill update)
-router.post('/:id/payments', authenticate, authorize('admin', 'receptionist'), validatePayment, async (req, res) => {
-  let conn;
+// Record payment
+router.post('/:id/payments', authenticate, authorize('admin', 'receptionist'), async (req, res) => {
   try {
     const { amount, payment_method, transaction_reference, notes } = req.body;
     const uuid = uuidv4();
     const payment_number = generatePaymentNumber();
     const [bill] = await pool.query('SELECT * FROM bills WHERE id = ?', [req.params.id]);
     if (bill.length === 0) return res.status(404).json({ message: 'Bill not found' });
-
-    conn = await pool.getConnection();
-    await conn.beginTransaction();
-    const [result] = await conn.query(
+    const [result] = await pool.query(
       `INSERT INTO payments (uuid, payment_number, bill_id, patient_id, amount, payment_method,
         transaction_reference, received_by, notes) VALUES (?,?,?,?,?,?,?,?,?)`,
       [uuid, payment_number, req.params.id, bill[0].patient_id, amount, payment_method,
@@ -133,21 +115,13 @@ router.post('/:id/payments', authenticate, authorize('admin', 'receptionist'), v
     );
     const newPaid = parseFloat(bill[0].paid_amount) + parseFloat(amount);
     let paymentStatus = 'partial';
-    if (newPaid > parseFloat(bill[0].net_amount)) paymentStatus = 'overpaid';
-    else if (newPaid >= parseFloat(bill[0].net_amount)) paymentStatus = 'paid';
-    await conn.query('UPDATE bills SET paid_amount = ?, payment_status = ? WHERE id = ?',
+    if (newPaid > bill[0].net_amount) paymentStatus = 'overpaid';
+    else if (newPaid >= bill[0].net_amount) paymentStatus = 'paid';
+    await pool.query('UPDATE bills SET paid_amount = ?, payment_status = ? WHERE id = ?',
       [newPaid, paymentStatus, req.params.id]);
-    await conn.commit();
-    conn.release();
-    conn = null;
-
-    await audit.create(req.user.id, 'payments', result.insertId, { payment_number, amount, payment_method }, req.ip);
     const [updatedBill] = await pool.query('SELECT * FROM bills WHERE id = ?', [req.params.id]);
     res.status(201).json({ payment: { id: result.insertId, uuid, payment_number, amount }, bill: updatedBill[0] });
   } catch (error) {
-    if (conn) {
-      try { await conn.rollback(); conn = null; } catch (e) { /* ignore */ }
-    }
     console.error(error);
     res.status(500).json({ message: 'Server error' });
   }
