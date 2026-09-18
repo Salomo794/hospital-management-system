@@ -160,4 +160,69 @@ router.get('/transactions', authenticate, authorize('admin', 'pharmacist'), asyn
   }
 });
 
+// Smart stock-out prediction & reorder suggestions.
+// Estimates each medicine's average daily consumption from dispensing history
+// and projects the remaining days of stock. Medicines whose projected days
+// remaining fall short of the lead-time buffer are pushed as reorder items.
+router.get('/reorder-suggestions', authenticate, authorize('admin', 'pharmacist'), async (req, res) => {
+  try {
+    const [medicines] = await pool.query(
+      `SELECT * FROM medicines WHERE is_active = TRUE ORDER BY name`
+    );
+    if (medicines.length === 0) return res.json({ suggestions: [], generated_at: new Date().toISOString() });
+
+    const [consumption] = await pool.query(
+      `SELECT medicine_id, COALESCE(SUM(quantity), 0) as qty
+       FROM inventory_transactions
+       WHERE transaction_type = 'dispense' AND created_at >= datetime('now', '-30 days')
+       GROUP BY medicine_id`
+    );
+    const consumeByMed = Object.fromEntries(consumption.map(c => [c.medicine_id, c.qty]));
+
+    const suggestions = medicines.map(m => {
+      const daily = (consumeByMed[m.id] || 0) / 30;
+      const stock = m.stock_quantity || 0;
+      const daysLeft = daily > 0 ? Math.floor(stock / daily) : null;
+      // Suggested order aims to reach ~30 day cover (or max_stock if lower),
+      // always preserving the minimum stock as a safety buffer.
+      const target = Math.min(m.max_stock_level || 1000, Math.max(m.min_stock_level || 10, Math.round(daily * 30)));
+      const suggested = Math.max(0, target - stock);
+      const urgency = daily === 0
+        ? 'inactive'
+        : (daysLeft <= 3 ? 'critical' : daysLeft <= 7 ? 'urgent' : daysLeft <= 14 ? 'warning' : 'healthy');
+      return {
+        id: m.id,
+        name: m.name,
+        generic_name: m.generic_name,
+        category: m.category,
+        unit: m.unit,
+        stock_quantity: stock,
+        min_stock_level: m.min_stock_level,
+        max_stock_level: m.max_stock_level,
+        daily_consumption: Math.round(daily * 100) / 100,
+        days_left: daysLeft,
+        suggested_order_quantity: suggested,
+        urgency,
+        forecast_date: daysLeft !== null ? new Date(Date.now() + daysLeft * 86400000).toISOString().split('T')[0] : null
+      };
+    });
+
+    const rank = { critical: 0, urgent: 1, warning: 2, healthy: 3, inactive: 4 };
+    suggestions.sort((a, b) => rank[a.urgency] - rank[b.urgency] || b.days_left - a.days_left);
+
+    res.json({
+      suggestions,
+      summary: {
+        critical: suggestions.filter(s => s.urgency === 'critical').length,
+        urgent: suggestions.filter(s => s.urgency === 'urgent').length,
+        warning: suggestions.filter(s => s.urgency === 'warning').length
+      },
+      generated_at: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 module.exports = router;

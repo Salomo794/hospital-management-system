@@ -3,6 +3,107 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 
+// Least-squares linear regression over daily series [x, y].
+// Returns slope, intercept and fitted points - a simple, dependency-free
+// forecasting engine used for the predictive analytics widget.
+function linearRegression(series) {
+  const n = series.length;
+  if (n === 0) return { slope: 0, intercept: 0, predict: () => 0 };
+  const xs = series.map(p => p.x);
+  const meanX = xs.reduce((a, b) => a + b, 0) / n;
+  const meanY = series.reduce((a, b) => a + b.y, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (series[i].x - meanX) * (series[i].y - meanY);
+    den += (series[i].x - meanX) ** 2;
+  }
+  const slope = den === 0 ? 0 : num / den;
+  const intercept = meanY - slope * meanX;
+  return { slope, intercept, predict: (x) => Math.max(0, Math.round(slope * x + intercept)) };
+}
+
+// Predictive forecast - projects patient visits and revenue for the next
+// `days` days based on a linear-regression trend over the last 14 days.
+router.get('/forecast', authenticate, async (req, res) => {
+  try {
+    const days = Math.min(30, Math.max(1, parseInt(req.query.days) || 7));
+    const horizon = Math.min(30, Math.max(1, parseInt(req.query.horizon) || days));
+    const today = new Date().toISOString().split('T')[0];
+    const start = new Date();
+    start.setDate(start.getDate() - 14);
+    const startStr = start.toISOString().split('T')[0];
+
+    // Daily real visit counts (all scheduled/completed/confirmed appts).
+    const [visits] = await pool.query(
+      `SELECT DATE(appointment_date) as day, COUNT(*) as count
+       FROM appointments
+       WHERE appointment_date >= ? AND appointment_date <= ? AND status != 'cancelled'
+       GROUP BY DATE(appointment_date) ORDER BY day`,
+      [startStr, today]
+    );
+    // Daily real revenue.
+    const [revenue] = await pool.query(
+      `SELECT DATE(payment_date) as day, COALESCE(SUM(amount), 0) as amount
+       FROM payments
+       WHERE DATE(payment_date) >= ? AND DATE(payment_date) <= ?
+       GROUP BY DATE(payment_date) ORDER BY day`,
+      [startStr, today]
+    );
+
+    const dayMap = {};
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      dayMap[d.toISOString().split('T')[0]] = { visits: 0, revenue: 0 };
+    }
+    visits.forEach(v => { if (dayMap[v.day]) dayMap[v.day].visits = v.count; });
+    revenue.forEach(r => { if (dayMap[r.day]) dayMap[r.day].revenue = r.amount; });
+
+    const daysArr = Object.keys(dayMap);
+    const visitSeries = daysArr.map((d, i) => ({ x: i, y: dayMap[d].visits }));
+    const revenueSeries = daysArr.map((d, i) => ({ x: i, y: dayMap[d].revenue }));
+
+    const visitModel = linearRegression(visitSeries);
+    const revenueModel = linearRegression(revenueSeries);
+
+    const history = daysArr.map(d => ({
+      date: d,
+      visits: dayMap[d].visits,
+      revenue: dayMap[d].revenue,
+      forecast_visits: visitModel.predict(daysArr.indexOf(d)),
+      forecast_revenue: revenueModel.predict(daysArr.indexOf(d))
+    }));
+
+    const forecasts = [];
+    for (let i = 1; i <= horizon; i++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() + i);
+      const x = 14 + i - 1;
+      forecasts.push({
+        date: d.toISOString().split('T')[0],
+        visits: visitModel.predict(x),
+        revenue: revenueModel.predict(x)
+      });
+    }
+
+    const lastActualVisits = visits.length >= 3 ? visits.slice(-3).reduce((a, b) => a + b.count, 0) / 3 : 0;
+    const avgProjected = forecasts.reduce((a, b) => a + b.visits, 0) / Math.max(1, forecasts.length);
+    const diff = lastActualVisits > 0 ? ((avgProjected - lastActualVisits) / lastActualVisits) * 100 : 0;
+
+    res.json({
+      history,
+      forecast: forecasts,
+      trend: diff > 5 ? 'up' : diff < -5 ? 'down' : 'stable',
+      percent_change: Math.round(diff * 10) / 10,
+      total_projected_visits: forecasts.reduce((a, b) => a + b.visits, 0),
+      total_projected_revenue: forecasts.reduce((a, b) => a + b.revenue, 0)
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Dashboard stats
 router.get('/dashboard', authenticate, async (req, res) => {
   try {

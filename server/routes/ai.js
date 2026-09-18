@@ -184,6 +184,44 @@ async function ruleBasedAssistant(message, user) {
       this_month: month[0].total
     };
   }
+  // Predictive workload forecast
+  else if (lowerMsg.includes('forecast') || lowerMsg.includes('predict') || lowerMsg.includes('trend') || lowerMsg.includes('next week')) {
+    const [last7] = await pool.query(
+      `SELECT COUNT(*) as count FROM appointments
+       WHERE appointment_date >= date('now', '-7 days') AND appointment_date < date('now') AND status != 'cancelled'`
+    );
+    const [next7] = await pool.query(
+      `SELECT COUNT(*) as booked FROM appointments
+       WHERE appointment_date >= date('now') AND appointment_date < date('now', '+7 days') AND status != 'cancelled'`
+    );
+    const dailyAvg = Math.round(last7[0].count / 7 || 0);
+    const projectedNext7 = dailyAvg * 7;
+    const trend = projectedNext7 > last7[0].count ? 'up' : projectedNext7 < last7[0].count ? 'down' : 'stable';
+    response = `Patient load forecast (next 7 days):`;
+    data = {
+      average_daily_visits_last_7_days: dailyAvg,
+      projected_visits_next_7_days: projectedNext7,
+      already_booked_next_7_days: next7[0].booked,
+      trend
+    };
+  }
+  // Pharmacy stock forecast
+  else if (lowerMsg.includes('stock') || lowerMsg.includes('reorder') || lowerMsg.includes('low supply') || lowerMsg.includes('medication alert')) {
+    const [lowStock] = await pool.query("SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = TRUE");
+    const [expiringSoon] = await pool.query("SELECT COUNT(*) as count FROM medicines WHERE expiry_date < date('now', '+60 days') AND expiry_date >= date('now') AND is_active = TRUE");
+    const [expired] = await pool.query("SELECT COUNT(*) as count FROM medicines WHERE expiry_date < date('now') AND is_active = TRUE");
+    let suggestion = "No medicines need restocking right now.";
+    if (lowStock[0].count > 0) {
+      suggestion = `${lowStock[0].count} item(s) are at or below minimum stock and should be reordered.`;
+    }
+    response = 'Pharmacy stock forecast:';
+    data = {
+      low_stock_items: lowStock[0].count,
+      expiring_within_60_days: expiringSoon[0].count,
+      already_expired: expired[0].count,
+      suggestion
+    };
+  }
   // Help / Default
   else {
     response = `I can help you with:
@@ -194,6 +232,8 @@ async function ruleBasedAssistant(message, user) {
 4. **Patient summary** - "patient record 5"
 5. **Pending tasks** - "show pending items"
 6. **Revenue** - "show revenue this month"
+7. **Forecast** - "predict next week's patient load"
+8. **Stock alerts** - "any low stock or reorder alerts?"
 
 Just type your question and I'll help you find the information.`;
   }

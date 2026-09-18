@@ -18,10 +18,15 @@ function generateOrderNumber() {
 
 // Numeric abnormal-detection: parse reference ranges of the forms
 // "70-100", "70 - 100 mg/dL", "<5.0", ">10", "4.5-11.0 10^9/L", "negative"
+// Returns { isAbnormal, flag } where flag is a compact clinical notation:
+//   CRITICAL_H / CRITICAL_L - dangerously out of range (red alert)
+//   H / L                 - above / below reference
+//   NORMAL                - within reference
+//   UNKNOWN               - non-numeric or qualitative result
 function evaluateAbnormal(resultValue, referenceRange) {
-  if (!resultValue || !referenceRange) return false;
+  if (!resultValue || !referenceRange) return { isAbnormal: false, flag: 'UNKNOWN' };
   const val = parseFloat(String(resultValue).replace(',', '.'));
-  if (isNaN(val)) return false;
+  if (isNaN(val)) return { isAbnormal: false, flag: 'UNKNOWN' };
 
   const range = String(referenceRange).trim().toLowerCase();
   const rangeMatch = range.match(/([\d.]+)\s*(?:-|–|to|−)\s*([\d.]+)/);
@@ -30,18 +35,34 @@ function evaluateAbnormal(resultValue, referenceRange) {
   const lessthanEq = range.match(/≤\s*([\d.]+)/);
   const greaterthanEq = range.match(/≥\s*([\d.]+)/);
 
-  if (rangeMatch) {
-    const low = parseFloat(rangeMatch[1]);
-    const high = parseFloat(rangeMatch[2]);
-    return val < low || val > high;
-  }
-  if (lessthan) return val >= parseFloat(lessthan[1]);
-  if (lessthanEq) return val > parseFloat(lessthanEq[1]);
-  if (greaterthan) return val <= parseFloat(greaterthan[1]);
-  if (greaterthanEq) return val < parseFloat(greaterthanEq[1]);
+  let bounds = null;
+  if (rangeMatch) bounds = { low: parseFloat(rangeMatch[1]), high: parseFloat(rangeMatch[2]) };
 
-  // Qualitative results like "negative", "positive", "normal" - no numeric judgement
-  return false;
+  const isAbnormal = (() => {
+    if (bounds) return val < bounds.low || val > bounds.high;
+    if (lessthan) return val >= parseFloat(lessthan[1]);
+    if (lessthanEq) return val > parseFloat(lessthanEq[1]);
+    if (greaterthan) return val <= parseFloat(greaterthan[1]);
+    if (greaterthanEq) return val < parseFloat(greaterthanEq[1]);
+    // Qualitative results like "negative", "positive", "normal" - no numeric judgement
+    return false;
+  })();
+
+  let flag = 'NORMAL';
+  if (isAbnormal && bounds) {
+    const spread = bounds.high - bounds.low;
+    // Values beyond ~1.5x the normal spread past the boundary are flagged critical.
+    if (val > bounds.high + spread * 1.5) flag = 'CRITICAL_H';
+    else if (val < bounds.low - spread * 1.5) flag = 'CRITICAL_L';
+    else if (val > bounds.high) flag = 'H';
+    else flag = 'L';
+  } else if (isAbnormal && greaterthan) {
+    flag = 'L';
+  } else if (isAbnormal && lessthan) {
+    flag = 'H';
+  }
+
+  return { isAbnormal, flag };
 }
 
 // Get all lab tests
@@ -84,6 +105,7 @@ router.get('/orders', authenticate, async (req, res) => {
     const offset = (page - 1) * limit;
     let query = `SELECT lo.*, p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn,
       u.first_name as doctor_first_name, u.last_name as doctor_last_name,
+      (SELECT COUNT(*) FROM lab_order_items flagct WHERE flagct.lab_order_id = lo.id AND flagct.is_abnormal = 1) as abnormal_count,
       GROUP_CONCAT(lt.name, ', ') as test_names
       FROM lab_orders lo
       JOIN patients p ON lo.patient_id = p.id
@@ -187,7 +209,17 @@ router.get('/orders/:id', authenticate, async (req, res) => {
         LEFT JOIN users t ON loi.technician_id = t.id WHERE loi.lab_order_id = ?`,
       [req.params.id]
     );
-    res.json({ ...order[0], items });
+    // Back-fill the flag notation for stored rows that predate the feature.
+    for (const item of items) {
+      if (!item.result_flag || item.result_flag === 'NORMAL' && item.is_abnormal) {
+        const { is_abnormal, flag } = evaluateAbnormal(item.result_value, item.reference_range);
+        item.is_abnormal = is_abnormal ? 1 : 0;
+        item.result_flag = flag;
+      }
+    }
+    const abnormalCount = items.filter(i => i.is_abnormal).length;
+    const criticalCount = items.filter(i => i.result_flag && i.result_flag.startsWith('CRITICAL')).length;
+    res.json({ ...order[0], items, abnormal_count: abnormalCount, critical_count: criticalCount });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
@@ -204,10 +236,10 @@ router.put('/orders/:id/results', authenticate, authorize('lab_technician', 'adm
     conn = await pool.getConnection();
     await conn.beginTransaction();
     for (const item of items) {
-      const is_abnormal = evaluateAbnormal(item.result_value, item.reference_range);
+      const { is_abnormal, flag } = evaluateAbnormal(item.result_value, item.reference_range);
       await conn.query(
-        `UPDATE lab_order_items SET result_value=?, result_unit=?, reference_range=?, is_abnormal=?, notes=?, technician_id=?, result_date=datetime('now') WHERE id=?`,
-        [item.result_value, item.result_unit, item.reference_range, is_abnormal ? 1 : 0, item.notes, req.user.id, item.id]
+        `UPDATE lab_order_items SET result_value=?, result_unit=?, reference_range=?, is_abnormal=?, result_flag=?, notes=?, technician_id=?, result_date=datetime('now') WHERE id=?`,
+        [item.result_value, item.result_unit, item.reference_range, is_abnormal ? 1 : 0, flag, item.notes, req.user.id, item.id]
       );
     }
     // Update order status
