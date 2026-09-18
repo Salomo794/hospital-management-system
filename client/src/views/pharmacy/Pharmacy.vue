@@ -4,6 +4,7 @@
       <div class="tabs-inline">
         <button :class="{ active: view === 'medicines' }" @click="view = 'medicines'; loadMedicines()">Medicines</button>
         <button :class="{ active: view === 'alerts' }" @click="view = 'alerts'; loadAlerts()">Stock Alerts</button>
+        <button :class="{ active: view === 'reorder' }" @click="view = 'reorder'; loadReorder()">Smart Reorder</button>
       </div>
       <div class="header-actions">
         <button class="btn btn-outline" @click="openDispenseModal" v-if="view === 'medicines'">Dispense</button>
@@ -93,6 +94,65 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <div v-if="view === 'reorder'">
+      <div v-if="loadingReorder" class="loading-container">
+        <div class="spinner"></div>
+        <span class="loading-text">Analyzing stock levels...</span>
+      </div>
+      <template v-else>
+        <div class="reorder-summary-bar" v-if="reorderData.summary">
+          <div class="summary-stat urgent">
+            <strong>{{ (reorderData.summary.critical || 0) + (reorderData.summary.urgent || 0) }}</strong>
+            <span>Need Attention</span>
+          </div>
+          <div class="summary-stat warning">
+            <strong>{{ reorderData.summary.warning || 0 }}</strong>
+            <span>Run Low Soon</span>
+          </div>
+          <div class="summary-stat">
+            <strong>{{ reorderData.suggestions?.length || 0 }}</strong>
+            <span>Total Tracked</span>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 16px;">
+          <div class="card-header">
+            <h3>Reorder Recommendations</h3>
+            <span class="text-muted">Based on 30-day consumption data</span>
+          </div>
+          <div v-if="reorderData.suggestions && reorderData.suggestions.length">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Medicine</th>
+                  <th>Current Stock</th>
+                  <th>Daily Usage</th>
+                  <th>Days Left</th>
+                  <th>Suggested Order</th>
+                  <th>Urgency</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="s in reorderData.suggestions" :key="s.medicine_id">
+                  <td><strong>{{ s.name }}</strong><br><span class="text-muted">{{ s.category || '' }}</span></td>
+                  <td>{{ s.stock_quantity }} {{ s.unit }}</td>
+                  <td>~{{ s.daily_consumption }} /day</td>
+                  <td>
+                    <span :class="daysLeftClass(s.days_left)">{{ s.days_left == null ? '∞' : s.days_left + 'd' }}</span>
+                  </td>
+                  <td>{{ s.suggested_order_quantity || '—' }} {{ s.unit }}</td>
+                  <td><span class="badge" :class="'badge-' + urgencyBadge(s.urgency)">{{ s.urgency }}</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="empty-state">
+            <p>No reorder data available yet — dispense some medicines first.</p>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- Add Medicine Modal -->

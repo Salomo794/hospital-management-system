@@ -22,6 +22,37 @@
       </div>
     </div>
 
+    <div class="card triage-panel" v-if="queue.length">
+      <div class="card-header">
+        <h3>Priority Triage Queue <span class="pill" v-if="stats.critical || 0">({{ stats.critical }} critical)</span></h3>
+        <button class="btn btn-sm btn-secondary" @click="loadQueue">Refresh</button>
+      </div>
+      <div v-if="queueLoading" class="loading-container">
+        <div class="spinner"></div>
+      </div>
+      <ul v-else class="queue-list">
+        <li v-for="q in queue" :key="q.id" class="queue-item">
+          <div class="queue-rank" :class="'rank-' + q.triage_severity">{{ q.queue_position }}</div>
+          <div class="queue-body">
+            <div class="queue-top">
+              <span class="badge" :class="'badge-' + getStatusColor(q.triage_severity)">{{ q.triage_severity }}</span>
+              <strong>{{ q.patient_first_name }} {{ q.patient_last_name }}</strong>
+              <span class="queue-wait" :title="formatDateTime(q.admission_date)">
+                ⏱ {{ formatWait(q.wait_hours) }}
+              </span>
+            </div>
+            <div class="queue-complaint" v-if="q.chief_complaint">{{ q.chief_complaint }}</div>
+            <div class="priority-bar">
+              <div class="priority-fill" :style="{ width: (q.priority || q.triage_score || 0) + '%', background: priorityColor(q.triage_severity) }"></div>
+            </div>
+            <div class="queue-meta">
+              Score {{ q.triage_score }} · {{ q.ward || 'Unassigned' }} · <span class="text-muted">{{ q.mrn }}</span>
+            </div>
+          </div>
+        </li>
+      </ul>
+    </div>
+
     <div class="card">
       <div class="card-header">
         <h3>Admissions ({{ total }})</h3>
@@ -39,6 +70,7 @@
               <th>Admission #</th>
               <th>Patient</th>
               <th>Doctor</th>
+              <th>Triage</th>
               <th>Ward / Bed</th>
               <th>Admitted</th>
               <th>Status</th>
@@ -50,6 +82,12 @@
               <td class="text-mono">{{ a.admission_number }}</td>
               <td>{{ a.patient_first_name }} {{ a.patient_last_name }}</td>
               <td>Dr. {{ a.doctor_first_name }} {{ a.doctor_last_name }}</td>
+              <td>
+                <span class="badge" :class="'badge-' + getStatusColor(a.triage_severity || 'low')">
+                  {{ a.triage_severity || 'low' }}
+                </span>
+                <span class="triage-score" v-if="a.triage_score">({{ a.triage_score }})</span>
+              </td>
               <td>{{ a.ward || '-' }} {{ a.bed_number ? '/ ' + a.bed_number : '' }}</td>
               <td>{{ formatDateTime(a.admission_date) }}</td>
               <td><span class="badge" :class="'badge-' + getStatusColor(a.status)">{{ a.status }}</span></td>
@@ -124,6 +162,31 @@
               </div>
             </div>
             <div class="form-group">
+              <label>Chief Complaint</label>
+              <textarea v-model="form.chief_complaint" rows="2" placeholder="e.g. Severe chest pain, difficulty breathing"></textarea>
+            </div>
+            <div class="form-row">
+              <div class="form-group" style="flex: 1.4;">
+                <label>Triage Severity</label>
+                <select v-model="form.triage_severity">
+                  <option value="">Auto-classify</option>
+                  <option value="critical">Critical</option>
+                  <option value="high">High</option>
+                  <option value="moderate">Moderate</option>
+                  <option value="low">Low</option>
+                </select>
+              </div>
+              <div class="form-group triage-score-box" style="flex: 1;">
+                <label>Est. Triage Score</label>
+                <div class="triage-score-display">
+                  <span class="badge" :class="'badge-' + getStatusColor(triagePreview.severity)">{{ triagePreview.severity }}</span>
+                  <strong>{{ triagePreview.score }}</strong>
+                  <span class="text-muted" v-if="!form.chief_complaint">—</span>
+                </div>
+                <small class="text-muted">Auto-computed from complaint</small>
+              </div>
+            </div>
+            <div class="form-group">
               <label>Diagnosis</label>
               <textarea v-model="form.diagnosis" rows="2"></textarea>
             </div>
@@ -188,6 +251,8 @@ export default {
 
     const admissions = ref([])
     const doctors = ref([])
+    const queue = ref([])
+    const queueLoading = ref(false)
     const stats = ref({})
     const total = ref(0)
     const page = ref(1)
@@ -207,8 +272,56 @@ export default {
       { label: 'Admitted', value: stats.value.admitted || 0, color: '#2563eb' },
       { label: 'Transferred', value: stats.value.transferred || 0, color: '#d97706' },
       { label: 'Discharged', value: stats.value.discharged || 0, color: '#059669' },
+      { label: 'Critical', value: stats.value.critical || 0, color: '#ef4444' },
       { label: 'Occupied Beds', value: stats.value.occupiedBeds || 0, color: '#0d9488' }
     ])
+
+    const PRIORITY_COLORS = {
+      critical: '#ef4444',
+      high: '#d97706',
+      moderate: '#3b82f6',
+      low: '#059669'
+    }
+
+    const SEVERITY_BUCKETS = [
+      { level: 'critical', score: 45, words: ['cardiac arrest', 'respiratory arrest', 'unconscious', 'unresponsive', 'seizure', 'stroke', 'anaphylaxis', 'hemorrhage', 'haemorrhage', 'severe bleeding', 'overdose', 'ventilated', 'intubated', 'status epilepticus'] },
+      { level: 'high', score: 22, words: ['chest pain', 'shortness of breath', 'breathing difficulty', 'difficulty breathing', 'palpitations', 'dizziness', 'head injury', 'fracture', 'high fever', 'severe headache', 'hypertensive crisis', 'stroke-like', 'slurred speech', 'atrial fibrillation', 'heart failure', 'copd', 'acute asthma', 'severe allergic', 'blood pressure'] },
+      { level: 'moderate', score: 10, words: ['wheezing', 'asthma', 'pneumonia', 'infection', 'dehydration', 'vomiting', 'diarrhea', 'abdominal pain', 'burn', 'wound', 'fever', 'cough', 'sore throat', 'migraine', 'kidney stone', 'uti', 'low blood sugar', 'hypoglycemia'] },
+      { level: 'low', score: 4, words: ['checkup', 'follow-up', 'routine', 'review', 'refill', 'screening', 'blood work', 'pre-operative'] }
+    ]
+
+    const triagePreview = computed(() => {
+      const text = (form.value.chief_complaint || '')
+      if (!text.trim()) {
+        return { score: 0, severity: form.value.triage_severity || 'low' }
+      }
+      const lower = text.toLowerCase()
+      let score = 0
+      let hasCritical = false
+      for (const bucket of SEVERITY_BUCKETS) {
+        for (const word of bucket.words) {
+          if (lower.includes(word.toLowerCase())) {
+            score += bucket.score
+            if (bucket.level === 'critical') hasCritical = true
+          }
+        }
+      }
+      if (hasCritical) score = Math.max(score, 85)
+      const floor = { critical: 65, high: 35, moderate: 15, low: 0 }
+      let severity = score >= 65 ? 'critical' : score >= 35 ? 'high' : score >= 15 ? 'moderate' : 'low'
+      if (form.value.triage_severity) severity = form.value.triage_severity
+      if (score < floor[severity]) score = floor[severity]
+      return { score: Math.min(100, score), severity }
+    })
+
+    const formatWait = (hours) => {
+      if (hours === null || hours === undefined) return '-'
+      if (hours < 1) return `${Math.round(hours * 60)}m`
+      if (hours < 24) return `${Math.round(hours * 10) / 10}h`
+      return `${Math.round(hours / 24)}d`
+    }
+
+    const priorityColor = (severity) => PRIORITY_COLORS[severity] || '#94a3b8'
 
     const defaultForm = () => ({
       id: null,
@@ -217,6 +330,9 @@ export default {
       doctor_id: '',
       ward: '',
       bed_number: '',
+      chief_complaint: '',
+      triage_severity: '',
+      triage_score: '',
       diagnosis: '',
       treatment_plan: '',
       notes: ''
@@ -244,6 +360,16 @@ export default {
         const { data } = await axios.get('/api/admissions/stats')
         stats.value = data
       } catch (e) { /* silent */ }
+    }
+
+    const loadQueue = async () => {
+      queueLoading.value = true
+      try {
+        const { data } = await axios.get('/api/admissions/queue')
+        queue.value = data.queue || []
+      } catch (e) { /* silent */ } finally {
+        queueLoading.value = false
+      }
     }
 
     const loadDoctors = async () => {
@@ -288,6 +414,9 @@ export default {
           doctor_id: admission.doctor_id,
           ward: admission.ward,
           bed_number: admission.bed_number,
+          chief_complaint: admission.chief_complaint || '',
+          triage_severity: admission.triage_severity || '',
+          triage_score: admission.triage_score || '',
           diagnosis: admission.diagnosis,
           treatment_plan: admission.treatment_plan,
           notes: admission.notes
@@ -314,6 +443,7 @@ export default {
         showModal.value = false
         loadAdmissions()
         loadStats()
+        loadQueue()
       } catch (e) {
         formError.value = e.response?.data?.message || 'Error saving admission'
         toast.error(formError.value)
@@ -335,6 +465,7 @@ export default {
         showTransferModal.value = false
         loadAdmissions()
         loadStats()
+        loadQueue()
       } catch (e) {
         toast.error('Error transferring patient')
       }
@@ -351,6 +482,7 @@ export default {
           toast.success('Patient discharged')
           loadAdmissions()
           loadStats()
+          loadQueue()
         } catch (e) {
           toast.error('Error discharging patient')
         }
@@ -360,13 +492,15 @@ export default {
     onMounted(() => {
       loadAdmissions()
       loadStats()
+      loadQueue()
       loadDoctors()
     })
 
     return {
-      admissions, doctors, stats, statChips, total, page, limit, statusFilter, loading,
+      admissions, doctors, queue, queueLoading, stats, statChips, total, page, limit, statusFilter, loading,
       showModal, showTransferModal, saving, formError, patientSearch, patientResults, transferForm, form,
-      loadAdmissions, searchPatients, selectPatient, clearPatient, openModal,
+      triagePreview, formatWait, priorityColor,
+      loadAdmissions, loadQueue, searchPatients, selectPatient, clearPatient, openModal,
       saveAdmission, openTransferModal, transfer, discharge,
       formatDateTime, getStatusColor
     }
@@ -413,6 +547,26 @@ export default {
 .btn-clear { background: none; border: none; font-size: 18px; cursor: pointer; color: #94a3b8; padding: 0 4px; }
 .btn-clear:hover { color: #ef4444; }
 .text-muted { color: #94a3b8; }
+
+.triage-panel { margin-bottom: 20px; }
+.pill { display: inline-block; margin-left: 6px; padding: 2px 10px; background: #fee2e2; color: #ef4444; border-radius: 20px; font-size: 12px; font-weight: 600; vertical-align: middle; }
+.queue-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.queue-item { display: flex; gap: 12px; align-items: stretch; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; }
+.queue-rank { display: flex; align-items: center; justify-content: center; min-width: 34px; height: 34px; border-radius: 8px; font-weight: 700; color: white; font-size: 14px; }
+.rank-critical { background: #ef4444; }
+.rank-high { background: #d97706; }
+.rank-moderate { background: #3b82f6; }
+.rank-low { background: #64748b; }
+.queue-body { flex: 1; min-width: 0; }
+.queue-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.queue-wait { font-size: 12px; color: #64748b; white-space: nowrap; }
+.queue-complaint { margin-top: 4px; color: #475569; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue-meta { margin-top: 6px; font-size: 12px; color: #64748b; display: flex; gap: 8px; }
+.priority-bar { height: 5px; background: #e2e8f0; border-radius: 10px; margin-top: 6px; overflow: hidden; }
+.priority-fill { height: 100%; border-radius: 10px; transition: width 0.4s ease; }
+.triage-score { margin-left: 6px; font-size: 12px; color: #64748b; }
+.triage-score-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; }
+.triage-score-display { display: flex; align-items: center; gap: 10px; font-size: 18px; }
 
 @media (max-width: 768px) {
   .page-header { flex-direction: column; align-items: stretch; }

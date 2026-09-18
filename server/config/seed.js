@@ -278,34 +278,30 @@ async function seed() {
         { name: 'Ibuprofen 400mg', daily: 16 },
         { name: 'Acetaminophen 500mg', daily: 20 },
       ];
-      const [medRows] = await conn.query('SELECT id, name FROM medicines');
+      const [medRows] = await conn.query('SELECT id, name, stock_quantity, min_stock_level FROM medicines');
       const medMap = {};
-      medRows.forEach(m => { medMap[m.name] = m.id; });
-      const medById = {};
-      medRows.forEach(m => { medById[m.id] = m; });
+      medRows.forEach(m => { medMap[m.name] = { id: m.id, stock: m.stock_quantity, min: m.min_stock_level }; });
       const pharmUser = userIds[5] || userIds[0];
-      const usedRefs = [];
       let txNo = 1;
       for (const m of meds) {
-        const medId = medMap[m.name];
-        if (!medId) continue;
+        const med = medMap[m.name];
+        if (!med) continue;
         for (let day = 1; day <= 30; day++) {
           const qty = Math.max(m.daily - (day % 4), Math.round(m.daily * 0.7));
           await conn.query(
             `INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, reference_number, notes, performed_by, created_at)
              VALUES (?, 'dispense', ?, ?, 'Daily dispensing', ?, datetime('now', ?))`,
-            [medId, qty, `RX-DS-${String(txNo++).padStart(4, '0')}`, pharmUser, `-${day} days`]
+            [med.id, qty, `RX-DS-${String(txNo++).padStart(4, '0')}`, pharmUser, `-${day} days`]
           );
         }
         // Stress a couple of fast movers right to the edge of their min stock.
         if (m.name === 'Metformin 500mg' || m.name === 'Amlodipine 5mg') {
-          const [stockRow] = await conn.query('SELECT stock_quantity FROM medicines WHERE id = ?', [medId]);
-          const extra = Math.max(0, stockRow[0].stock_quantity - m.min_stock_level + 5);
-          await conn.query('UPDATE medicines SET stock_quantity = ? WHERE id = ?', [stockRow[0].stock_quantity - extra, medId]);
+          const extra = Math.max(0, med.stock - med.min + 5);
+          await conn.query('UPDATE medicines SET stock_quantity = ? WHERE id = ?', [med.stock - extra, med.id]);
           await conn.query(
             `INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, reference_number, notes, performed_by, created_at)
              VALUES (?, 'dispense', ?, ?, 'Bulk dispensing', ?, datetime('now', '-1 day'))`,
-            [medId, extra, `RX-BULK-${medId}`, pharmUser]
+            [med.id, extra, `RX-BULK-${med.id}`, pharmUser]
           );
         }
       }

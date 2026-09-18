@@ -86,6 +86,35 @@
           </div>
         </div>
 
+        <div class="card chart-card forecast-card">
+          <div class="card-header">
+            <h3>Patient Load Forecast (Next 7 Days)</h3>
+            <span v-if="forecast" class="trend-badge" :class="'trend-' + forecast.trend">{{ forecastTrend }}</span>
+          </div>
+          <div class="card-body">
+            <Line v-if="forecast && forecastChartData.labels.length" :data="forecastChartData" :options="forecastChartOptions" style="max-height: 230px;" />
+            <div v-else class="empty-state">
+              <span class="empty-icon">&#128200;</span>
+              <h3>No Forecast Data</h3>
+              <p>Predictive workload forecast will appear here.</p>
+            </div>
+            <div v-if="forecast" class="forecast-summary">
+              <div class="forecast-stat">
+                <strong>{{ forecast.total_projected_visits }}</strong>
+                <span>Projected visits</span>
+              </div>
+              <div class="forecast-stat">
+                <strong>{{ forecast.total_projected_revenue ? formatCurrency(forecast.total_projected_revenue) : '—' }}</strong>
+                <span>Projected revenue</span>
+              </div>
+              <div class="forecast-stat">
+                <strong>{{ forecast.percent_change != null ? forecast.percent_change + '%' : '—' }}</strong>
+                <span>vs prior week</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="card chart-card">
           <div class="card-header">
             <h3>Appointment Status</h3>
@@ -143,14 +172,14 @@ import { ref, onMounted, computed } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { formatDate, formatCurrency, formatTime, getStatusColor } from '../../utils/helpers'
-import { Bar, Doughnut } from 'vue-chartjs'
-import { Chart as ChartJS, Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, ArcElement } from 'chart.js'
+import { Bar, Doughnut, Line } from 'vue-chartjs'
+import { Chart as ChartJS, Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, ArcElement, LineElement, PointElement, Filler } from 'chart.js'
 
-ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, ArcElement)
+ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, ArcElement, LineElement, PointElement, Filler)
 
 export default {
   name: 'Dashboard',
-  components: { Bar, Doughnut },
+  components: { Bar, Doughnut, Line },
   setup() {
     const toast = useToast()
     const stats = ref({})
@@ -198,6 +227,42 @@ export default {
       maintainAspectRatio: false
     }
 
+    const forecast = ref(null)
+    const forecastLoading = ref(false)
+
+    const forecastChartData = computed(() => {
+      if (!forecast.value || !forecast.value.forecast) return { labels: [], datasets: [] }
+      return {
+        labels: forecast.value.forecast.map(d => formatShortDate(d.date)),
+        datasets: [{
+          label: 'Projected visits',
+          data: forecast.value.forecast.map(d => d.visits),
+          borderColor: '#0d9488',
+          backgroundColor: 'rgba(13, 148, 136, 0.12)',
+          fill: true,
+          tension: 0.35,
+          pointBackgroundColor: '#0d9488'
+        }]
+      }
+    })
+
+    const forecastChartOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+    }
+
+    const forecastTrend = computed(() => {
+      if (!forecast.value) return ''
+      const t = forecast.value.trend
+      if (t === 'up') return '🡡 Trending up'
+      if (t === 'down') return '🡣 Trending down'
+      return '— Stable'
+    })
+
+    const formatShortDate = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' }).replace(',', '')
+
     const statsCards = computed(() => [
       { label: 'Total Patients', value: stats.value.totalPatients || 0, rawValue: stats.value.totalPatients || 0, icon: '👥', color: '#0d9488' },
       { label: 'Active Doctors', value: stats.value.totalDoctors || 0, rawValue: stats.value.totalDoctors || 0, icon: '👨‍⚕️', color: '#3b82f6' },
@@ -219,6 +284,8 @@ export default {
         recentAppointments.value = data.recentAppointments
         recentPatients.value = data.recentPatients
         weeklyStats.value = data.weeklyStats || []
+        const fc = await axios.get('/api/reports/forecast', { params: { horizon: 7 } })
+        forecast.value = fc.data
       } catch (e) {
         toast.error('Failed to load dashboard data')
       } finally {
@@ -226,7 +293,7 @@ export default {
       }
     })
 
-    return { statsCards, recentAppointments, recentPatients, weeklyStats, maxWeekly, loading, weeklyChartData, weeklyChartOptions, statusChartData, statusChartOptions, formatDate, formatCurrency, formatTime, formatDay, getStatusColor }
+    return { statsCards, recentAppointments, recentPatients, weeklyStats, maxWeekly, loading, weeklyChartData, weeklyChartOptions, statusChartData, statusChartOptions, forecast, forecastLoading, forecastChartData, forecastChartOptions, forecastTrend, formatDate, formatCurrency, formatTime, formatDay, getStatusColor }
   }
 }
 </script>
@@ -309,6 +376,15 @@ export default {
 }
 .bar-value { position: absolute; top: -18px; font-size: 11px; font-weight: 600; color: #1e293b; }
 .bar-label { font-size: 11px; color: #94a3b8; }
+
+.trend-badge { font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 20px; }
+.trend-up { background: #ecfdf5; color: #059669; }
+.trend-down { background: #fef2f2; color: #dc2626; }
+.trend-stable { background: #f8fafc; color: #64748b; }
+.forecast-summary { display: flex; gap: 20px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #f1f5f9; }
+.forecast-stat { display: flex; flex-direction: column; }
+.forecast-stat strong { font-size: 18px; color: #1e293b; }
+.forecast-stat span { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.3px; }
 
 .quick-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .action-btn {
