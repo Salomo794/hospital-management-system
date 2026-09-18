@@ -105,7 +105,8 @@ router.get('/orders', authenticate, async (req, res) => {
     const offset = (page - 1) * limit;
     let query = `SELECT lo.*, p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn,
       u.first_name as doctor_first_name, u.last_name as doctor_last_name,
-      (SELECT COUNT(*) FROM lab_order_items flagct WHERE flagct.lab_order_id = lo.id AND flagct.is_abnormal = 1) as abnormal_count,
+      (SELECT COUNT(*) FROM lab_order_items flagct WHERE flagct.lab_order_id = lo.id AND flagct.result_flag IN ('H','L','CRITICAL_H','CRITICAL_L')) as abnormal_count,
+      (SELECT COUNT(*) FROM lab_order_items flagcc WHERE flagcc.lab_order_id = lo.id AND flagcc.result_flag IN ('CRITICAL_H','CRITICAL_L')) as critical_count,
       GROUP_CONCAT(lt.name, ', ') as test_names
       FROM lab_orders lo
       JOIN patients p ON lo.patient_id = p.id

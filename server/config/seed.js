@@ -343,6 +343,10 @@ async function seed() {
     if (existingLabOrders[0].count === 0) {
       const [labTestRows] = await conn.query('SELECT id FROM lab_tests ORDER BY id LIMIT 5');
       const statuses = ['ordered', 'in_progress', 'completed', 'completed', 'ordered'];
+      const ranges = ['4.5 - 11.0', '40 - 100', '70 - 99', '0.6 - 1.2', '3.5 - 5.0'];
+      const results = ['', '', '210', '1.6', ''];
+      const resultUnits = ['x10^3/uL', 'mg/dL', 'mg/dL', 'mg/dL', 'mEq/L'];
+      const resultFlags = [null, null, 'CRITICAL_H', 'H', null];
       for (let i = 0; i < 5; i++) {
         const uuid = uuidv4();
         const today = new Date().toISOString().split('T')[0].replace(/-/g, '');
@@ -355,9 +359,9 @@ async function seed() {
            i === 0 ? 'Fasting required' : null]
         );
         await conn.query(
-          `INSERT INTO lab_order_items (lab_order_id, lab_test_id, reference_range, result_unit)
-           VALUES (?, ?, ?, ?)`,
-          [result.insertId, labTestRows[i].id, 'See reference range', '']
+          `INSERT INTO lab_order_items (lab_order_id, lab_test_id, reference_range, result_unit, result_value, result_flag)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [result.insertId, labTestRows[i].id, ranges[i], resultUnits[i], results[i] || null, resultFlags[i]]
         );
       }
     }

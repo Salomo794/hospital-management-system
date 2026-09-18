@@ -16,7 +16,7 @@ function todayKey() {
 
 async function alreadySent(userId, type, ref) {
   const [rows] = await pool.query(
-    'SELECT id FROM notifications WHERE user_id = ? AND type = ? AND message LIKE ? AND created_at >= date("now") LIMIT 1',
+    'SELECT id FROM notifications WHERE user_id = ? AND type = ? AND message LIKE ? AND created_at >= date(\'now\') LIMIT 1',
     [userId, type, `%${ref}%`]
   );
   return rows.length > 0;

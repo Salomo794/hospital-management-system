@@ -289,6 +289,8 @@ export default {
     const showAddModal = ref(false)
     const lowStock = ref([])
     const expired = ref([])
+    const reorderData = ref({ suggestions: [], summary: {} })
+    const loadingReorder = ref(false)
     const loadingMedicines = ref(false)
     const loadingAlerts = ref(false)
     const savingMedicine = ref(false)
@@ -331,6 +333,32 @@ export default {
       } finally {
         loadingAlerts.value = false
       }
+    }
+
+    const loadReorder = async () => {
+      loadingReorder.value = true
+      try {
+        const { data } = await axios.get('/api/pharmacy/reorder-suggestions')
+        const order = { critical: 0, urgent: 1, warning: 2, healthy: 3, inactive: 4 }
+        const suggestions = (data.suggestions || []).slice().sort(
+          (a, b) => (order[a.urgency] ?? 9) - (order[b.urgency] ?? 9)
+        )
+        reorderData.value = { ...data, suggestions }
+      } catch (e) {
+        toast.error('Failed to load reorder suggestions')
+      } finally {
+        loadingReorder.value = false
+      }
+    }
+
+    const urgencyBadge = (u) => ({ critical: 'danger', urgent: 'danger', warning: 'warning', healthy: 'success', inactive: 'gray' }[u] || 'info')
+
+    const daysLeftClass = (d) => {
+      if (d == null) return 'days-ok'
+      if (d <= 3) return 'days-critical'
+      if (d <= 7) return 'days-urgent'
+      if (d <= 14) return 'days-warning'
+      return 'days-ok'
     }
 
     const addMedicine = async () => {
@@ -409,7 +437,9 @@ export default {
     return {
       view, medicines, search, categoryFilter, lowStockOnly, showAddModal, lowStock, expired, medForm,
       loadingMedicines, loadingAlerts, savingMedicine,
+      reorderData, loadingReorder,
       loadMedicines, debouncedLoadMedicines, loadAlerts, addMedicine, formatDate, formatCurrency,
+      loadReorder, urgencyBadge, daysLeftClass,
       showDispenseModal, dispensing, loadingPrescriptions, prescriptionSearch,
       filteredPrescriptionItems, selectedPrescriptionItem, dispenseForm,
       openDispenseModal, closeDispenseModal, filterPrescriptionItems, selectPrescriptionItem,
@@ -435,6 +465,21 @@ export default {
 .alert-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
 .alert-info { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
 .text-danger { color: #ef4444; }
+.text-muted { color: #94a3b8; }
+.reorder-summary-bar { display: flex; gap: 16px; flex-wrap: wrap; }
+.summary-stat {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: white; border-radius: 12px; padding: 16px 28px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08); min-width: 120px;
+}
+.summary-stat strong { font-size: 24px; color: #1e293b; }
+.summary-stat span { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.3px; }
+.summary-stat.urgent strong { color: #ef4444; }
+.summary-stat.warning strong { color: #d97706; }
+.days-critical { color: #ef4444; font-weight: 700; }
+.days-urgent { color: #d97706; font-weight: 600; }
+.days-warning { color: #b45309; }
+.days-ok { color: #059669; }
 .modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #64748b; }
 
 .loading-container { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 40px 20px; }
