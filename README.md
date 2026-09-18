@@ -10,11 +10,14 @@ A modern Hospital Management System with a Vue 3 frontend and a Node.js/Express 
 - **Appointments** — scheduling with doctor availability slots
 - **Electronic Medical Records (EMR)** — chart notes, diagnoses, treatment plans
 - **Pharmacy** — medicine inventory, low-stock alerts, prescription dispensing
-- **Laboratory** — test catalog, lab orders, result entry
+- **Pharmacy Smart Reorder** — 30-day consumption analysis predicts stock-out dates and suggests reorder quantities (critical / urgent / warning)
+- **Laboratory** — test catalog, lab orders, result entry with automatic abnormal / critical value flags
+- **Admissions Triage** — severity-ranked priority queue with auto-scored chief complaints (critical / high / moderate / low)
+- **Predictive Forecast** — dashboard forecast of patient load & revenue for the next 7 days
 - **Billing** — bills, payments, partial/paid tracking
 - **Reports** — dashboard analytics and financial reporting
 - **Notifications** — in-app alerts
-- **AI Assistant** — built-in chat assistant for clinical queries
+- **AI Assistant** — built-in chat assistant for clinical queries plus forecast and stock-alert intents
 
 ## Tech Stack
 
@@ -101,10 +104,11 @@ The API is served under `/api` (port 5000). Main groups:
 - `/api/doctors` — doctor profiles
 - `/api/appointments` — appointment scheduling
 - `/api/emr` — medical records & prescriptions
-- `/api/pharmacy` — medicines, dispensing, inventory
+- `/api/pharmacy` — medicines, dispensing, inventory, reorder suggestions (`/reorder-suggestions`)
 - `/api/laboratory` — lab tests and orders
+- `/api/admissions` — admissions and triage queue (`/queue`)
 - `/api/billing` — bills and payments
-- `/api/reports` — analytics and financial reports
+- `/api/reports` — analytics, financial reports, predictive forecast (`/forecast`)
 - `/api/notifications` — user notifications
 - `/api/ai` — AI assistant chat
 
