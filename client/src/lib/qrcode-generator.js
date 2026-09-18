@@ -2291,6 +2291,11 @@ var qrcode = function() {
       define([], factory);
   } else if (typeof exports === 'object') {
       module.exports = factory();
+  } else {
+      var root = (typeof globalThis === 'object') ? globalThis
+               : (typeof self === 'object') ? self
+               : (typeof window === 'object') ? window : (typeof global === 'object' ? global : {});
+      root.qrcode = factory();
   }
 }(function () {
     return qrcode;

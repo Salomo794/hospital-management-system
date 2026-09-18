@@ -16,6 +16,10 @@
               <button @click="sendMessage('Show pending tasks')">Pending Tasks</button>
               <button @click="sendMessage('Show revenue this month')">Monthly Revenue</button>
               <button @click="sendMessage('find patient Smith')">Find Patient</button>
+              <button @click="sendMessage('Ward status and bed occupancy')">Ward Status</button>
+              <button @click="sendMessage('interaction between Warfarin and Aspirin')">Drug Interaction</button>
+              <button @click="sendMessage('allergies of Maria Garcia')">Patient Allergies</button>
+              <button @click="sendMessage('Check low stock medicines')">Low Stock</button>
             </div>
           </div>
         </div>

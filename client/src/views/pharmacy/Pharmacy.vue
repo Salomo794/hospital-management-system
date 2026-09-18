@@ -4,6 +4,7 @@
       <div class="tabs-inline">
         <button :class="{ active: view === 'medicines' }" @click="view = 'medicines'; loadMedicines()">Medicines</button>
         <button :class="{ active: view === 'alerts' }" @click="view = 'alerts'; loadAlerts()">Stock Alerts</button>
+        <button :class="{ active: view === 'interactions' }" @click="view = 'interactions'; loadInteractionView()">Interactions</button>
       </div>
       <div class="header-actions">
         <button class="btn btn-outline" @click="openDispenseModal" v-if="view === 'medicines'">Dispense</button>
@@ -95,7 +96,63 @@
       </div>
     </div>
 
-    <!-- Add Medicine Modal -->
+    <!-- Drug Interaction Checker -->
+    <div v-if="view === 'interactions'">
+      <div v-if="loadingInteractions" class="loading-container">
+        <div class="spinner"></div>
+        <span class="loading-text">Loading interaction data...</span>
+      </div>
+      <template v-else>
+        <div class="interaction-summary">
+          <div class="summary-chip" v-for="s in severityKeys" :key="s" :class="'chip-' + s">
+            <span class="chip-count">{{ interactionSummary.summary[s] || 0 }}</span>
+            <span class="chip-label">{{ severityLabel(s) }}</span>
+          </div>
+          <div class="summary-total"><strong>{{ interactionSummary.total || 0 }}</strong> known interactions in formulary</div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3>Check Interactions</h3>
+            <button class="btn btn-primary btn-sm" :disabled="selectedIds.length < 2 || checkingInteractions" @click="checkInteractions">
+              <span v-if="checkingInteractions" class="spinner-sm"></span>
+              {{ checkingInteractions ? 'Checking...' : 'Check Interactions' }}
+            </button>
+          </div>
+          <div class="card-body">
+            <p class="interaction-hint">Select at least two medicines to screen for potential drug-drug interactions.</p>
+            <div class="interaction-picker">
+              <label class="picker-item" v-for="m in medicines" :key="m.id">
+                <input type="checkbox" :value="m.id" v-model="selectedIds" />
+                <span>{{ m.name }}</span>
+                <span class="picker-generic" v-if="m.generic_name">{{ m.generic_name }}</span>
+              </label>
+              <div v-if="!medicines.length" class="empty-state"><p>No medicines available to check.</p></div>
+            </div>
+
+            <div v-if="interactionResults.length" class="interaction-results">
+              <div class="result-group" v-for="grp in groupedResults" :key="grp.severity">
+                <h4 :class="'sev-' + grp.severity">{{ severityLabel(grp.severity) }} ({{ grp.items.length }})</h4>
+                <div class="interaction-item" v-for="it in grp.items" :key="it.id">
+                  <div class="interaction-pair">
+                    <span class="pair-med">{{ it.medicine_a }}</span>
+                    <span class="pair-sep">&#8646;</span>
+                    <span class="pair-med">{{ it.medicine_b }}</span>
+                    <span class="badge" :class="'badge-' + sevBadge(it.severity)">{{ it.severity }}</span>
+                  </div>
+                  <div class="interaction-desc">{{ it.description }}</div>
+                  <div class="interaction-mgmt" v-if="it.clinical_management"><strong>Management:</strong> {{ it.clinical_management }}</div>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="checkedIds.length >= 2" class="empty-state interaction-clear">
+              <div class="empty-icon">&#9989;</div>
+              <p>No known interactions between the selected medicines.</p>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
     <div class="modal-overlay" v-if="showAddModal" @click.self="showAddModal = false">
       <div class="modal">
         <div class="modal-header"><h3>Add New Medicine</h3><button class="modal-close" @click="showAddModal = false">&times;</button></div>
@@ -244,7 +301,7 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { formatDate, formatCurrency } from '../../utils/helpers'
@@ -275,6 +332,54 @@ export default {
     const selectedPrescriptionItem = ref(null)
     const dispenseForm = ref({ prescription_item_id: null, quantity: 1 })
     const safetyWarnings = ref([])
+
+    const loadingInteractions = ref(false)
+    const interactionSummary = ref({ summary: { mild: 0, moderate: 0, severe: 0, contraindicated: 0 }, total: 0 })
+    const selectedIds = ref([])
+    const checkingInteractions = ref(false)
+    const interactionResults = ref([])
+    const checkedIds = ref([])
+    const severityKeys = ['contraindicated', 'severe', 'moderate', 'mild']
+    const severityLabel = (s) => s.charAt(0).toUpperCase() + s.slice(1)
+    const sevBadge = (s) => s === 'contraindicated' || s === 'severe' ? 'danger' : s === 'moderate' ? 'warning' : 'info'
+
+    const groupedResults = computed(() =>
+      severityKeys
+        .map(severity => ({ severity, items: interactionResults.value.filter(r => r.severity === severity) }))
+        .filter(g => g.items.length)
+    )
+
+    const loadInteractionView = async () => {
+      loadingInteractions.value = true
+      interactionResults.value = []
+      checkedIds.value = []
+      try {
+        const [medsRes, summaryRes] = await Promise.all([
+          axios.get('/api/pharmacy/medicines', { params: { limit: 200 } }),
+          axios.get('/api/pharmacy/interactions/summary')
+        ])
+        medicines.value = medsRes.data.medicines || []
+        interactionSummary.value = summaryRes.data
+      } catch (e) {
+        toast.error('Failed to load interaction data')
+      } finally {
+        loadingInteractions.value = false
+      }
+    }
+
+    const checkInteractions = async () => {
+      checkingInteractions.value = true
+      interactionResults.value = []
+      try {
+        const { data } = await axios.post('/api/pharmacy/interactions/check', { medicineIds: selectedIds.value })
+        interactionResults.value = data.interactions
+        checkedIds.value = data.checkedIds
+      } catch (e) {
+        toast.error(e.response?.data?.message || 'Error checking interactions')
+      } finally {
+        checkingInteractions.value = false
+      }
+    }
 
     const noAllergy = (text) => {
       if (!text) return true
@@ -405,7 +510,10 @@ export default {
       filteredPrescriptionItems, selectedPrescriptionItem, dispenseForm,
       safetyWarnings, noAllergy,
       openDispenseModal, closeDispenseModal, filterPrescriptionItems, selectPrescriptionItem,
-      dispenseMedicineAction
+      dispenseMedicineAction,
+      loadingInteractions, interactionSummary, selectedIds, checkingInteractions, interactionResults,
+      checkedIds, severityKeys, groupedResults, severityLabel, sevBadge,
+      loadInteractionView, checkInteractions
     }
   }
 }
@@ -451,5 +559,34 @@ export default {
 .selected-rx-banner { background: #f0fdfa; padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #99f6e4; font-size: 14px; }
 .field-hint { display: block; margin-top: 4px; font-size: 12px; color: #64748b; }
 
-@media (max-width: 768px) { .alerts-grid { grid-template-columns: 1fr; } }
+.interaction-summary { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.summary-chip { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+.chip-contraindicated { background: #7f1d1d; color: #fff; }
+.chip-severe { background: #fef2f2; color: #dc2626; }
+.chip-moderate { background: #fffbeb; color: #d97706; }
+.chip-mild { background: #eff6ff; color: #2563eb; }
+.summary-total { font-size: 13px; color: #64748b; margin-left: auto; }
+.interaction-hint { font-size: 13px; color: #64748b; margin: 0 0 12px; }
+.interaction-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-height: 260px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }
+.picker-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #334155; cursor: pointer; padding: 6px 8px; border-radius: 6px; }
+.picker-item:hover { background: #f8fafc; }
+.picker-generic { font-size: 11px; color: #94a3b8; }
+.interaction-results { margin-top: 16px; display: flex; flex-direction: column; gap: 14px; }
+.result-group h4 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.sev-contraindicated { color: #7f1d1d; }
+.sev-severe { color: #dc2626; }
+.sev-moderate { color: #d97706; }
+.sev-mild { color: #2563eb; }
+.interaction-item { border: 1px solid #e2e8f0; border-left: 4px solid #94a3b8; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: white; }
+.interaction-pair { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; color: #1e293b; }
+.pair-sep { color: #94a3b8; }
+.interaction-desc { font-size: 13px; color: #475569; margin-top: 6px; }
+.interaction-mgmt { font-size: 12px; color: #64748b; margin-top: 6px; }
+.interaction-clear { padding: 24px; }
+.badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; text-transform: capitalize; }
+.badge-danger { background: #fef2f2; color: #dc2626; }
+.badge-warning { background: #fffbeb; color: #d97706; }
+.badge-info { background: #eff6ff; color: #2563eb; }
+
+@media (max-width: 768px) { .alerts-grid { grid-template-columns: 1fr; } .interaction-picker { grid-template-columns: 1fr; } }
 </style>

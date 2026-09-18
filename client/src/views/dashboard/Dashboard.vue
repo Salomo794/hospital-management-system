@@ -16,6 +16,25 @@
       </div>
 
       <div class="dashboard-grid">
+        <div class="card insights-card" v-if="insights.length">
+          <div class="card-header full">
+            <h3>Smart Insights</h3>
+            <span class="insights-badge">AI-powered</span>
+          </div>
+          <div class="card-body">
+            <div class="insights-list">
+              <div v-for="(ins, i) in insights" :key="i" class="insight-item" :class="'insight-' + ins.severity">
+                <span class="insight-icon">{{ ins.icon }}</span>
+                <div class="insight-body">
+                  <div class="insight-title">{{ ins.title }}</div>
+                  <div class="insight-message">{{ ins.message }}</div>
+                </div>
+                <router-link v-if="ins.link" :to="ins.link" class="btn btn-sm insight-action">View &#8594;</router-link>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-header">
             <h3>Today's Appointments</h3>
@@ -148,6 +167,26 @@ export default {
     const recentPatients = ref([])
     const weeklyStats = ref([])
     const loading = ref(false)
+    const insights = ref([])
+
+    onMounted(async () => {
+      loading.value = true
+      try {
+        const [{ data }, insightsRes] = await Promise.all([
+          axios.get('/api/reports/dashboard'),
+          axios.get('/api/reports/insights').catch(() => ({ data: [] }))
+        ])
+        stats.value = data.stats
+        recentAppointments.value = data.recentAppointments
+        recentPatients.value = data.recentPatients
+        weeklyStats.value = data.weeklyStats || []
+        insights.value = insightsRes.data || []
+      } catch (e) {
+        toast.error('Failed to load dashboard data')
+      } finally {
+        loading.value = false
+      }
+    })
 
     const maxWeekly = computed(() => Math.max(...weeklyStats.value.map(d => d.count), 1))
 
@@ -164,22 +203,7 @@ export default {
 
     const formatDay = (d) => new Date(d).toLocaleDateString('en', { weekday: 'short' })
 
-    onMounted(async () => {
-      loading.value = true
-      try {
-        const { data } = await axios.get('/api/reports/dashboard')
-        stats.value = data.stats
-        recentAppointments.value = data.recentAppointments
-        recentPatients.value = data.recentPatients
-        weeklyStats.value = data.weeklyStats || []
-      } catch (e) {
-        toast.error('Failed to load dashboard data')
-      } finally {
-        loading.value = false
-      }
-    })
-
-    return { statsCards, recentAppointments, recentPatients, weeklyStats, maxWeekly, loading, formatDate, formatCurrency, formatTime, formatDay, getStatusColor }
+    return { statsCards, recentAppointments, recentPatients, weeklyStats, maxWeekly, loading, insights, formatDate, formatCurrency, formatTime, formatDay, getStatusColor }
   }
 }
 </script>
@@ -211,6 +235,24 @@ export default {
 }
 
 .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+.insights-card .card-header.full { justify-content: space-between; }
+.insights-badge { font-size: 11px; font-weight: 600; color: #0d9488; background: #f0fdfa; padding: 4px 10px; border-radius: 20px; }
+.insights-list { display: flex; flex-direction: column; gap: 8px; }
+.insight-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px; border: 1px solid #e2e8f0; border-left-width: 4px; }
+.insight-icon { font-size: 22px; flex-shrink: 0; }
+.insight-body { flex: 1; }
+.insight-title { font-size: 13px; font-weight: 600; color: #1e293b; }
+.insight-message { font-size: 12px; color: #64748b; margin-top: 2px; }
+.insight-action { flex-shrink: 0; }
+.insight-success { border-left-color: #10b981; background: #f0fdf4; }
+.insight-success .insight-title { color: #047857; }
+.insight-warning { border-left-color: #f59e0b; background: #fffbeb; }
+.insight-warning .insight-title { color: #b45309; }
+.insight-danger { border-left-color: #ef4444; background: #fef2f2; }
+.insight-danger .insight-title { color: #b91c1c; }
+.insight-info { border-left-color: #3b82f6; background: #eff6ff; }
+.insight-info .insight-title { color: #1d4ed8; }
 
 .card { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden; }
 .card-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #f1f5f9; }

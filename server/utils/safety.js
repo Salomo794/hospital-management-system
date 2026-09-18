@@ -54,7 +54,7 @@ async function checkInteractions(medicineIds) {
      JOIN medicines ma ON di.medicine_a_id = ma.id
      JOIN medicines mb ON di.medicine_b_id = mb.id
      WHERE di.medicine_a_id IN (${placeholders}) AND di.medicine_b_id IN (${placeholders})`,
-    ids
+    [...ids, ...ids]
   );
   return rows.map((r) => ({
     type: 'interaction',
