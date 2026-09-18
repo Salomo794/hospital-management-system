@@ -58,6 +58,168 @@ router.get('/dashboard', authenticate, async (req, res) => {
   }
 });
 
+// Smart insights - rule-based operational intelligence for the dashboard
+router.get('/insights', authenticate, async (req, res) => {
+  try {
+    const insights = [];
+    const today = new Date().toISOString().split('T')[0];
+
+    // 1. Bed occupancy
+    const [admissions] = await pool.query(
+      "SELECT ward, COUNT(*) as count FROM admissions WHERE status = 'admitted' GROUP BY ward"
+    );
+    const WARD_CAPACITY = { 'General Medicine': 20, 'Surgery': 12, 'ICU': 8, 'Pediatrics': 10, 'Maternity': 14 };
+    const totalBeds = Object.values(WARD_CAPACITY).reduce((s, n) => s + n, 0);
+    const occupiedBeds = admissions.reduce((s, a) => {
+      return s + (WARD_CAPACITY[a.ward] ? Math.min(a.count, WARD_CAPACITY[a.ward]) : a.count);
+    }, 0);
+    const occupancyPct = totalBeds ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
+    if (occupancyPct >= 85) {
+      insights.push({
+        severity: 'danger',
+        icon: '🏥',
+        title: 'Hospital at high occupancy',
+        message: `Bed occupancy is at ${occupancyPct}% (${occupiedBeds}/${totalBeds}). Consider managing elective admissions or preparing surge capacity.`,
+        link: '/ward'
+      });
+    } else if (occupancyPct >= 60) {
+      insights.push({
+        severity: 'warning',
+        icon: '🏥',
+        title: 'Bed occupancy rising',
+        message: `Occupancy is at ${occupancyPct}% (${occupiedBeds}/${totalBeds}). Review ward capacity in the ward dashboard.`,
+        link: '/ward'
+      });
+    } else {
+      insights.push({
+        severity: 'success',
+        icon: '🏥',
+        title: 'Bed availability is healthy',
+        message: `Occupancy is at ${occupancyPct}% with ${totalBeds - occupiedBeds} of ${totalBeds} beds available.`,
+        link: '/ward'
+      });
+    }
+
+    // Highest-pressure ward
+    if (admissions.length) {
+      const pressured = admissions
+        .filter(a => WARD_CAPACITY[a.ward])
+        .map(a => ({ ward: a.ward, pct: Math.round((Math.min(a.count, WARD_CAPACITY[a.ward]) / WARD_CAPACITY[a.ward]) * 100) }))
+        .sort((a, b) => b.pct - a.pct)[0];
+      if (pressured && pressured.pct >= 80) {
+        insights.push({
+          severity: 'warning',
+          icon: '🚨',
+          title: `${pressured.ward} ward near full`,
+          message: `${pressured.ward} is at ${pressured.pct}% capacity. Check bed assignments immediately.`,
+          link: '/ward'
+        });
+      }
+    }
+
+    // 2. Medicines expiring soon
+    const [expiring] = await pool.query(
+      "SELECT COUNT(*) as count FROM medicines WHERE expiry_date >= date('now') AND expiry_date <= date('now', '+30 days') AND is_active = TRUE"
+    );
+    if (expiring[0].count > 0) {
+      insights.push({
+        severity: 'warning',
+        icon: '⏳',
+        title: 'Medicines expiring within 30 days',
+        message: `${expiring[0].count} medicine(s) expire within the next month. Plan restocking or rotation.`,
+        link: '/pharmacy'
+      });
+    }
+
+    // 3. Low stock
+    const [lowStock] = await pool.query(
+      "SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = TRUE"
+    );
+    if (lowStock[0].count > 0) {
+      insights.push({
+        severity: lowStock[0].count > 3 ? 'danger' : 'warning',
+        icon: '⚠️',
+        title: 'Medicines below minimum stock',
+        message: `${lowStock[0].count} medicine(s) are at or below their minimum stock level and need reordering.`,
+        link: '/pharmacy'
+      });
+    }
+
+    // 4. No-show risk (patients with cancellations + upcoming appointment)
+    const [noShowRisk] = await pool.query(`
+      SELECT COUNT(DISTINCT p.id) as count
+      FROM patients p
+      WHERE EXISTS (
+        SELECT 1 FROM appointments c
+        WHERE c.patient_id = p.id AND c.status = 'cancelled' AND c.appointment_date >= date('now', '-90 days')
+      )
+      AND EXISTS (
+        SELECT 1 FROM appointments a
+        WHERE a.patient_id = p.id AND a.status = 'scheduled' AND a.appointment_date >= date('now')
+      )`);
+    if (noShowRisk[0].count > 0) {
+      insights.push({
+        severity: 'info',
+        icon: '📅',
+        title: 'Patients at no-show risk',
+        message: `${noShowRisk[0].count} patient(s) have recent cancellations and an upcoming appointment. Consider sending reminders to reduce no-shows.`,
+        link: '/appointments'
+      });
+    }
+
+    // 5. Overdue / pending bills
+    const [pendingBills] = await pool.query(
+      "SELECT COUNT(*) as count, COALESCE(SUM(net_amount - paid_amount), 0) as amount FROM bills WHERE payment_status IN ('pending','partial')"
+    );
+    if (pendingBills[0].count > 0) {
+      insights.push({
+        severity: 'warning',
+        icon: '💰',
+        title: 'Unpaid bills outstanding',
+        message: `${pendingBills[0].count} bill(s) totaling ${pendingBills[0].amount.toLocaleString()} currency units are pending or partially paid.`,
+        link: '/billing'
+      });
+    }
+
+    // 6. Pending lab orders
+    const [pendingLab] = await pool.query(
+      "SELECT COUNT(*) as count FROM lab_orders WHERE status IN ('ordered','in_progress')"
+    );
+    if (pendingLab[0].count > 0) {
+      insights.push({
+        severity: 'info',
+        icon: '🧪',
+        title: 'Lab orders awaiting results',
+        message: `${pendingLab[0].count} lab orders are in progress and await result entry.`,
+        link: '/laboratory'
+      });
+    }
+
+    // 7. Revenue pulse (today vs yesterday)
+    const [todayRev] = await pool.query(
+      "SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE DATE(payment_date) = ?", [today]
+    );
+    const [yesterdayRev] = await pool.query(
+      "SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE DATE(payment_date) = date('now', '-1 day')"
+    );
+    const delta = yesterdayRev[0].total > 0 ? Math.round(((todayRev[0].total - yesterdayRev[0].total) / yesterdayRev[0].total) * 100) : null;
+    if (delta !== null) {
+      insights.push({
+        severity: delta < 0 ? 'warning' : 'success',
+        icon: '📈',
+        title: delta < 0 ? 'Revenue below yesterday' : 'Revenue tracking above yesterday',
+        message: `Today's collections are ${delta < 0 ? delta * -1 : delta}% ${delta < 0 ? 'below' : 'above'} yesterday${delta < 0 ? ` (gap of ${(yesterdayRev[0].total - todayRev[0].total).toLocaleString()} units)` : ''}.`,
+        link: '/reports'
+      });
+    }
+
+    res.json({ insights, generatedAt: new Date().toISOString() });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Financial reports
 router.get('/financial', authenticate, authorize('admin'), async (req, res) => {
   try {

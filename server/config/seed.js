@@ -121,6 +121,11 @@ async function seed() {
     }
     console.log('  Patients seeded');
 
+    // --- Portal self-service PINs ---
+    const hashedPortalPin = bcrypt.hashSync('password123', 4);
+    await conn.query('UPDATE patients SET portal_pin = COALESCE(portal_pin, ?) WHERE portal_pin IS NULL OR portal_pin = ?', [hashedPortalPin, '']);
+    console.log('  Portal PINs seeded');
+
     // --- Appointments ---
     const [existingAppts] = await conn.query('SELECT COUNT(*) as count FROM appointments');
     if (existingAppts[0].count === 0) {
@@ -356,6 +361,80 @@ async function seed() {
     }
     console.log('  Bills and payments seeded');
 
+    // --- Drug Interactions ---
+    const [existingInteractions] = await conn.query('SELECT COUNT(*) as count FROM drug_interactions');
+    if (existingInteractions[0].count === 0) {
+      const [medRows] = await conn.query('SELECT id, generic_name FROM medicines');
+      const genericMap = {};
+      medRows.forEach(m => { genericMap[m.generic_name.toLowerCase()] = m.id; });
+      const interactions = [
+        ['Acetylsalicylic Acid', 'Warfarin Sodium', 'severe', 'Combined use significantly increases the risk of major bleeding.', 'Avoid combination when possible. If unavoidable, monitor INR closely and watch for signs of bleeding.'],
+        ['Acetylsalicylic Acid', 'Ibuprofen', 'moderate', 'Ibuprofen may diminish the cardioprotective antiplatelet effect of aspirin.', 'Separate doses by at least 2 hours, or consider an alternative anti-inflammatory.'],
+        ['Warfarin Sodium', 'Ibuprofen', 'severe', 'Highly increased risk of gastrointestinal and systemic bleeding.', 'Avoid combination; use acetaminophen for analgesia and test for occult blood if NSAID is essential.'],
+        ['Warfarin Sodium', 'Acetaminophen', 'moderate', 'Chronic high-dose acetaminophen can elevate INR and potentiate anticoagulation.', 'Monitor INR during sustained therapy and adjust warfarin dose as needed.'],
+        ['Warfarin Sodium', 'Ciprofloxacin', 'severe', 'Fluoroquinolones markedly potentiate warfarin effect, raising bleeding risk.', 'Avoid if possible; if required, monitor INR within 3-5 days of starting the antibiotic.'],
+        ['Warfarin Sodium', 'Omeprazole', 'moderate', 'May increase INR and bleeding tendency through CYP inhibition.', 'Monitor INR when adding or stopping the PPI and adjust warfarin accordingly.'],
+        ['Warfarin Sodium', 'Levothyroxine Sodium', 'moderate', 'Thyroid replacement can potentiate anticoagulant effect.', 'Monitor INR when thyroid dosing changes and adjust warfarin as needed.'],
+        ['Lisinopril', 'Losartan Potassium', 'contraindicated', 'Dual RAAS blockade increases the risk of hyperkalemia, hypotension and renal impairment.', 'Do not combine ACE inhibitors with ARBs. Choose a single agent and monitor potassium and renal function.'],
+        ['Metoprolol Tartrate', 'Glipizide', 'moderate', 'Beta-blockers can mask the adrenergic warning signs of hypoglycemia (tremor, tachycardia).', 'Counsel patients on hypoglycemia recognition; monitor blood glucose closely.'],
+        ['Metoprolol Tartrate', 'Albuterol', 'moderate', 'Non-selective beta-blockade can antagonize beta-2 bronchodilator effects and worsen bronchospasm.', 'Use a cardioselective agent at the lowest effective dose and monitor respiratory status.'],
+        ['Metoprolol Tartrate', 'Digoxin', 'moderate', 'Additive negative chronotropic effect increases the risk of bradycardia and heart block.', 'Monitor heart rate and digoxin levels; reduce dose if bradycardia occurs.'],
+        ['Amlodipine Besylate', 'Digoxin', 'moderate', 'May raise serum digoxin concentrations and increase toxicity risk.', 'Monitor digoxin levels and watch for nausea, visual changes or arrhythmia.'],
+        ['Ibuprofen', 'Prednisone', 'moderate', 'Combined use increases the risk of gastrointestinal ulceration and bleeding.', 'Add gastroprotection (PPI) and use the lowest effective NSAID dose for the shortest time.'],
+        ['Prednisone', 'Glipizide', 'moderate', 'Corticosteroids raise blood glucose and may reduce the effect of antidiabetic agents.', 'Monitor blood glucose and adjust the antidiabetic dose during steroid therapy.'],
+        ['Levothyroxine Sodium', 'Omeprazole', 'moderate', 'PPIs reduce levothyroxine absorption, potentially causing hypothyroid symptoms.', 'Take levothyroxine on an empty stomach, well separated from the PPI dose, and recheck TSH.'],
+        ['Amlodipine Besylate', 'Metoprolol Tartrate', 'mild', 'Additive hypotensive effect; may cause dizziness or fatigue on initiation.', 'Monitor blood pressure during the dose-titration period.'],
+      ];
+      for (const [a, b, severity, description, clinical] of interactions) {
+        const aId = genericMap[a.toLowerCase()];
+        const bId = genericMap[b.toLowerCase()];
+        if (!aId || !bId) continue;
+        await conn.query(
+          `INSERT INTO drug_interactions (medicine_a_id, medicine_b_id, severity, description, clinical_management)
+           VALUES (?, ?, ?, ?, ?)`,
+          [aId, bId, severity, description, clinical]
+        );
+      }
+    }
+    console.log('  Drug interactions seeded');
+
+    // --- Admissions (Ward & Bed Management) ---
+    const [existingAdmissions] = await conn.query('SELECT COUNT(*) as count FROM admissions');
+    if (existingAdmissions[0].count === 0) {
+      const [patientRows] = await conn.query('SELECT id FROM patients ORDER BY id');
+      const patientIdList = patientRows.map(r => r.id);
+      const wards = [
+        { ward: 'General Medicine', bed: '01', patientIdx: 0, diagnosis: 'Hypertensive crisis', plan: 'IV antihypertensives, cardiac monitoring' },
+        { ward: 'General Medicine', bed: '02', patientIdx: 2, diagnosis: 'COPD exacerbation', plan: 'Nebulized bronchodilators, oxygen therapy' },
+        { ward: 'ICU', bed: '01', patientIdx: 4, diagnosis: 'Atrial fibrillation with RVR', plan: 'Continuous ECG, rate control, anticoagulation' },
+        { ward: 'Surgery', bed: '03', patientIdx: 6, diagnosis: 'Post-operative observation (lumbar decompression)', plan: 'Pain control, physiotherapy consult' },
+        { ward: 'Maternity', bed: '02', patientIdx: 1, diagnosis: 'Gestational diabetes monitoring', plan: 'Glucose monitoring, diet counseling' },
+        { ward: 'Pediatrics', bed: '05', patientIdx: 3, diagnosis: 'Observation after ingestion', plan: 'Observation, IV fluids' },
+        { ward: 'ICU', bed: '02', patientIdx: 9, diagnosis: 'Heart failure decompensation', plan: 'Diuretics, telemetry, daily weights' },
+      ];
+      for (let i = 0; i < wards.length; i++) {
+        const w = wards[i];
+        const uuid = uuidv4();
+        const admNum = `ADM-${Date.now().toString(36).toUpperCase()}-${i + 1}`;
+        await conn.query(
+          `INSERT INTO admissions (uuid, admission_number, patient_id, doctor_id, ward, bed_number, diagnosis, treatment_plan, status, notes, admission_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?, datetime('now', ?))`,
+          [uuid, admNum, patientIdList[w.patientIdx], i % 2 === 0 ? doctorUserId1 : doctorUserId2,
+           w.ward, w.bed, w.diagnosis, w.plan,
+           `${w.bed} days stay, review daily`, `-${i % 5} days`]
+        );
+      }
+      const dischargedUuid = uuidv4();
+      await conn.query(
+        `INSERT INTO admissions (uuid, admission_number, patient_id, doctor_id, ward, bed_number, diagnosis, treatment_plan, status, notes, admission_date, discharge_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'discharged', ?, datetime('now', '-10 days'), datetime('now', '-3 days'))`,
+        [dischargedUuid, `ADM-${Date.now().toString(36).toUpperCase()}-X`, patientIdList[8], doctorUserId2,
+         'Surgery', 'B-04', 'Appendectomy', 'Wound care, follow-up in clinic',
+         'Recovered well, discharged to home care']
+      );
+    }
+    console.log('  Admissions seeded');
+
     // --- Sample notifications ---
     const [existingNotifs] = await conn.query('SELECT COUNT(*) as count FROM notifications');
     if (existingNotifs[0].count === 0) {
@@ -377,6 +456,7 @@ async function seed() {
     console.log('  Receptionist: receptionist@hospital.com');
     console.log('  Pharmacist:   pharmacist@hospital.com');
     console.log('  Lab Tech:     labtech@hospital.com');
+    console.log('  Patient Portal (portal_pin: password123):  any patient MRN / phone / email');
   } catch (error) {
     await conn.rollback();
     console.error('Seeding failed:', error);

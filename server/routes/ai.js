@@ -140,6 +140,215 @@ router.post('/chat', authenticate, async (req, res) => {
         this_month: month[0].total
       };
     }
+    // Bed / ward status
+    else if (lowerMsg.includes('ward') || lowerMsg.includes('occupancy') || lowerMsg.includes('bed')) {
+      const WARD_CAPACITY = { 'General Medicine': 20, 'Surgery': 12, 'ICU': 8, 'Pediatrics': 10, 'Maternity': 14 };
+      const [admissions] = await pool.query("SELECT ward, COUNT(*) as count FROM admissions WHERE status = 'admitted' GROUP BY ward");
+      const byWard = {};
+      admissions.forEach(a => { byWard[a.ward] = a.count; });
+      const seatRows = Object.entries(WARD_CAPACITY).map(([ward, total]) => {
+        const occupied = byWard[ward] || 0;
+        return {
+          ward,
+          occupied,
+          available: total - occupied,
+          total,
+          utilization: `${Math.round((Math.min(occupied, total) / total) * 100)}%`
+        };
+      });
+      const totalBeds = Object.values(WARD_CAPACITY).reduce((s, n) => s + n, 0);
+      const totalOccupied = seatRows.reduce((s, w) => s + w.occupied, 0);
+      response = `Hospital occupancy: ${totalOccupied}/${totalBeds} beds in use (${Math.round((totalOccupied / totalBeds) * 100)}%):`;
+      data = seatRows;
+    }
+    // Medicine stock checks (specific + low stock)
+    else if (lowerMsg.includes('low stock') || lowerMsg.includes('stock alert') || lowerMsg.includes('stock alerts')) {
+      const [low] = await pool.query(
+        "SELECT name, generic_name, stock_quantity, min_stock_level, unit FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = TRUE ORDER BY stock_quantity ASC"
+      );
+      if (low.length > 0) {
+        response = `Found ${low.length} medicine(s) at or below minimum stock:`;
+        data = low.map(m => ({
+          medicine: m.name,
+          stock: `${m.stock_quantity} ${m.unit}`,
+          minimum: m.min_stock_level
+        }));
+      } else {
+        response = 'All medicines are above their minimum stock levels.';
+      }
+    }
+    else if (lowerMsg.includes('stock') || lowerMsg.includes('inventory')) {
+      const medMatch = message.match(/(?:stock\s+of\s+|stock\s+for\s+)?(.+)/i);
+      const raw = medMatch && medMatch[1] ? medMatch[1] : '';
+      const searchTerm = raw
+        .replace(/^(?:current\s+)?(?:stock|inventory|medicine|medicines|list|status|level|levels)\s*/i, '')
+        .replace(/[?.!]\s*$/, '')
+        .trim();
+      const genericQuery = !searchTerm || /^(medicine|medicines|inventory|stock|list|status|level|levels)$/i.test(searchTerm);
+      if (!genericQuery) {
+        const [med] = await pool.query(
+          `SELECT name, generic_name, stock_quantity, min_stock_level, expiry_date, unit
+           FROM medicines WHERE name LIKE ? OR generic_name LIKE ? LIMIT 5`,
+          [`%${searchTerm}%`, `%${searchTerm}%`]
+        );
+        if (med.length > 0) {
+          response = `Stock status for "${searchTerm}":`;
+          data = med.map(m => ({
+            medicine: m.name,
+            available: `${m.stock_quantity} ${m.unit}`,
+            status: m.stock_quantity <= m.min_stock_level ? 'Low stock' : 'OK',
+            expires: m.expiry_date || 'n/a'
+          }));
+        } else {
+          response = `No medicine matches "${searchTerm}".`;
+        }
+      } else {
+        const [meds] = await pool.query(
+          "SELECT COUNT(*) as count FROM medicines WHERE is_active = TRUE"
+        );
+        const [low] = await pool.query(
+          "SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = TRUE"
+        );
+        const [expiring] = await pool.query(
+          "SELECT COUNT(*) as count FROM medicines WHERE expiry_date >= date('now') AND expiry_date <= date('now', '+30 days') AND is_active = TRUE"
+        );
+        response = 'Pharmacy inventory overview:';
+        data = {
+          total_medicines: meds[0].count,
+          low_stock_items: low[0].count,
+          expiring_within_30_days: expiring[0].count
+        };
+      }
+    }
+    // Drug interaction check
+    else if (lowerMsg.includes('interaction') && lowerMsg.includes('between')) {
+      const pairMatch = message.match(/between\s+(.+?)\s+and\s+(.+)/i);
+      if (pairMatch) {
+        const a = pairMatch[1].trim();
+        const b = pairMatch[2].trim().replace(/[?.!]\s*$/, '');
+        const [res] = await pool.query(
+          `SELECT di.severity, di.description, di.clinical_management,
+             ma.name as medicine_a, mb.name as medicine_b
+           FROM drug_interactions di
+           JOIN medicines ma ON di.medicine_a_id = ma.id
+           JOIN medicines mb ON di.medicine_b_id = mb.id
+           WHERE (ma.name LIKE ? OR ma.generic_name LIKE ?) AND (mb.name LIKE ? OR mb.generic_name LIKE ?)
+              OR (mb.name LIKE ? OR mb.generic_name LIKE ?) AND (ma.name LIKE ? OR ma.generic_name LIKE ?) LIMIT 5`,
+          [`%${a}%`, `%${a}%`, `%${b}%`, `%${b}%`, `%${a}%`, `%${a}%`, `%${b}%`, `%${b}%`]
+        );
+        if (res.length > 0) {
+          const r = res[0];
+          response = `⚠️ Interaction found between **${r.medicine_a}** and **${r.medicine_b}** (${r.severity}):`;
+          data = { severity: r.severity, description: r.description, clinical_management: r.clinical_management };
+        } else {
+          response = `No known interaction between "${a}" and "${b}" in the formulary. Always verify with a clinical reference.`;
+        }
+      } else {
+        response = 'Please phrase it like: "interaction between Warfarin and Aspirin".';
+      }
+    }
+    // Patient allergies
+    else if (lowerMsg.includes('allergy') || lowerMsg.includes('allergies')) {
+      const nameMatch = message.match(/allerg(?:y|ies)\s*(?:of|for)?\s+(.+)/i);
+      const searchName = nameMatch ? nameMatch[1].trim() : '';
+      if (searchName) {
+        const [patients] = await pool.query(
+          `SELECT first_name, last_name, mrn, allergies FROM patients
+           WHERE first_name LIKE ? OR last_name LIKE ? OR mrn LIKE ? LIMIT 5`,
+          [`%${searchName}%`, `%${searchName}%`, `%${searchName}%`]
+        );
+        if (patients.length > 0) {
+          response = 'Allergy profiles:';
+          data = patients.map(p => ({
+            patient: `${p.first_name} ${p.last_name}`,
+            mrn: p.mrn,
+            allergies: p.allergies || 'None recorded'
+          }));
+        } else {
+          response = `No patient found matching "${searchName}".`;
+        }
+      } else {
+        response = 'Please include a patient name, e.g. "allergies of Maria Garcia".';
+      }
+    }
+    // Abnormal / critical lab results
+    else if (lowerMsg.includes('abnormal') || lowerMsg.includes('critical result') || lowerMsg.includes('critical lab')) {
+      const [rows] = await pool.query(
+        `SELECT li.result_value, li.reference_range, li.notes, li.result_date,
+           lt.name as test_name, p.first_name, p.last_name, p.mrn
+         FROM lab_order_items li
+         JOIN lab_tests lt ON li.lab_test_id = lt.id
+         JOIN lab_orders lo ON li.lab_order_id = lo.id
+         JOIN patients p ON lo.patient_id = p.id
+         WHERE li.is_abnormal = TRUE
+         ORDER BY li.result_date DESC LIMIT 10`
+      );
+      if (rows.length > 0) {
+        response = `Found ${rows.length} abnormal lab result(s):`;
+        data = rows.map(r => ({
+          patient: `${r.first_name} ${r.last_name}`,
+          mrn: r.mrn,
+          test: r.test_name,
+          result: r.result_value || 'n/a',
+          reference: r.reference_range || 'n/a',
+          date: r.result_date ? r.result_date.substring(0, 10) : 'n/a'
+        }));
+      } else {
+        response = 'No abnormal lab results recorded.';
+      }
+    }
+    // Live hospital overview
+    else if (lowerMsg.includes('overview') || lowerMsg.includes('command center') || lowerMsg.includes('live status') || lowerMsg.includes('hospital status')) {
+      const today = new Date().toISOString().split('T')[0];
+      const [apptsToday] = await pool.query('SELECT COUNT(*) as count FROM appointments WHERE appointment_date = ?', [today]);
+      const [waiting] = await pool.query("SELECT COUNT(*) as count FROM checkins WHERE date(checkin_time) = date('now') AND status IN ('waiting','in_consultation')");
+      const [admissions] = await pool.query("SELECT COUNT(*) as count FROM admissions WHERE status = 'admitted'");
+      const [lowStock] = await pool.query('SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = TRUE');
+      const [pendingBills] = await pool.query("SELECT COUNT(*) as count FROM bills WHERE payment_status IN ('pending','partial')");
+      response = 'Live hospital overview:';
+      data = {
+        appointments_today: apptsToday[0].count,
+        patients_waiting: waiting[0].count,
+        inpatients: admissions[0].count,
+        low_stock_items: lowStock[0].count,
+        unpaid_bills: pendingBills[0].count,
+        tip: 'Use "forecast" for the next 7 days outlook, or "bed occupancy" for ward detail.'
+      };
+    }
+    // Predictive forecast
+    else if (lowerMsg.includes('forecast') || lowerMsg.includes('predict') || lowerMsg.includes('outlook') || lowerMsg.includes('trend')) {
+      const [history] = await pool.query(
+        `SELECT appointment_date, COUNT(*) as count FROM appointments
+         WHERE appointment_date >= date('now', '-42 days') AND appointment_date < date('now')
+         GROUP BY appointment_date`
+      );
+      const wdTotals = {}, wdCount = {};
+      history.forEach(({ appointment_date, count }) => {
+        const wd = new Date(appointment_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' });
+        wdTotals[wd] = (wdTotals[wd] || 0) + count;
+        wdCount[wd] = (wdCount[wd] || 0) + 1;
+      });
+      const days = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(); d.setDate(d.getDate() + i);
+        const date = d.toISOString().split('T')[0];
+        const wd = new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' });
+        const pred = wdCount[wd] ? Math.max(1, Math.round(wdTotals[wd] / wdCount[wd])) : 2;
+        days.push({ date, day: wd, predicted: pred });
+      }
+      const peak = [...days].sort((a, b) => b.predicted - a.predicted)[0];
+      const [beds] = await pool.query("SELECT COUNT(*) as count FROM admissions WHERE status = 'admitted'");
+      const [lowStock] = await pool.query('SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = TRUE');
+      response = `Next 7 days forecast — busiest is ${peak.day} (${peak.date}) with ~${peak.predicted} expected visits:`;
+      data = {
+        outlook: days.map(d => `${d.day}: ${d.predicted}`),
+        peak_day: peak.day,
+        peak_date: peak.date,
+        beds_in_use: beds[0].count,
+        low_stock_items: lowStock[0].count,
+        summary: `Plan extra staff for ${peak.day}. Ensure reorders are placed for the ${lowStock[0].count} low-stock items.`
+      };
+    }
     // Help / Default
     else {
       response = `I can help you with:
@@ -150,6 +359,13 @@ router.post('/chat', authenticate, async (req, res) => {
 4. **Patient summary** - "patient record 5"
 5. **Pending tasks** - "show pending items"
 6. **Revenue** - "show revenue this month"
+7. **Ward status** - "ward status" or "bed occupancy"
+8. **Medicines** - "low stock medicines" or "stock of Amoxicillin"
+9. **Drug interactions** - "interaction between Warfarin and Aspirin"
+10. **Allergies** - "allergies of Maria Garcia"
+11. **Lab results** - "abnormal lab results"
+12. **Live overview** - "hospital status" or "command center"
+13. **Smart forecast** - "forecast next week" or "predict patient load"
 
 Just type your question and I'll help you find the information.`;
     }

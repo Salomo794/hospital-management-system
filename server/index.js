@@ -17,7 +17,10 @@ const laboratoryRoutes = require('./routes/laboratory');
 const billingRoutes = require('./routes/billing');
 const reportRoutes = require('./routes/reports');
 const notificationRoutes = require('./routes/notifications');
+const admissionRoutes = require('./routes/admissions');
 const aiRoutes = require('./routes/ai');
+const smartRoutes = require('./routes/smart');
+const portalRoutes = require('./routes/portal');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -42,7 +45,10 @@ app.use('/api/laboratory', laboratoryRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/admissions', admissionRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/smart', smartRoutes);
+app.use('/api/portal', portalRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

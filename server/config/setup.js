@@ -38,6 +38,7 @@ async function setup() {
       insurance_number TEXT,
       allergies TEXT,
       chronic_conditions TEXT,
+      portal_pin TEXT,
       photo TEXT,
       status TEXT DEFAULT 'active' CHECK(status IN ('active','inactive','deceased')),
       created_at TEXT DEFAULT (datetime('now')),
@@ -320,6 +321,32 @@ async function setup() {
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
       FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE
+    )`);
+
+    await conn.query(`CREATE TABLE IF NOT EXISTS drug_interactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      medicine_a_id INTEGER NOT NULL,
+      medicine_b_id INTEGER NOT NULL,
+      severity TEXT NOT NULL CHECK(severity IN ('mild','moderate','severe','contraindicated')),
+      description TEXT NOT NULL,
+      clinical_management TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (medicine_a_id) REFERENCES medicines(id) ON DELETE CASCADE,
+      FOREIGN KEY (medicine_b_id) REFERENCES medicines(id) ON DELETE CASCADE
+    )`);
+
+    await conn.query(`CREATE TABLE IF NOT EXISTS checkins (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uuid TEXT UNIQUE NOT NULL,
+      patient_id INTEGER NOT NULL,
+      appointment_id INTEGER,
+      checkin_time TEXT DEFAULT (datetime('now')),
+      purpose TEXT,
+      status TEXT DEFAULT 'waiting' CHECK(status IN ('waiting','in_consultation','completed','no_show','cancelled')),
+      qr_token TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
+      FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL
     )`);
 
     console.log('All tables created successfully (SQLite)!');

@@ -39,6 +39,73 @@ router.get('/alerts', authenticate, async (req, res) => {
   }
 });
 
+// Check for interactions among a set of medicines
+// Body: { medicineIds: [1, 5, 12, ...] }
+router.post('/interactions/check', authenticate, async (req, res) => {
+  try {
+    const { medicineIds } = req.body;
+    if (!Array.isArray(medicineIds) || medicineIds.length < 2) {
+      return res.status(400).json({ message: 'Provide at least two medicineIds to check' });
+    }
+    const uniqueIds = [...new Set(medicineIds.map(Number).filter(Boolean))];
+    if (uniqueIds.length < 2) {
+      return res.status(400).json({ message: 'Provide at least two distinct medicines to check' });
+    }
+    const placeholders = uniqueIds.map(() => '?').join(',');
+    const [rows] = await pool.query(
+      `SELECT di.id, di.severity, di.description, di.clinical_management,
+        ma.id as medicine_a_id, ma.name as medicine_a, ma.generic_name as medicine_a_generic,
+        mb.id as medicine_b_id, mb.name as medicine_b, mb.generic_name as medicine_b_generic
+       FROM drug_interactions di
+       JOIN medicines ma ON di.medicine_a_id = ma.id
+       JOIN medicines mb ON di.medicine_b_id = mb.id
+       WHERE (di.medicine_a_id IN (${placeholders}) AND di.medicine_b_id IN (${placeholders}))
+          OR (di.medicine_b_id IN (${placeholders}) AND di.medicine_a_id IN (${placeholders}))`,
+      [...uniqueIds, ...uniqueIds, ...uniqueIds, ...uniqueIds]
+    );
+    res.json({ interactions: rows, checkedIds: uniqueIds });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Summary counts of known interaction severity across the formulary
+router.get('/interactions/summary', authenticate, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT severity, COUNT(*) as count FROM drug_interactions GROUP BY severity"
+    );
+    const summary = { mild: 0, moderate: 0, severe: 0, contraindicated: 0 };
+    rows.forEach(r => { summary[r.severity] = r.count; });
+    res.json({ summary, total: rows.reduce((s, r) => s + r.count, 0) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// List all known interactions involving a specific medicine
+router.get('/interactions/:medicineId', authenticate, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT di.id, di.severity, di.description, di.clinical_management,
+        ma.id as medicine_a_id, ma.name as medicine_a, ma.generic_name as medicine_a_generic,
+        mb.id as medicine_b_id, mb.name as medicine_b, mb.generic_name as medicine_b_generic
+       FROM drug_interactions di
+       JOIN medicines ma ON di.medicine_a_id = ma.id
+       JOIN medicines mb ON di.medicine_b_id = mb.id
+       WHERE di.medicine_a_id = ? OR di.medicine_b_id = ?
+       ORDER BY CASE di.severity WHEN 'contraindicated' THEN 0 WHEN 'severe' THEN 1 WHEN 'moderate' THEN 2 ELSE 3 END`,
+      [req.params.medicineId, req.params.medicineId]
+    );
+    res.json({ interactions: rows });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Add medicine
 router.post('/medicines', authenticate, authorize('admin', 'pharmacist'), async (req, res) => {
   try {
