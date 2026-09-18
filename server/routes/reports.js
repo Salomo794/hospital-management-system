@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { WARD_CAPACITY } = require('./admissions');
 
 // Dashboard stats
 router.get('/dashboard', authenticate, async (req, res) => {
@@ -68,11 +69,10 @@ router.get('/insights', authenticate, async (req, res) => {
     const [admissions] = await pool.query(
       "SELECT ward, COUNT(*) as count FROM admissions WHERE status = 'admitted' GROUP BY ward"
     );
-    const WARD_CAPACITY = { 'General Medicine': 20, 'Surgery': 12, 'ICU': 8, 'Pediatrics': 10, 'Maternity': 14 };
-    const totalBeds = Object.values(WARD_CAPACITY).reduce((s, n) => s + n, 0);
-    const occupiedBeds = admissions.reduce((s, a) => {
-      return s + (WARD_CAPACITY[a.ward] ? Math.min(a.count, WARD_CAPACITY[a.ward]) : a.count);
-    }, 0);
+    const wardCap = ward => WARD_CAPACITY[ward] || 20;
+    const allWards = new Set([...Object.keys(WARD_CAPACITY), ...admissions.map(a => a.ward)]);
+    const totalBeds = [...allWards].reduce((s, w) => s + wardCap(w), 0);
+    const occupiedBeds = admissions.reduce((s, a) => s + Math.min(a.count, wardCap(a.ward)), 0);
     const occupancyPct = totalBeds ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
     if (occupancyPct >= 85) {
       insights.push({

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate } = require('../middleware/auth');
+const { WARD_CAPACITY } = require('./admissions');
 
 // AI Assistant endpoint - processes natural language queries
 router.post('/chat', authenticate, async (req, res) => {
@@ -17,8 +18,8 @@ router.post('/chat', authenticate, async (req, res) => {
       const searchName = nameMatch ? nameMatch[1].trim() : message.replace(/find|search|patient|named/gi, '').trim();
       const [patients] = await pool.query(
         `SELECT id, mrn, first_name, last_name, date_of_birth, gender, phone, blood_type, status
-         FROM patients WHERE first_name LIKE ? OR last_name LIKE ? OR mrn LIKE ? LIMIT 5`,
-        [`%${searchName}%`, `%${searchName}%`, `%${searchName}%`]
+         FROM patients WHERE first_name LIKE ? OR last_name LIKE ? OR first_name || ' ' || last_name LIKE ? OR mrn LIKE ? LIMIT 5`,
+        [`%${searchName}%`, `%${searchName}%`, `%${searchName}%`, `%${searchName}%`]
       );
       if (patients.length > 0) {
         response = `Found ${patients.length} patient(s):`;
@@ -142,21 +143,22 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     // Bed / ward status
     else if (lowerMsg.includes('ward') || lowerMsg.includes('occupancy') || lowerMsg.includes('bed')) {
-      const WARD_CAPACITY = { 'General Medicine': 20, 'Surgery': 12, 'ICU': 8, 'Pediatrics': 10, 'Maternity': 14 };
       const [admissions] = await pool.query("SELECT ward, COUNT(*) as count FROM admissions WHERE status = 'admitted' GROUP BY ward");
       const byWard = {};
       admissions.forEach(a => { byWard[a.ward] = a.count; });
-      const seatRows = Object.entries(WARD_CAPACITY).map(([ward, total]) => {
+      const allWards = new Set([...Object.keys(WARD_CAPACITY), ...Object.keys(byWard)]);
+      const seatRows = [...allWards].map(ward => {
+        const total = WARD_CAPACITY[ward] || 20;
         const occupied = byWard[ward] || 0;
         return {
           ward,
           occupied,
-          available: total - occupied,
+          available: Math.max(total - occupied, 0),
           total,
           utilization: `${Math.round((Math.min(occupied, total) / total) * 100)}%`
         };
-      });
-      const totalBeds = Object.values(WARD_CAPACITY).reduce((s, n) => s + n, 0);
+      }).sort((a, b) => a.ward.localeCompare(b.ward));
+      const totalBeds = seatRows.reduce((s, w) => s + w.total, 0);
       const totalOccupied = seatRows.reduce((s, w) => s + w.occupied, 0);
       response = `Hospital occupancy: ${totalOccupied}/${totalBeds} beds in use (${Math.round((totalOccupied / totalBeds) * 100)}%):`;
       data = seatRows;
@@ -254,8 +256,8 @@ router.post('/chat', authenticate, async (req, res) => {
       if (searchName) {
         const [patients] = await pool.query(
           `SELECT first_name, last_name, mrn, allergies FROM patients
-           WHERE first_name LIKE ? OR last_name LIKE ? OR mrn LIKE ? LIMIT 5`,
-          [`%${searchName}%`, `%${searchName}%`, `%${searchName}%`]
+           WHERE first_name LIKE ? OR last_name LIKE ? OR first_name || ' ' || last_name LIKE ? OR mrn LIKE ? LIMIT 5`,
+          [`%${searchName}%`, `%${searchName}%`, `%${searchName}%`, `%${searchName}%`]
         );
         if (patients.length > 0) {
           response = 'Allergy profiles:';

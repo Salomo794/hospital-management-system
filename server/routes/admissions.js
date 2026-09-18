@@ -8,20 +8,21 @@ const { authenticate, authorize } = require('../middleware/auth');
 const WARDS = {
   'General Medicine': 20,
   'Surgery': 12,
-  'ICU': 8,
+  'ICU': 10,
   'Pediatrics': 10,
-  'Maternity': 14
+  'Maternity': 14,
+  'Ward A': 20,
+  'Ward B': 20
 };
+
+// Capacity for any ward (configured or discovered in data) defaults to 20 beds
+const wardCapacity = ward => WARDS[ward] || 20;
 
 const pad = n => String(n).padStart(2, '0');
 
-// Helper: which wards have they configured capacity for
-const wardList = () => Object.entries(WARDS).map(([ward, total]) => ({ ward, total }));
-
 // Helper: resolve a free bed number inside a ward, honor existing occupied beds
 async function findFreeBed(conn, ward) {
-  const total = WARDS[ward];
-  if (!total) return null;
+  const total = wardCapacity(ward);
   const [rows] = await conn.query(
     "SELECT bed_number FROM admissions WHERE ward = ? AND status = 'admitted' ORDER BY bed_number",
     [ward]
@@ -39,25 +40,31 @@ router.get('/', authenticate, async (req, res) => {
   try {
     const { status, ward, search, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
-    let query = `
-      SELECT a.*, p.first_name as patient_first_name, p.last_name as patient_last_name,
-        p.mrn, u.first_name as doctor_first_name, u.last_name as doctor_last_name
-      FROM admissions a
-      JOIN patients p ON a.patient_id = p.id
-      JOIN users u ON a.doctor_id = u.id
-      WHERE 1=1`;
     const params = [];
-    if (status) { query += ' AND a.status = ?'; params.push(status); }
-    if (ward) { query += ' AND a.ward = ?'; params.push(ward); }
+    let where = 'WHERE 1=1';
+    if (status) { where += ' AND a.status = ?'; params.push(status); }
+    if (ward) { where += ' AND a.ward = ?'; params.push(ward); }
     if (search) {
-      query += ' AND (p.first_name LIKE ? OR p.last_name LIKE ? OR p.mrn LIKE ? OR a.admission_number LIKE ? OR a.bed_number LIKE ?)';
+      where += ' AND (p.first_name LIKE ? OR p.last_name LIKE ? OR p.mrn LIKE ? OR a.admission_number LIKE ? OR a.bed_number LIKE ?)';
       const like = `%${search}%`;
       params.push(like, like, like, like, like);
     }
-    const [countRes] = await pool.query(query.replace(/SELECT a\.\*.*FROM admissions/, 'SELECT COUNT(*) as total FROM admissions'), params);
-    query += ' ORDER BY a.created_at DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), parseInt(offset));
-    const [rows] = await pool.query(query, params);
+    const [countRes] = await pool.query(
+      `SELECT COUNT(*) as total FROM admissions a
+       JOIN patients p ON a.patient_id = p.id
+       JOIN users u ON a.doctor_id = u.id
+       ${where}`,
+      params
+    );
+    const [rows] = await pool.query(
+      `SELECT a.*, p.first_name as patient_first_name, p.last_name as patient_last_name,
+        p.mrn, u.first_name as doctor_first_name, u.last_name as doctor_last_name
+       FROM admissions a
+       JOIN patients p ON a.patient_id = p.id
+       JOIN users u ON a.doctor_id = u.id
+       ${where} ORDER BY a.created_at DESC LIMIT ? OFFSET ?`,
+      [...params, parseInt(limit), parseInt(offset)]
+    );
     res.json({
       admissions: rows,
       total: countRes[0].total,
@@ -82,24 +89,19 @@ router.get('/wards', authenticate, async (req, res) => {
       occupiedByWard[a.ward].push(a);
     });
 
-    const wards = wardList().map(({ ward, total }) => {
+    // Combine configured wards with any ward discovered in live data (falls back to default capacity)
+    const wardTotals = {};
+    [...Object.keys(WARDS), ...Object.keys(occupiedByWard)].forEach(w => { wardTotals[w] = wardCapacity(w); });
+
+    const wards = Object.entries(wardTotals).map(([ward, total]) => {
       const occupied = occupiedByWard[ward] ? occupiedByWard[ward].length : 0;
       const beds = [];
-      for (let i = 1; i <= total; i++) {
+      for (let i = 1; i <= Math.min(total, 40); i++) {
         const bed = pad(i);
         const adm = (occupiedByWard[ward] || []).find(a => a.bed_number === bed);
         beds.push(adm ? { bed, status: 'occupied', admissionId: adm.id, patientId: adm.patient_id, diagnosis: adm.diagnosis } : { bed, status: 'available' });
       }
       return { ward, total, occupied, available: total - occupied, percentage: Math.round((occupied / total) * 100), beds };
-    });
-
-    // Track wards present in the data but not configured (safety)
-    const seen = new Set(wards.map(w => w.ward));
-    Object.keys(occupiedByWard).forEach(ward => {
-      if (!seen.has(ward)) {
-        const occupied = occupiedByWard[ward].length;
-        wards.push({ ward, total: occupied, occupied, available: 0, percentage: 100, beds: [] });
-      }
     });
 
     const totalBeds = wards.reduce((s, w) => s + w.total, 0);
@@ -127,7 +129,7 @@ router.post('/', authenticate, authorize('admin', 'doctor', 'nurse', 'receptioni
     if (!patient_id || !doctor_id || !ward) {
       return res.status(400).json({ message: 'patient_id, doctor_id and ward are required' });
     }
-    if (!WARDS[ward]) {
+    if (!wardCapacity(ward)) {
       return res.status(400).json({ message: `Unknown ward "${ward}".` });
     }
 
@@ -137,7 +139,7 @@ router.post('/', authenticate, authorize('admin', 'doctor', 'nurse', 'receptioni
         "SELECT COUNT(*) as count FROM admissions WHERE ward = ? AND status = 'admitted'",
         [ward]
       );
-      const capacity = WARDS[ward];
+      const capacity = wardCapacity(ward);
       if (activeInWard[0].count >= capacity) {
         return res.status(409).json({ message: `${ward} ward is full (${capacity}/${capacity} beds).` });
       }
@@ -194,7 +196,7 @@ router.put('/:id', authenticate, authorize('admin', 'doctor', 'nurse', 'receptio
     const updates = [];
     const values = [];
 
-    if (ward && WARDS[ward] === undefined) {
+    if (ward && wardCapacity(ward) === undefined) {
       return res.status(400).json({ message: `Unknown ward "${ward}".` });
     }
     const targetWard = ward || adm.ward;
@@ -206,8 +208,8 @@ router.put('/:id', authenticate, authorize('admin', 'doctor', 'nurse', 'receptio
         "SELECT COUNT(*) as count FROM admissions WHERE ward = ? AND status = 'admitted' AND id != ?",
         [targetWard, adm.id]
       );
-      if (activeInTarget[0].count >= WARDS[targetWard]) {
-        return res.status(409).json({ message: `${targetWard} ward is full (${WARDS[targetWard]}/${WARDS[targetWard]} beds).` });
+      if (activeInTarget[0].count >= wardCapacity(targetWard)) {
+        return res.status(409).json({ message: `${targetWard} ward is full (${wardCapacity(targetWard)}/${wardCapacity(targetWard)} beds).` });
       }
       let newBed = bed_number;
       if (!newBed) {
@@ -274,3 +276,4 @@ router.post('/:id/discharge', authenticate, authorize('admin', 'doctor', 'nurse'
 });
 
 module.exports = router;
+module.exports.WARD_CAPACITY = WARDS;

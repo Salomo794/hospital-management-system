@@ -78,6 +78,15 @@
           <span class="nav-text" v-show="!sidebarCollapsed">Pharmacy</span>
         </router-link>
         <router-link 
+          to="/ward" 
+          class="nav-item" 
+          :class="{ active: $route.path.startsWith('/ward') }"
+          @click="closeMobileSidebar"
+        >
+          <span class="nav-icon">&#127973;</span>
+          <span class="nav-text" v-show="!sidebarCollapsed">Wards & Beds</span>
+        </router-link>
+        <router-link 
           to="/laboratory" 
           class="nav-item" 
           :class="{ active: $route.path.startsWith('/laboratory') }"
@@ -212,6 +221,7 @@ export default {
         '/appointments': 'Appointments',
         '/emr': 'Electronic Medical Records',
         '/pharmacy': 'Pharmacy Management',
+        '/ward': 'Wards & Beds',
         '/laboratory': 'Laboratory Management',
         '/billing': 'Billing & Payments',
         '/reports': 'Reports & Analytics',

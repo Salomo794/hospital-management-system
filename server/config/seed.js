@@ -123,7 +123,7 @@ async function seed() {
 
     // --- Portal self-service PINs ---
     const hashedPortalPin = bcrypt.hashSync('password123', 4);
-    await conn.query('UPDATE patients SET portal_pin = COALESCE(portal_pin, ?) WHERE portal_pin IS NULL OR portal_pin = ?', [hashedPortalPin, '']);
+    await conn.query("UPDATE patients SET portal_pin = ? WHERE portal_pin IS NULL OR portal_pin = ''", [hashedPortalPin]);
     console.log('  Portal PINs seeded');
 
     // --- Appointments ---

@@ -149,6 +149,24 @@
               <button class="modal-close" @click="closePrescriptionModal">&times;</button>
             </div>
             <div class="modal-body">
+              <div v-if="record && !noAllergy(record.patient_allergies)" class="alert alert-info" style="margin-bottom: 16px">
+                <span class="alert-icon">&#9888;</span>
+                <div class="alert-content">
+                  <div class="alert-title">Recorded allergies</div>
+                  {{ record.patient_allergies }}
+                </div>
+              </div>
+
+              <div v-if="safetyWarnings.length" class="alert alert-danger" style="margin-bottom: 16px">
+                <span class="alert-icon">&#9940;</span>
+                <div class="alert-content">
+                  <div class="alert-title">Safety warning — review before prescribing</div>
+                  <ul style="margin: 6px 0 0 16px">
+                    <li v-for="(w, i) in safetyWarnings" :key="i">{{ w.message }}</li>
+                  </ul>
+                </div>
+              </div>
+
               <div class="form-group">
                 <label>Notes</label>
                 <textarea
@@ -260,9 +278,18 @@
             <div class="modal-footer">
               <button class="btn btn-sm" @click="closePrescriptionModal">Cancel</button>
               <button
+                v-if="safetyWarnings.length"
+                class="btn btn-sm btn-danger"
+                :disabled="submittingPrescription"
+                @click="submitPrescription(true)"
+              >
+                {{ submittingPrescription ? 'Creating...' : 'Prescribe Anyway' }}
+              </button>
+              <button
+                v-else
                 class="btn btn-sm btn-primary"
                 :disabled="submittingPrescription"
-                @click="submitPrescription"
+                @click="submitPrescription(false)"
               >
                 {{ submittingPrescription ? 'Creating...' : 'Create Prescription' }}
               </button>
@@ -397,6 +424,12 @@ export default {
     // --- Prescription Modal ---
     const showPrescriptionModal = ref(false)
     const submittingPrescription = ref(false)
+    const safetyWarnings = ref([])
+
+    function noAllergy(text) {
+      if (!text) return true
+      return ['none', 'n/a', 'na', 'nil', 'nkda'].includes(String(text).trim().toLowerCase())
+    }
 
     function createEmptyItem() {
       return {
@@ -454,22 +487,25 @@ export default {
     function openPrescriptionModal() {
       prescriptionForm.notes = ''
       prescriptionForm.items = [createEmptyItem()]
+      safetyWarnings.value = []
       showPrescriptionModal.value = true
     }
 
     function closePrescriptionModal() {
       showPrescriptionModal.value = false
+      safetyWarnings.value = []
     }
 
-    async function submitPrescription() {
+    async function submitPrescription(acknowledge = false) {
       const validItems = prescriptionForm.items.filter(i => i.medicine_id && i.frequency)
       if (!validItems.length) {
         toast.warning('Please add at least one item with a medicine and frequency.')
         return
       }
       submittingPrescription.value = true
+      if (!acknowledge) safetyWarnings.value = []
       try {
-        await axios.post('/api/emr/prescriptions', {
+        const { data } = await axios.post('/api/emr/prescriptions', {
           medical_record_id: record.value.id,
           patient_id: record.value.patient_id,
           items: validItems.map(i => ({
@@ -480,13 +516,24 @@ export default {
             quantity: i.quantity,
             instructions: i.instructions
           })),
-          notes: prescriptionForm.notes
+          notes: prescriptionForm.notes,
+          acknowledge_warnings: acknowledge
         })
-        toast.success('Prescription created successfully.')
+        if (data.warnings && data.warnings.length) {
+          toast.warning(`Prescription created with ${data.warnings.length} safety warning(s).`)
+        } else {
+          toast.success('Prescription created successfully.')
+        }
         closePrescriptionModal()
         await fetchRecord()
       } catch (err) {
-        toast.error(err.response?.data?.message || 'Failed to create prescription.')
+        const res = err.response?.data
+        if (err.response?.status === 409 && res?.warnings) {
+          safetyWarnings.value = res.warnings
+          toast.warning(res.message || 'Safety warning detected.')
+        } else {
+          toast.error(res?.message || 'Failed to create prescription.')
+        }
       } finally {
         submittingPrescription.value = false
       }
@@ -582,6 +629,8 @@ export default {
       getStatusColor,
       showPrescriptionModal,
       submittingPrescription,
+      safetyWarnings,
+      noAllergy,
       prescriptionForm,
       searchMedicine,
       selectMedicine,

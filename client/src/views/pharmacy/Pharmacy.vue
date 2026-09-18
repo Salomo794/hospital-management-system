@@ -182,7 +182,29 @@
               <span>Selected: <strong>{{ selectedPrescriptionItem?.medicine_name }}</strong> for {{ selectedPrescriptionItem?.patient_name }}</span>
             </div>
 
-            <form @submit.prevent="dispenseMedicineAction" v-if="dispenseForm.prescription_item_id">
+            <div
+              v-if="selectedPrescriptionItem && !noAllergy(selectedPrescriptionItem.patient_allergies)"
+              class="alert alert-info"
+              style="margin-bottom: 12px"
+            >
+              <span class="alert-icon">&#9888;</span>
+              <div class="alert-content">
+                <div class="alert-title">Recorded allergies</div>
+                {{ selectedPrescriptionItem.patient_allergies }}
+              </div>
+            </div>
+
+            <div v-if="safetyWarnings.length" class="alert alert-danger" style="margin-bottom: 12px">
+              <span class="alert-icon">&#9940;</span>
+              <div class="alert-content">
+                <div class="alert-title">Safety warning — review before dispensing</div>
+                <ul style="margin: 6px 0 0 16px">
+                  <li v-for="(w, i) in safetyWarnings" :key="i">{{ w.message }}</li>
+                </ul>
+              </div>
+            </div>
+
+            <form @submit.prevent="dispenseMedicineAction(false)" v-if="dispenseForm.prescription_item_id">
               <div class="form-group">
                 <label>Quantity to Dispense *</label>
                 <input
@@ -198,7 +220,17 @@
               </div>
               <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" @click="closeDispenseModal">Cancel</button>
-                <button type="submit" class="btn btn-primary" :disabled="dispensing || !dispenseForm.quantity">
+                <button
+                  v-if="safetyWarnings.length"
+                  type="button"
+                  class="btn btn-danger"
+                  :disabled="dispensing || !dispenseForm.quantity"
+                  @click="dispenseMedicineAction(true)"
+                >
+                  <span v-if="dispensing" class="spinner-sm"></span>
+                  {{ dispensing ? 'Dispensing...' : 'Dispense Anyway' }}
+                </button>
+                <button v-else type="submit" class="btn btn-primary" :disabled="dispensing || !dispenseForm.quantity">
                   <span v-if="dispensing" class="spinner-sm"></span>
                   {{ dispensing ? 'Dispensing...' : 'Dispense' }}
                 </button>
@@ -242,6 +274,12 @@ export default {
     const filteredPrescriptionItems = ref([])
     const selectedPrescriptionItem = ref(null)
     const dispenseForm = ref({ prescription_item_id: null, quantity: 1 })
+    const safetyWarnings = ref([])
+
+    const noAllergy = (text) => {
+      if (!text) return true
+      return ['none', 'n/a', 'na', 'nil', 'nkda'].includes(String(text).trim().toLowerCase())
+    }
 
     const loadMedicines = async () => {
       loadingMedicines.value = true
@@ -292,6 +330,7 @@ export default {
       filteredPrescriptionItems.value = []
       selectedPrescriptionItem.value = null
       dispenseForm.value = { prescription_item_id: null, quantity: 1 }
+      safetyWarnings.value = []
       loadingPrescriptions.value = true
       try {
         const { data } = await axios.get('/api/prescriptions/pending-items')
@@ -318,6 +357,7 @@ export default {
     const selectPrescriptionItem = (item) => {
       selectedPrescriptionItem.value = item
       dispenseForm.value = { prescription_item_id: item.id, quantity: 1 }
+      safetyWarnings.value = []
     }
 
     const closeDispenseModal = () => {
@@ -327,18 +367,30 @@ export default {
       filteredPrescriptionItems.value = []
     }
 
-    const dispenseMedicineAction = async () => {
+    const dispenseMedicineAction = async (acknowledge = false) => {
       dispensing.value = true
+      if (!acknowledge) safetyWarnings.value = []
       try {
-        await axios.post('/api/pharmacy/dispense', {
+        const { data } = await axios.post('/api/pharmacy/dispense', {
           prescription_item_id: dispenseForm.value.prescription_item_id,
-          quantity: dispenseForm.value.quantity
+          quantity: dispenseForm.value.quantity,
+          acknowledge_warnings: acknowledge
         })
-        toast.success('Medicine dispensed successfully')
+        if (data.warnings && data.warnings.length) {
+          toast.warning(`Dispensed with ${data.warnings.length} safety warning(s).`)
+        } else {
+          toast.success('Medicine dispensed successfully')
+        }
         closeDispenseModal()
         loadMedicines()
       } catch (e) {
-        toast.error(e.response?.data?.message || 'Error dispensing medicine')
+        const res = e.response?.data
+        if (e.response?.status === 409 && res?.warnings) {
+          safetyWarnings.value = res.warnings
+          toast.warning(res.message || 'Safety warning detected')
+        } else {
+          toast.error(res?.message || 'Error dispensing medicine')
+        }
       } finally {
         dispensing.value = false
       }
@@ -351,6 +403,7 @@ export default {
       loadMedicines, loadAlerts, addMedicine, formatDate, formatCurrency,
       showDispenseModal, dispensing, loadingPrescriptions, prescriptionSearch,
       filteredPrescriptionItems, selectedPrescriptionItem, dispenseForm,
+      safetyWarnings, noAllergy,
       openDispenseModal, closeDispenseModal, filterPrescriptionItems, selectPrescriptionItem,
       dispenseMedicineAction
     }

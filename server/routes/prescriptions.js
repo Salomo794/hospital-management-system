@@ -8,9 +8,11 @@ router.get('/pending-items', authenticate, authorize('admin', 'pharmacist'), asy
   try {
     const [rows] = await pool.query(
       `SELECT pi.id, pi.prescription_id, pi.quantity as quantity_prescribed, pi.dispensed,
-        m.name as medicine_name,
+        pi.medicine_id, pi.dosage, pi.frequency,
+        m.name as medicine_name, m.generic_name as medicine_generic,
+        pr.patient_id,
         p.first_name || ' ' || p.last_name as patient_name,
-        p.mrn as patient_mrn
+        p.mrn as patient_mrn, p.allergies as patient_allergies
        FROM prescription_items pi
        JOIN medicines m ON pi.medicine_id = m.id
        JOIN prescriptions pr ON pi.prescription_id = pr.id

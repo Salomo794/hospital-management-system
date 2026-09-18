@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { evaluateSafety } = require('../utils/safety');
 
 // Get all medicines
 router.get('/medicines', authenticate, async (req, res) => {
@@ -156,20 +157,40 @@ router.put('/medicines/:id', authenticate, authorize('admin', 'pharmacist'), asy
 // Dispense medicine
 router.post('/dispense', authenticate, authorize('pharmacist'), async (req, res) => {
   try {
-    const { prescription_item_id, quantity } = req.body;
+    const { prescription_item_id, quantity, acknowledge_warnings } = req.body;
     const [pi] = await pool.query('SELECT * FROM prescription_items WHERE id = ?', [prescription_item_id]);
     if (pi.length === 0) return res.status(404).json({ message: 'Prescription item not found' });
     const [med] = await pool.query('SELECT * FROM medicines WHERE id = ?', [pi[0].medicine_id]);
     if (med[0].stock_quantity < quantity) {
       return res.status(400).json({ message: 'Insufficient stock' });
     }
+
+    const [pr] = await pool.query('SELECT patient_id FROM prescriptions WHERE id = ?', [pi[0].prescription_id]);
+    const patientId = pr[0] && pr[0].patient_id;
+    const [activeMeds] = await pool.query(
+      `SELECT DISTINCT pi2.medicine_id
+       FROM prescription_items pi2
+       JOIN prescriptions pr2 ON pi2.prescription_id = pr2.id
+       WHERE pr2.patient_id = ? AND pr2.status = 'active' AND pi2.dispensed = 0`,
+      [patientId]
+    );
+    const medIds = [...new Set([...activeMeds.map((m) => m.medicine_id), pi[0].medicine_id])];
+    const safety = await evaluateSafety(patientId, medIds);
+    if (safety.blocking && !acknowledge_warnings) {
+      return res.status(409).json({
+        message: 'Safety alert: dispensing this medicine conflicts with a recorded allergy or a contraindicated interaction.',
+        warnings: safety.warnings,
+        requires_acknowledgement: true,
+      });
+    }
+
     await pool.query('UPDATE medicines SET stock_quantity = stock_quantity - ? WHERE id = ?', [quantity, pi[0].medicine_id]);
     await pool.query("UPDATE prescription_items SET dispensed = TRUE, dispensed_date = datetime('now') WHERE id = ?", [prescription_item_id]);
     await pool.query(
       'INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, reference_number, performed_by) VALUES (?, "dispense", ?, ?, ?)',
       [pi[0].medicine_id, quantity, `RX-${prescription_item_id}`, req.user.id]
     );
-    res.json({ message: 'Medicine dispensed successfully' });
+    res.json({ message: 'Medicine dispensed successfully', warnings: safety.warnings, acknowledged: !!acknowledge_warnings });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });

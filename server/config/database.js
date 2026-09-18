@@ -51,9 +51,8 @@ function migrate() {
   }
 
   // Backfill a default demo PIN for any patient that still lacks one.
-  // COALESCE keeps already-set pins untouched on subsequent starts.
   const defaultPinHash = bcrypt.hashSync('password123', 4);
-  sqlite.prepare('UPDATE patients SET portal_pin = COALESCE(portal_pin, ?) WHERE portal_pin IS NULL OR portal_pin = ?').run(defaultPinHash, '');
+  sqlite.prepare("UPDATE patients SET portal_pin = ? WHERE portal_pin IS NULL OR portal_pin = ''").run(defaultPinHash);
 }
 
 migrate();

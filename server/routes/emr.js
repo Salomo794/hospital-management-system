@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { evaluateSafety } = require('../utils/safety');
 
 // Get medical records for a patient
 router.get('/patient/:patientId', authenticate, async (req, res) => {
@@ -43,7 +44,20 @@ router.get('/prescriptions/:medicalRecordId', authenticate, async (req, res) => 
 
 router.post('/prescriptions', authenticate, authorize('doctor', 'admin'), async (req, res) => {
   try {
-    const { medical_record_id, patient_id, items, notes } = req.body;
+    const { medical_record_id, patient_id, items, notes, acknowledge_warnings } = req.body;
+    if (!items || items.length === 0) {
+      return res.status(400).json({ message: 'At least one medication is required' });
+    }
+
+    const safety = await evaluateSafety(patient_id, items.map((i) => i.medicine_id));
+    if (safety.blocking && !acknowledge_warnings) {
+      return res.status(409).json({
+        message: 'Safety alert: this prescription conflicts with a recorded allergy or a contraindicated interaction.',
+        warnings: safety.warnings,
+        requires_acknowledgement: true,
+      });
+    }
+
     const uuid = uuidv4();
     const prescription_number = `RX-${Date.now().toString(36).toUpperCase()}`;
     const [result] = await pool.query(
@@ -59,7 +73,7 @@ router.post('/prescriptions', authenticate, authorize('doctor', 'admin'), async 
       }
     }
     const [newRx] = await pool.query('SELECT * FROM prescriptions WHERE id = ?', [result.insertId]);
-    res.status(201).json(newRx[0]);
+    res.status(201).json({ ...newRx[0], warnings: safety.warnings, acknowledged: !!acknowledge_warnings });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
@@ -71,7 +85,8 @@ router.get('/:id', authenticate, async (req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT mr.*, u.first_name as doctor_first_name, u.last_name as doctor_last_name,
-        p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn
+        p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn,
+        p.allergies as patient_allergies
         FROM medical_records mr
         JOIN users u ON mr.doctor_id = u.id
         JOIN patients p ON mr.patient_id = p.id

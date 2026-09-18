@@ -21,6 +21,7 @@ const routes = [
       { path: 'appointments', name: 'Appointments', component: () => import('../views/appointments/Appointments.vue') },
       { path: 'emr', name: 'EMR', component: () => import('../views/emr/EMR.vue') },
       { path: 'emr/:id', name: 'EMRDetail', component: () => import('../views/emr/EMRDetail.vue') },
+      { path: 'ward', name: 'Ward', component: () => import('../views/ward/Ward.vue') },
       { path: 'pharmacy', name: 'Pharmacy', component: () => import('../views/pharmacy/Pharmacy.vue') },
       { path: 'laboratory', name: 'Laboratory', component: () => import('../views/laboratory/Laboratory.vue') },
       { path: 'laboratory/orders/:id', name: 'LabOrderDetail', component: () => import('../views/laboratory/LabOrderDetail.vue') },

@@ -2,8 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate } = require('../middleware/auth');
-
-const WARD_CAPACITY = { 'General Medicine': 20, 'Surgery': 12, 'ICU': 8, 'Pediatrics': 10, 'Maternity': 14 };
+const { WARD_CAPACITY } = require('./admissions');
 
 function isoDate(offsetDays = 0) {
   const d = new Date();
@@ -64,11 +63,13 @@ router.get('/forecast', authenticate, async (req, res) => {
     );
     const byWard = {};
     admissions.forEach(a => { byWard[a.ward] = a.occupied; });
-    const wardRows = Object.entries(WARD_CAPACITY).map(([ward, total]) => {
-      const occupied = byWard[ward] || 0;
-      return { ward, occupied: Math.min(occupied, total), total, available: Math.max(total - occupied, 0), pct: Math.round((Math.min(occupied, total) / total) * 100) };
+    const allWards = new Set([...Object.keys(WARD_CAPACITY), ...Object.keys(byWard)]);
+    const wardRows = [...allWards].map((ward) => {
+      const total = WARD_CAPACITY[ward] || 20;
+      const occupied = Math.min(byWard[ward] || 0, total);
+      return { ward, occupied, total, available: Math.max(total - occupied, 0), pct: Math.round((occupied / total) * 100) };
     });
-    const totalBeds = Object.values(WARD_CAPACITY).reduce((s, n) => s + n, 0);
+    const totalBeds = wardRows.reduce((s, w) => s + w.total, 0);
     const totalOccupied = wardRows.reduce((s, w) => s + w.occupied, 0);
     const [discharged7] = await pool.query(
       'SELECT COUNT(*) as count FROM admissions WHERE status = ? AND discharge_date >= date(?, \'-7 days\')',
@@ -196,7 +197,9 @@ router.get('/command-center', authenticate, async (req, res) => {
     );
     const byWard = {};
     admissions.forEach(a => { byWard[a.ward] = a.occupied; });
-    const beds = Object.entries(WARD_CAPACITY).map(([ward, total]) => {
+    const allWards = new Set([...Object.keys(WARD_CAPACITY), ...Object.keys(byWard)]);
+    const beds = [...allWards].map((ward) => {
+      const total = WARD_CAPACITY[ward] || 20;
       const occupied = byWard[ward] || 0;
       return { ward, occupied: Math.min(occupied, total), total, available: Math.max(total - occupied, 0), pct: Math.round((Math.min(occupied, total) / total) * 100) };
     });
