@@ -94,17 +94,11 @@
         <div class="card">
           <div class="card-header">
             <h3>Weekly Overview</h3>
+            <span class="insights-badge">7-day trend</span>
           </div>
           <div class="card-body">
-            <div v-if="weeklyStats.length" class="chart-placeholder">
-              <div class="bar-chart">
-                <div v-for="day in weeklyStats" :key="day.date" class="bar-group">
-                  <div class="bar" :style="{ height: Math.max((day.count / maxWeekly * 120), 4) + 'px' }">
-                    <span class="bar-value">{{ day.count }}</span>
-                  </div>
-                  <div class="bar-label">{{ formatDay(day.date) }}</div>
-                </div>
-              </div>
+            <div v-if="weeklyStats.length" class="chart-wrap">
+              <BarChart :data="weeklyChartData" :options="chartOptions" />
             </div>
             <div v-else class="empty-state">
               <span class="empty-icon">&#128200;</span>
@@ -190,6 +184,43 @@ export default {
 
     const maxWeekly = computed(() => Math.max(...weeklyStats.value.map(d => d.count), 1))
 
+    const weeklyChartData = computed(() => ({
+      labels: weeklyStats.value.map(d => formatDay(d.date)),
+      datasets: [{
+        label: 'Appointments',
+        data: weeklyStats.value.map(d => d.count),
+        backgroundColor: '#0d9488',
+        hoverBackgroundColor: '#14b8a6',
+        borderRadius: 8,
+        maxBarThickness: 42
+      }]
+    }))
+
+    const chartOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#0f172a',
+          titleFont: { family: 'Inter, sans-serif' },
+          bodyFont: { family: 'Inter, sans-serif' },
+          padding: 12,
+          cornerRadius: 8
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: { precision: 0 },
+          grid: { color: '#f1f5f9', drawBorder: false }
+        },
+        x: {
+          grid: { display: false }
+        }
+      }
+    }
+
     const statsCards = computed(() => [
       { label: 'Total Patients', value: stats.value.totalPatients || 0, rawValue: stats.value.totalPatients || 0, icon: '👥', color: '#0d9488' },
       { label: 'Active Doctors', value: stats.value.totalDoctors || 0, rawValue: stats.value.totalDoctors || 0, icon: '👨‍⚕️', color: '#3b82f6' },
@@ -203,7 +234,7 @@ export default {
 
     const formatDay = (d) => new Date(d).toLocaleDateString('en', { weekday: 'short' })
 
-    return { statsCards, recentAppointments, recentPatients, weeklyStats, maxWeekly, loading, insights, formatDate, formatCurrency, formatTime, formatDay, getStatusColor }
+    return { statsCards, recentAppointments, recentPatients, weeklyStats, weeklyChartData, chartOptions, loading, insights, formatDate, formatCurrency, formatTime, formatDay, getStatusColor }
   }
 }
 </script>
@@ -294,16 +325,7 @@ export default {
 .patient-name { font-weight: 500; font-size: 14px; color: #1e293b; }
 .patient-meta { font-size: 12px; color: #94a3b8; }
 
-.chart-placeholder { padding: 10px 0; }
-.bar-chart { display: flex; align-items: flex-end; gap: 12px; height: 160px; padding: 20px 0; }
-.bar-group { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; }
-.bar {
-  width: 100%; max-width: 40px; background: linear-gradient(180deg, #0d9488, #14b8a6);
-  border-radius: 4px 4px 0 0; transition: height 0.4s ease; position: relative;
-  min-height: 4px;
-}
-.bar-value { position: absolute; top: -18px; font-size: 11px; font-weight: 600; color: #1e293b; }
-.bar-label { font-size: 11px; color: #94a3b8; }
+.chart-wrap { height: 230px; padding: 6px 0 2px; }
 
 .quick-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .action-btn {

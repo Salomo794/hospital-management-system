@@ -481,7 +481,7 @@ export default {
   width: 24px;
   height: 24px;
   border: 3px solid #e2e8f0;
-  border-top-color: #3b82f6;
+  border-top-color: #0d9488;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
@@ -534,12 +534,12 @@ export default {
 }
 
 .btn-primary {
-  background: #3b82f6;
+  background: #0d9488;
   color: white;
 }
 
-.btn-primary:hover { background: #2563eb; }
-.btn-primary:disabled { background: #93c5fd; cursor: not-allowed; }
+.btn-primary:hover { background: #0f766e; }
+.btn-primary:disabled { background: #5eead4; cursor: not-allowed; }
 
 .btn-outline {
   background: transparent;

@@ -42,17 +42,8 @@
           <div class="card" style="margin-top:20px">
             <div class="card-header"><h3>Weekly Appointment Trend</h3></div>
             <div class="card-body">
-              <div v-if="weeklyStats.length" class="chart-bars">
-                <div v-for="day in weeklyStats" :key="day.date" class="bar-group">
-                  <div class="bar" :style="{ height: Math.max((day.count / maxWeekly) * 120, 8) + 'px' }">
-                    <span class="bar-label">{{ day.count }}</span>
-                  </div>
-                  <div class="bar-day">{{ formatDay(day.date) }}</div>
-                  <div class="bar-sub">
-                    <span class="completed">{{ day.completed }}</span>/
-                    <span class="cancelled">{{ day.cancelled }}</span>
-                  </div>
-                </div>
+              <div v-if="weeklyStats.length" class="chart-wrap">
+                <BarChart :data="weeklyChartData" :options="barOptions" />
               </div>
               <div v-else class="empty-state">
                 <span class="empty-icon">&#128197;</span>
@@ -118,6 +109,9 @@
             <div class="card-header"><h3>Revenue by Category</h3></div>
             <div class="card-body">
               <div v-if="financial.topServices && financial.topServices.length">
+                <div class="chart-wrap doughnut-wrap">
+                  <DoughnutChart :data="categoryChartData" :options="chartOptions" />
+                </div>
                 <div v-for="s in financial.topServices" :key="s.category" class="report-row">
                   <span class="row-label">{{ formatCategory(s.category) }}</span>
                   <span class="row-value">{{ formatCurrency(s.total_revenue) }}</span>
@@ -248,7 +242,6 @@ export default {
     const loadingFinancial = ref(false)
     const loadingPatients = ref(false)
 
-    const maxWeekly = computed(() => Math.max(...weeklyStats.value.map(d => d.count), 1))
     const totalPatients = computed(() => patientStats.value.byGender.reduce((s, g) => s + g.count, 0) || 1)
     const maxDiagnosisCount = computed(() => {
       if (!patientStats.value.topDiagnoses || !patientStats.value.topDiagnoses.length) return 1
@@ -285,6 +278,70 @@ export default {
 
     const formatDay = (d) => new Date(d).toLocaleDateString('en', { weekday: 'short' })
     const formatCategory = (c) => c ? c.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) : ''
+
+    const weeklyChartData = computed(() => ({
+      labels: weeklyStats.value.map(d => formatDay(d.date)),
+      datasets: [
+        {
+          label: 'Completed',
+          data: weeklyStats.value.map(d => d.completed || 0),
+          backgroundColor: '#10b981',
+          borderRadius: 6,
+          maxBarThickness: 32
+        },
+        {
+          label: 'Cancelled',
+          data: weeklyStats.value.map(d => d.cancelled || 0),
+          backgroundColor: '#f59e0b',
+          borderRadius: 6,
+          maxBarThickness: 32
+        }
+      ]
+    }))
+
+    const barOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: { precision: 0 },
+          grid: { color: '#f1f5f9', drawBorder: false }
+        },
+        x: { grid: { display: false } }
+      },
+      plugins: {
+        legend: { labels: { font: { family: 'Inter, sans-serif' }, usePointStyle: true, boxWidth: 8 } },
+        tooltip: { backgroundColor: '#0f172a', padding: 12, cornerRadius: 8 }
+      }
+    }
+
+    const categoryChartData = computed(() => ({
+      labels: (financial.value.topServices || []).map(s => formatCategory(s.category)),
+      datasets: [{
+        label: 'Revenue',
+        data: (financial.value.topServices || []).map(s => parseFloat(s.total_revenue) || 0),
+        backgroundColor: ['#0d9488', '#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4'],
+        borderWidth: 2,
+        borderColor: '#ffffff'
+      }]
+    }))
+
+    const chartOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { family: 'Inter, sans-serif' }, usePointStyle: true, boxWidth: 8, padding: 14 } },
+        tooltip: {
+          backgroundColor: '#0f172a',
+          padding: 12,
+          cornerRadius: 8,
+          callbacks: {
+            label: (ctx) => ` ${ctx.label}: ${formatCurrency(ctx.parsed)}`
+          }
+        }
+      }
+    }
 
     const loadDashboard = async () => {
       loadingOverview.value = true
@@ -333,8 +390,9 @@ export default {
     onMounted(loadDashboard)
     return {
       activeTab, stats, weeklyStats, period, year, financial, patientStats,
-      maxWeekly, totalPatients, maxDiagnosisCount, hasPatientData,
+      totalPatients, maxDiagnosisCount, hasPatientData,
       totalRevenue, totalExpenses, netIncome, groupedRevenue,
+      weeklyChartData, categoryChartData, barOptions, chartOptions,
       formatDate, formatCurrency, formatDay, formatCategory,
       loadFinancial, loadPatientStats, switchTab,
       loadingOverview, loadingFinancial, loadingPatients
@@ -358,14 +416,8 @@ export default {
 .stats-value { font-size: 24px; font-weight: 700; color: #1e293b; }
 .stats-label { font-size: 13px; color: #64748b; margin-top: 4px; }
 
-.chart-bars { display: flex; align-items: flex-end; gap: 16px; height: 180px; padding: 20px 0; }
-.bar-group { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; }
-.bar { width: 100%; max-width: 50px; background: linear-gradient(180deg, #0d9488, #14b8a6); border-radius: 4px 4px 0 0; position: relative; min-height: 8px; display: flex; align-items: flex-start; justify-content: center; padding-top: 4px; transition: height 0.4s ease; }
-.bar-label { color: white; font-size: 11px; font-weight: 600; }
-.bar-day { font-size: 12px; color: #64748b; }
-.bar-sub { font-size: 10px; color: #94a3b8; }
-.completed { color: #10b981; }
-.cancelled { color: #ef4444; }
+.chart-wrap { height: 240px; }
+.doughnut-wrap { height: 220px; margin-bottom: 8px; }
 
 .filter-bar { display: flex; gap: 12px; margin-bottom: 20px; }
 .filter-bar select, .filter-bar input { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; }
