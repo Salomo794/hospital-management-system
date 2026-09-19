@@ -414,7 +414,20 @@ export default {
 
 .text-muted { color: #94a3b8; text-align: center; padding: 20px; }
 
+@media (max-width: 1024px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
 @media (max-width: 768px) {
   .stats-grid, .report-grid, .financial-summary { grid-template-columns: 1fr; }
+  .tabs-inline { width: 100%; }
+  .tabs-inline button { flex: 1; padding: 10px 12px; justify-content: center; }
+  .filter-bar { flex-direction: column; align-items: stretch; }
+  .filter-bar select, .filter-bar input { width: 100%; }
+}
+
+@media (max-width: 576px) {
+  .tabs-inline { overflow-x: auto; white-space: nowrap; }
+  .tabs-inline button { flex: none; }
 }
 </style>

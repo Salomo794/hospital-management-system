@@ -588,5 +588,57 @@ export default {
 .badge-warning { background: #fffbeb; color: #d97706; }
 .badge-info { background: #eff6ff; color: #2563eb; }
 
-@media (max-width: 768px) { .alerts-grid { grid-template-columns: 1fr; } .interaction-picker { grid-template-columns: 1fr; } }
+@media (max-width: 768px) {
+  .alerts-grid { grid-template-columns: 1fr; }
+  .interaction-picker { grid-template-columns: 1fr; }
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .header-actions {
+    width: 100%;
+  }
+  .header-actions .btn {
+    flex: 1;
+  }
+  .tabs-inline {
+    width: 100%;
+  }
+  .tabs-inline button {
+    flex: 1;
+    padding: 10px 12px;
+    justify-content: center;
+  }
+  .search-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .search-filters input,
+  .search-filters select {
+    width: 100%;
+  }
+  .interaction-summary {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .summary-total {
+    margin-left: 0;
+  }
+  .prescription-item {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}
+
+@media (max-width: 576px) {
+  .tabs-inline {
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .tabs-inline button {
+    flex: none;
+    min-width: max-content;
+  }
+}
 </style>

@@ -210,4 +210,28 @@ export default {
 .empty-state p { font-size: 15px; color: #475569; margin: 0; }
 .empty-hint { font-size: 13px; color: #94a3b8; }
 .full-page-empty { padding: 80px 20px; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .page-header .search-bar {
+    max-width: 100%;
+    width: 100%;
+  }
+  .page-header .btn {
+    width: 100%;
+  }
+  .selected-patient-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .selected-patient-banner .btn {
+    align-self: flex-end;
+  }
+}
 </style>

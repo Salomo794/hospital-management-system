@@ -338,4 +338,22 @@ export default {
 .empty-state p {
   margin: 0 0 16px;
 }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .header-right {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .search-bar input {
+    width: 100%;
+  }
+  .filter-group select {
+    width: 100%;
+  }
+}
 </style>

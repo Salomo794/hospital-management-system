@@ -1311,5 +1311,18 @@ select.form-control {
   .vitals-grid {
     grid-template-columns: 1fr 1fr;
   }
+  .detail-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .vitals-grid {
+    grid-template-columns: 1fr;
+  }
+  .record-title h2 {
+    font-size: 17px;
+  }
 }
 </style>

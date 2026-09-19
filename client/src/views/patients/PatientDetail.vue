@@ -202,5 +202,14 @@ export default {
 
 .text-muted { color: #94a3b8; font-size: 12px; }
 .text-danger { color: #ef4444; }
-@media (max-width: 768px) { .detail-grid { grid-template-columns: 1fr; } .info-grid { grid-template-columns: 1fr; } }
+@media (max-width: 768px) {
+  .detail-grid { grid-template-columns: 1fr; }
+  .info-grid { grid-template-columns: 1fr; }
+  .detail-header { flex-wrap: wrap; gap: 12px; }
+  .tabs { overflow-x: auto; white-space: nowrap; }
+  .tabs button { flex: 1; padding: 10px 14px; }
+}
+@media (max-width: 480px) {
+  .patient-title { flex-wrap: wrap; }
+}
 </style>

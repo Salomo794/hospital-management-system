@@ -181,4 +181,20 @@ export default {
 .chat-input input { flex: 1; padding: 12px 16px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; outline: none; }
 .chat-input input:focus { border-color: #0d9488; }
 .chat-input .btn { padding: 12px 20px; font-size: 16px; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .ai-assistant { height: calc(100vh - 120px); }
+  .message { max-width: 100%; }
+  .chat-messages { padding: 14px; }
+  .chat-input { padding: 12px 14px; }
+  .chat-input .btn { padding: 12px 16px; }
+  .data-key { min-width: 90px; }
+}
+
+@media (max-width: 480px) {
+  .message-content { font-size: 13px; padding: 10px 12px; }
+  .quick-actions button { width: 100%; }
+  .chat-input input { font-size: 13px; padding: 10px 12px; }
+}
 </style>

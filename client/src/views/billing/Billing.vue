@@ -780,4 +780,49 @@ export default {
   font-weight: 700;
   font-size: 16px;
 }
+
+/* Responsive */
+@media (max-width: 900px) {
+  .billing-stats {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .billing-page {
+    padding: 12px;
+  }
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .page-header .btn {
+    width: 100%;
+  }
+  .search-filters {
+    flex-direction: column;
+  }
+  .search-filters select,
+  .search-filters input {
+    width: 100%;
+  }
+  .billing-stats {
+    grid-template-columns: 1fr;
+  }
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+  .bill-item {
+    flex-wrap: wrap;
+  }
+  .totals-row {
+    grid-template-columns: 1fr;
+  }
+  .modal-footer {
+    flex-direction: column;
+  }
+  .modal-footer .btn {
+    width: 100%;
+  }
+}
 </style>

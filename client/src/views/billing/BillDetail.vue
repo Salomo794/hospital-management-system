@@ -205,6 +205,12 @@ export default {
 .spinner { width: 40px; height: 40px; border: 4px solid #e2e8f0; border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-@media (max-width: 768px) { .bill-grid { grid-template-columns: 1fr; } }
+@media (max-width: 768px) {
+  .bill-grid { grid-template-columns: 1fr; }
+  .detail-header { flex-wrap: wrap; gap: 12px; }
+  .action-bar { flex-direction: column; }
+  .action-bar .btn { width: 100%; }
+  .payment-info { flex-direction: column; gap: 4px; align-items: flex-start; }
+}
 @media print { .detail-header .btn, .action-bar { display: none; } .modal-overlay { display: none !important; } }
 </style>

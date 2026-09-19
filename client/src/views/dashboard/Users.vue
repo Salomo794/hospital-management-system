@@ -123,5 +123,6 @@ export default {
   .page-header { flex-direction: column; align-items: stretch; }
   .header-actions { flex-direction: column; }
   .search-bar input { width: 100%; }
+  .filter-group select { width: 100%; }
 }
 </style>

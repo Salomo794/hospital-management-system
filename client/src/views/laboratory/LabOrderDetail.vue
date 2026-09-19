@@ -503,4 +503,38 @@ export default {
   margin-right: 6px;
   vertical-align: middle;
 }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .detail-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .info-bar {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .demo-grid {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .result-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .action-bar {
+    justify-content: stretch;
+  }
+  .action-bar .btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .result-grid {
+    grid-template-columns: 1fr;
+  }
+  .record-title h2 {
+    font-size: 17px;
+  }
+}
 </style>

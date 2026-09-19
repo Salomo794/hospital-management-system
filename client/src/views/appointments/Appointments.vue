@@ -534,4 +534,40 @@ export default {
   align-items: center;
   gap: 6px;
 }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .page-header .btn {
+    width: 100%;
+  }
+  .filter-group {
+    flex-direction: column;
+  }
+  .filter-group select,
+  .filter-group input {
+    width: 100%;
+  }
+  .btn-group {
+    flex-wrap: wrap;
+  }
+  .btn-group .btn {
+    flex: 1;
+    min-width: 70px;
+  }
+  .pagination {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px;
+  }
+}
+
+@media (max-width: 576px) {
+  .page-title {
+    font-size: 17px;
+  }
+}
 </style>

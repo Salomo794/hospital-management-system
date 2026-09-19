@@ -413,4 +413,29 @@ export default {
 .modal-close:hover {
   color: #1e293b;
 }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .search-bar input {
+    width: 100%;
+  }
+  .page-header .btn {
+    width: 100%;
+  }
+  .actions-cell {
+    flex-wrap: wrap;
+  }
+  .actions-cell .btn {
+    flex: 1;
+    min-width: 60px;
+  }
+  .pagination {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
 </style>

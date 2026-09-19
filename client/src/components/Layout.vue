@@ -319,7 +319,7 @@ export default {
 .layout {
   display: flex;
   min-height: 100vh;
-  background: #f1f5f9;
+  background: linear-gradient(160deg, #f0fdfa 0%, #eff6ff 45%, #f8fafc 100%);
 }
 
 .backdrop {
@@ -462,6 +462,27 @@ export default {
   
   .main-content.expanded {
     margin-left: 0;
+  }
+
+  .page-content {
+    padding: 16px;
+  }
+
+  .top-header {
+    padding: 12px 16px;
+  }
+
+  .notification-drawer {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .user-info {
+    display: none;
+  }
+
+  .page-title {
+    font-size: 17px;
   }
 }
 

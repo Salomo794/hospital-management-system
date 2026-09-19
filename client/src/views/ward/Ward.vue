@@ -451,5 +451,15 @@ export default {
 @media (max-width: 768px) {
   .wards-grid { grid-template-columns: 1fr; }
   .selected-bed-body { grid-template-columns: 1fr; }
+  .stats-grid { grid-template-columns: 1fr; }
+  .page-header { flex-direction: column; align-items: stretch; gap: 12px; }
+  .header-actions { width: 100%; }
+  .header-actions .btn { flex: 1; }
+  .search-filters { flex-direction: column; align-items: stretch; }
+  .search-filters input,
+  .search-filters select { width: 100%; }
+}
+@media (max-width: 480px) {
+  .bed { width: 34px; height: 34px; font-size: 11px; }
 }
 </style>

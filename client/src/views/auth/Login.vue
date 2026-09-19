@@ -159,5 +159,16 @@ export default {
 @media (max-width: 768px) {
   .login-container { flex-direction: column; }
   .login-left { padding: 24px; }
+  .login-right { padding: 28px; }
+}
+
+@media (max-width: 576px) {
+  .login-page { padding: 12px; }
+  .login-left { padding: 20px; display: block; }
+  .login-right { padding: 20px; }
+  .login-features { margin-top: 20px; }
+  .feature { font-size: 13px; }
+  .brand-icon { font-size: 36px; }
+  .login-brand h1 { font-size: 24px; }
 }
 </style>

@@ -355,4 +355,37 @@ export default {
   font-size: 13px;
   color: #94a3b8;
 }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .lab-page {
+    padding: 12px;
+  }
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .tabs-inline {
+    width: 100%;
+  }
+  .tabs-inline button {
+    flex: 1;
+    padding: 10px 12px;
+    justify-content: center;
+  }
+  .search-filters select {
+    width: 100%;
+  }
+}
+
+@media (max-width: 576px) {
+  .tabs-inline {
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .tabs-inline button {
+    flex: none;
+  }
+}
 </style>
