@@ -2,7 +2,6 @@
   <div class="doctors-page">
     <div class="page-header">
       <div class="header-left">
-        <h2>Doctors</h2>
         <span class="doctor-count" v-if="!loading">{{ doctors.length }} doctor{{ doctors.length !== 1 ? 's' : '' }}</span>
       </div>
       <div class="header-right">
@@ -151,11 +150,12 @@ export default {
   margin-bottom: 24px;
   gap: 16px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .header-left {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
 }
 
@@ -165,8 +165,13 @@ export default {
 }
 
 .doctor-count {
-  font-size: 14px;
-  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-bg);
+  padding: 5px 12px;
+  border-radius: 20px;
+  white-space: nowrap;
 }
 
 .header-right {

@@ -2,8 +2,9 @@
   <div class="login-page">
     <div class="login-container">
       <div class="login-left">
+        <div class="login-pattern" aria-hidden="true"></div>
         <div class="login-brand">
-          <div class="brand-icon">&#x2695;</div>
+          <div class="brand-icon" v-html="brandIcon"></div>
           <h1>MediCare</h1>
           <p>Hospital Management System</p>
         </div>
@@ -13,6 +14,10 @@
           <div class="feature"><span>&#10003;</span> Pharmacy Management</div>
           <div class="feature"><span>&#10003;</span> AI-Powered Assistant</div>
           <div class="feature"><span>&#10003;</span> Real-time Analytics</div>
+        </div>
+        <div class="login-footnote">
+          <span class="foot-dot"></span>
+          Role-based access &middot; Encrypted sessions
         </div>
       </div>
       <div class="login-right">
@@ -31,10 +36,21 @@
 
           <div class="form-group" :class="{ 'has-error': passwordTouched && !password }">
             <label>Password</label>
-            <input
-              type="password" v-model="password" placeholder="Enter your password"
-              @blur="passwordTouched = true"
-            />
+            <div class="input-wrap">
+              <input
+                :type="showPassword ? 'text' : 'password'"
+                v-model="password" placeholder="Enter your password"
+                @blur="passwordTouched = true"
+              />
+              <button
+                type="button" class="reveal"
+                @click="showPassword = !showPassword"
+                :aria-label="showPassword ? 'Hide password' : 'Show password'"
+                :title="showPassword ? 'Hide password' : 'Show password'"
+              >
+                <span v-html="showPassword ? eyeOffIcon : eyeIcon"></span>
+              </button>
+            </div>
             <span class="field-error" v-if="passwordTouched && !password">Password is required</span>
           </div>
 
@@ -67,6 +83,13 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../store/auth'
 import { useToast } from '../../store/toast'
 
+const svg = (body) =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+
+const brandIcon = svg('<path d="M12 6.5v11M6.5 12h11"/>')
+const eyeIcon = svg('<path d="M2.2 12S5.6 5.5 12 5.5 21.8 12 21.8 12 18.4 18.5 12 18.5 2.2 12 2.2 12Z"/><circle cx="12" cy="12" r="3.1"/>')
+const eyeOffIcon = svg('<path d="M9.9 5.7A9.6 9.6 0 0 1 12 5.5c6.4 0 9.8 6.5 9.8 6.5a17.6 17.6 0 0 1-3.4 4.2"/><path d="M6.4 7.4A17.4 17.4 0 0 0 2.2 12S5.6 18.5 12 18.5a9.7 9.7 0 0 0 4.2-.9"/><path d="M9.9 9.9a3.1 3.1 0 0 0 4.3 4.3"/><path d="M3 3l18 18"/>')
+
 export default {
   name: 'Login',
   setup() {
@@ -78,6 +101,7 @@ export default {
     const loading = ref(false)
     const emailTouched = ref(false)
     const passwordTouched = ref(false)
+    const showPassword = ref(false)
 
     const handleLogin = async () => {
       emailTouched.value = true
@@ -107,7 +131,10 @@ export default {
       passwordTouched.value = false
     }
 
-    return { email, password, loading, emailTouched, passwordTouched, handleLogin, fillDemo }
+    return {
+      email, password, loading, emailTouched, passwordTouched, showPassword,
+      handleLogin, fillDemo, brandIcon, eyeIcon, eyeOffIcon
+    }
   }
 }
 </script>
@@ -125,12 +152,39 @@ export default {
 .login-left {
   flex: 1; background: linear-gradient(135deg, #0d9488 0%, #0f4c5c 100%);
   color: white; padding: 40px; display: flex; flex-direction: column;
-  justify-content: center;
+  justify-content: center; position: relative; overflow: hidden;
 }
-.brand-icon { font-size: 48px; margin-bottom: 16px; }
-.login-brand h1 { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+.login-pattern {
+  position: absolute; inset: 0;
+  background-image:
+    radial-gradient(circle at 82% 12%, rgba(255,255,255,0.16) 0, transparent 34%),
+    radial-gradient(circle at 12% 88%, rgba(117,224,207,0.22) 0, transparent 40%),
+    linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+  background-size: auto, auto, 34px 34px, 34px 34px;
+  pointer-events: none;
+}
+.login-left > *:not(.login-pattern) { position: relative; z-index: 1; }
+.brand-icon {
+  width: 54px; height: 54px; border-radius: 15px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  display: grid; place-items: center; margin-bottom: 18px;
+}
+.brand-icon :deep(svg) { width: 28px; height: 28px; stroke-width: 2.4; color: #75e0cf; }
+.login-brand h1 { font-size: 30px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.02em; }
 .login-brand p { opacity: 0.8; font-size: 14px; }
-.login-features { margin-top: 40px; }
+.login-features { margin-top: 38px; }
+.login-footnote {
+  margin-top: auto; padding-top: 32px;
+  display: flex; align-items: center; gap: 9px;
+  font-size: 11.5px; letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.62);
+}
+.foot-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #75e0cf; box-shadow: 0 0 0 4px rgba(117, 224, 207, 0.18);
+}
 .feature {
   display: flex; align-items: center; gap: 12px;
   padding: 8px 0; font-size: 14px; opacity: 0.9;
@@ -140,6 +194,18 @@ export default {
 .login-form h2 { font-size: 24px; color: #1e293b; margin-bottom: 4px; }
 .subtitle { color: #64748b; margin-bottom: 24px; font-size: 14px; }
 .btn-block { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.input-wrap { position: relative; display: flex; align-items: center; }
+.input-wrap input { padding-right: 44px; }
+.reveal {
+  position: absolute; right: 8px;
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0;
+  background: none; border: none; border-radius: 7px;
+  color: #94a3b8; cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+.reveal:hover { color: #0d9488; background: #f0fdfa; }
+.reveal :deep(svg) { width: 17px; height: 17px; }
 .btn-spinner {
   width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3);
   border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite;
@@ -158,17 +224,19 @@ export default {
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 768px) {
   .login-container { flex-direction: column; }
-  .login-left { padding: 24px; }
+  .login-left { padding: 26px 24px; }
   .login-right { padding: 28px; }
 }
 
 @media (max-width: 576px) {
   .login-page { padding: 12px; }
-  .login-left { padding: 20px; display: block; }
+  .login-left { padding: 24px 20px; }
   .login-right { padding: 20px; }
-  .login-features { margin-top: 20px; }
+  .login-features { margin-top: 22px; }
   .feature { font-size: 13px; }
-  .brand-icon { font-size: 36px; }
-  .login-brand h1 { font-size: 24px; }
+  .brand-icon { width: 46px; height: 46px; border-radius: 13px; margin-bottom: 14px; }
+  .brand-icon :deep(svg) { width: 24px; height: 24px; }
+  .login-brand h1 { font-size: 25px; }
+  .login-footnote { padding-top: 22px; }
 }
 </style>

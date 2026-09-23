@@ -25,6 +25,15 @@ const portalRoutes = require('./routes/portal');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Fail loudly in development if the JWT secret is missing or still the
+// placeholder from .env.example — otherwise every token is forgeable.
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'change_this_to_a_secure_random_string') {
+  console.warn(
+    '[security] JWT_SECRET is missing or still the .env.example placeholder. ' +
+    'Set a long random value in server/.env before deploying.'
+  );
+}
+
 // Middleware
 app.use(helmet());
 app.use(cors());

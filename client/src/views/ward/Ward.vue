@@ -1,8 +1,7 @@
 <template>
   <div class="ward-page">
     <div class="page-header">
-      <h2>Ward &amp; Admission Management</h2>
-      <div class="header-actions">
+      <div class="header-actions ml-auto">
         <button class="btn btn-outline" @click="loadAll">Refresh</button>
         <button class="btn btn-primary" @click="openAdmitModal" v-if="canAdmit">+ Admit Patient</button>
       </div>

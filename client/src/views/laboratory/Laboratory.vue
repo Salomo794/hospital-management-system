@@ -1,7 +1,6 @@
 <template>
   <div class="lab-page">
     <div class="page-header">
-      <h1>Laboratory</h1>
       <div class="tabs-inline">
         <button :class="{ active: view === 'orders' }" @click="switchTab('orders')">
           Lab Orders

@@ -4,10 +4,13 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
+const { validateRegistration } = require('../middleware/validation');
 
-// Register
-router.post('/register', async (req, res) => {
+// Register — admin-only user creation.
+// Previously this endpoint was completely open: anyone could POST
+// { role: 'admin' } and receive a valid admin JWT without authentication.
+router.post('/register', authenticate, authorize('admin'), validateRegistration, async (req, res) => {
   try {
     const { email, password, first_name, last_name, role, phone } = req.body;
     const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [email]);
@@ -20,9 +23,9 @@ router.post('/register', async (req, res) => {
       'INSERT INTO users (uuid, email, password, role, first_name, last_name, phone) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [uuid, email, hashedPassword, role, first_name, last_name, phone]
     );
-    const token = jwt.sign({ id: result.insertId, role }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE });
+    // Do not issue a JWT for the newly created user — the admin creating
+    // the account stays logged in as themselves.
     res.status(201).json({
-      token,
       user: { id: result.insertId, uuid, email, role, first_name, last_name }
     });
   } catch (error) {

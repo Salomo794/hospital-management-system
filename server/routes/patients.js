@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { validatePatient } = require('../middleware/validation');
 
 // Generate MRN
 function generateMRN() {
@@ -48,7 +49,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // Create patient
-router.post('/', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), async (req, res) => {
+router.post('/', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), validatePatient, async (req, res) => {
   try {
     const { first_name, last_name, date_of_birth, gender, blood_type, phone, email, address,
       emergency_contact_name, emergency_contact_phone, insurance_provider, insurance_number,

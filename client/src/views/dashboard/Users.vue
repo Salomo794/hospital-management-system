@@ -2,7 +2,6 @@
   <div class="users-page">
     <div class="page-header">
       <div class="header-left">
-        <h2>Staff Members</h2>
         <span class="user-count badge badge-info" v-if="!loading">{{ total }} users</span>
       </div>
       <div class="header-actions">

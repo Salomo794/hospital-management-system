@@ -1,141 +1,67 @@
 <template>
   <div class="layout">
     <!-- Mobile Backdrop -->
-    <div 
-      v-if="mobileOpen" 
-      class="backdrop" 
+    <div
+      v-if="mobileOpen"
+      class="backdrop"
       @click="mobileOpen = false"
     ></div>
 
     <!-- Sidebar -->
-    <aside 
-      class="sidebar" 
+    <aside
+      class="sidebar"
       :class="{ collapsed: sidebarCollapsed, 'mobile-open': mobileOpen }"
     >
       <div class="sidebar-header">
         <div class="logo">
-          <span class="logo-icon">&#x2695;</span>
+          <span class="logo-icon" v-html="logoIcon"></span>
           <span class="logo-lockup" v-show="!sidebarCollapsed">
             <span class="logo-text">MediCare</span>
             <span class="logo-subtitle">Clinical operations</span>
           </span>
         </div>
-        <button class="sidebar-toggle" @click="toggleSidebar">
+        <button
+          class="sidebar-toggle"
+          @click="toggleSidebar"
+          :aria-label="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        >
           <span v-if="sidebarCollapsed || mobileOpen">&#10005;</span>
           <span v-else>&#9776;</span>
         </button>
       </div>
+
       <nav class="sidebar-nav">
-        <router-link 
-          to="/dashboard" 
-          class="nav-item" 
-          :class="{ active: $route.path === '/dashboard' }"
-          @click="closeMobileSidebar"
-        >
-          <span class="nav-icon">&#9632;</span>
-          <span class="nav-text" v-show="!sidebarCollapsed">Dashboard</span>
-        </router-link>
-        <router-link 
-          to="/patients" 
-          class="nav-item" 
-          :class="{ active: $route.path.startsWith('/patients') }"
-          @click="closeMobileSidebar"
-        >
-          <span class="nav-icon">&#9823;</span>
-          <span class="nav-text" v-show="!sidebarCollapsed">Patients</span>
-        </router-link>
-        <router-link 
-          to="/doctors" 
-          class="nav-item" 
-          :class="{ active: $route.path.startsWith('/doctors') }"
-          @click="closeMobileSidebar"
-        >
-          <span class="nav-icon">&#9877;</span>
-          <span class="nav-text" v-show="!sidebarCollapsed">Doctors</span>
-        </router-link>
-        <router-link 
-          to="/appointments" 
-          class="nav-item" 
-          :class="{ active: $route.path.startsWith('/appointments') }"
-          @click="closeMobileSidebar"
-        >
-          <span class="nav-icon">&#128197;</span>
-          <span class="nav-text" v-show="!sidebarCollapsed">Appointments</span>
-        </router-link>
-        <router-link 
-          to="/emr" 
-          class="nav-item" 
-          :class="{ active: $route.path.startsWith('/emr') }"
-          @click="closeMobileSidebar"
-        >
-          <span class="nav-icon">&#128203;</span>
-          <span class="nav-text" v-show="!sidebarCollapsed">Medical Records</span>
-        </router-link>
-        <router-link 
-          to="/pharmacy" 
-          class="nav-item" 
-          :class="{ active: $route.path.startsWith('/pharmacy') }"
-          @click="closeMobileSidebar"
-        >
-          <span class="nav-icon">&#9764;</span>
-          <span class="nav-text" v-show="!sidebarCollapsed">Pharmacy</span>
-        </router-link>
-        <router-link 
-          to="/ward" 
-          class="nav-item" 
-          :class="{ active: $route.path.startsWith('/ward') }"
-          @click="closeMobileSidebar"
-        >
-          <span class="nav-icon">&#127973;</span>
-          <span class="nav-text" v-show="!sidebarCollapsed">Wards & Beds</span>
-        </router-link>
-        <router-link 
-          to="/laboratory" 
-          class="nav-item" 
-          :class="{ active: $route.path.startsWith('/laboratory') }"
-          @click="closeMobileSidebar"
-        >
-          <span class="nav-icon">&#9879;</span>
-          <span class="nav-text" v-show="!sidebarCollapsed">Laboratory</span>
-        </router-link>
-        <router-link 
-          to="/billing" 
-          class="nav-item" 
-          :class="{ active: $route.path.startsWith('/billing') }"
-          @click="closeMobileSidebar"
-        >
-          <span class="nav-icon">&#128176;</span>
-          <span class="nav-text" v-show="!sidebarCollapsed">Billing</span>
-        </router-link>
-        <router-link 
-          to="/reports" 
-          class="nav-item" 
-          :class="{ active: $route.path.startsWith('/reports') }"
-          @click="closeMobileSidebar"
-        >
-          <span class="nav-icon">&#128200;</span>
-          <span class="nav-text" v-show="!sidebarCollapsed">Reports</span>
-        </router-link>
-        <router-link 
-          to="/ai-assistant" 
-          class="nav-item" 
-          :class="{ active: $route.path.startsWith('/ai') }"
-          @click="closeMobileSidebar"
-        >
-          <span class="nav-icon">&#129302;</span>
-          <span class="nav-text" v-show="!sidebarCollapsed">AI Assistant</span>
-        </router-link>
-        <router-link 
-          v-if="authStore.userRole === 'admin'" 
-          to="/users" 
-          class="nav-item" 
-          :class="{ active: $route.path === '/users' }"
-          @click="closeMobileSidebar"
-        >
-          <span class="nav-icon">&#9881;</span>
-          <span class="nav-text" v-show="!sidebarCollapsed">User Management</span>
-        </router-link>
+        <template v-for="section in navSections" :key="section.title">
+          <div
+            class="sidebar-section-title"
+            v-if="section.items.length"
+          >
+            {{ section.title }}
+          </div>
+          <router-link
+            v-for="item in section.items"
+            :key="item.to"
+            :to="item.to"
+            class="nav-item"
+            :class="{ active: isActive(item) }"
+            :title="sidebarCollapsed ? item.label : ''"
+            @click="closeMobileSidebar"
+          >
+            <span class="nav-icon" v-html="item.icon"></span>
+            <span class="nav-text" v-show="!sidebarCollapsed">{{ item.label }}</span>
+          </router-link>
+        </template>
       </nav>
+
+      <div class="sidebar-footer" v-show="!sidebarCollapsed">
+        <div class="facility-chip">
+          <span class="facility-dot"></span>
+          <span class="facility-text">
+            <strong>Central General Hospital</strong>
+            <small>Ward capacity 78%</small>
+          </span>
+        </div>
+      </div>
     </aside>
 
     <!-- Main Content -->
@@ -147,17 +73,19 @@
             &#9776;
           </button>
           <div class="page-heading">
-            <span class="page-kicker">Workspace / Live view</span>
+            <span class="page-kicker">{{ pageKicker }}</span>
             <h1 class="page-title">{{ pageTitle }}</h1>
           </div>
         </div>
         <div class="header-right">
+          <div class="header-date">{{ todayLabel }}</div>
           <div class="system-status"><span class="status-pulse"></span> Systems operational</div>
+
           <!-- Notification Bell -->
-          <div class="notification-bell" @click="showNotifications = !showNotifications">
-            <span>&#128276;</span>
-            <span class="notification-badge" v-if="unreadCount > 0">{{ unreadCount }}</span>
-          </div>
+          <button class="notification-bell" @click="showNotifications = !showNotifications" aria-label="Notifications">
+            <span v-html="bellIcon"></span>
+            <span class="notification-badge" v-if="unreadCount > 0">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+          </button>
 
           <!-- User Dropdown -->
           <div class="user-dropdown" @click="showDropdown = !showDropdown">
@@ -166,8 +94,13 @@
               <span class="user-name">{{ authStore.userName }}</span>
               <span class="user-role">{{ authStore.userRole }}</span>
             </div>
+            <span class="chevron" :class="{ open: showDropdown }" v-html="chevronIcon"></span>
             <div class="dropdown-menu" v-show="showDropdown">
-              <a href="#" @click.prevent="logout">&#128682; Logout</a>
+              <div class="dropdown-head">
+                <span class="dropdown-name">{{ authStore.userName }}</span>
+                <span class="dropdown-mail">{{ authStore.user?.email || '' }}</span>
+              </div>
+              <a href="#" @click.prevent="logout"><span v-html="logoutIcon"></span> Sign out</a>
             </div>
           </div>
         </div>
@@ -188,15 +121,25 @@
       <div class="notification-drawer">
         <div class="drawer-header">
           <h3>Notifications</h3>
-          <button class="btn btn-sm" @click="markAllRead">Mark all read</button>
+          <div class="drawer-actions">
+            <span class="drawer-count" v-if="unreadCount">{{ unreadCount }} new</span>
+            <button class="btn btn-sm btn-mark" @click="markAllRead">Mark all read</button>
+          </div>
         </div>
         <div class="notification-list">
           <div v-for="n in notifications" :key="n.id" class="notification-item" :class="{ unread: !n.is_read }">
-            <div class="notification-title">{{ n.title }}</div>
-            <div class="notification-message">{{ n.message }}</div>
-            <div class="notification-time">{{ formatTime(n.created_at) }}</div>
+            <span class="notification-dot" v-if="!n.is_read"></span>
+            <div class="notification-body">
+              <div class="notification-title">{{ n.title }}</div>
+              <div class="notification-message">{{ n.message }}</div>
+              <div class="notification-time">{{ formatTime(n.created_at) }}</div>
+            </div>
           </div>
-          <div v-if="notifications.length === 0" class="notification-empty">No notifications</div>
+          <div v-if="notifications.length === 0" class="notification-empty">
+            <span class="empty-bell" v-html="bellIcon"></span>
+            <p>You're all caught up</p>
+            <small>No new notifications right now.</small>
+          </div>
         </div>
       </div>
     </div>
@@ -209,13 +152,31 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../store/auth'
 import axios from 'axios'
 
+const svg = (body) =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+
+const icons = {
+  dashboard: svg('<rect x="3" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="3" width="7" height="7" rx="1.6"/><rect x="3" y="14" width="7" height="7" rx="1.6"/><rect x="14" y="14" width="7" height="7" rx="1.6"/>'),
+  patients: svg('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
+  doctors: svg('<path d="M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/>'),
+  appointments: svg('<rect x="3" y="4.5" width="18" height="17" rx="2.2"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/><path d="M8.5 14.5h3"/>'),
+  records: svg('<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2.5" width="8" height="4" rx="1.2"/><path d="M8.5 12.5h7M8.5 16.5h4.5"/>'),
+  pharmacy: svg('<path d="M10.5 20.5 3.6 13.6a4.9 4.9 0 0 1 6.9-6.9l6.9 6.9a4.9 4.9 0 0 1-6.9 6.9Z"/><path d="M8.2 8.2l6.9 6.9"/>'),
+  ward: svg('<path d="M4 21V5.5A2.5 2.5 0 0 1 6.5 3h7A2.5 2.5 0 0 1 16 5.5V21"/><path d="M16 10h2.5A2.5 2.5 0 0 1 21 12.5V21"/><path d="M9.5 7.5h3M11 6v3"/><path d="M2 21h20"/>'),
+  laboratory: svg('<path d="M9.5 2.5h5"/><path d="M10.5 2.5v6.4L5 18.2A2 2 0 0 0 6.7 21.2h10.6A2 2 0 0 0 19 18.2l-5.5-9.3V2.5"/><path d="M7.6 15h8.8"/>'),
+  billing: svg('<rect x="2.5" y="5" width="19" height="14" rx="2.4"/><path d="M2.5 9.8h19"/><path d="M6.5 14.6h3.5"/>'),
+  reports: svg('<path d="M3.5 3.5v17h17"/><path d="M7.5 17v-4.5M12 17V8M16.5 17v-6.5"/>'),
+  ai: svg('<path d="M12 3.2l1.8 4.4 4.4 1.8-4.4 1.8L12 15.6l-1.8-4.4L5.8 9.4l4.4-1.8L12 3.2Z"/><path d="M18.6 15.4l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8.8-1.9Z"/>'),
+  users: svg('<circle cx="12" cy="12" r="3.1"/><path d="M19.1 14.4a1.6 1.6 0 0 0 .32 1.76l.06.06a1.94 1.94 0 1 1-2.74 2.74l-.06-.06a1.6 1.6 0 0 0-1.76-.32 1.6 1.6 0 0 0-.97 1.46v.17a1.94 1.94 0 1 1-3.88 0v-.09a1.6 1.6 0 0 0-1.04-1.46 1.6 1.6 0 0 0-1.76.32l-.06.06a1.94 1.94 0 1 1-2.74-2.74l.06-.06a1.6 1.6 0 0 0 .32-1.76 1.6 1.6 0 0 0-1.46-.97H3.3a1.94 1.94 0 1 1 0-3.88h.09a1.6 1.6 0 0 0 1.46-1.04 1.6 1.6 0 0 0-.32-1.76l-.06-.06a1.94 1.94 0 1 1 2.74-2.74l.06.06a1.6 1.6 0 0 0 1.76.32h.08A1.6 1.6 0 0 0 10.1 4.4v-.17a1.94 1.94 0 1 1 3.88 0v.09a1.6 1.6 0 0 0 .97 1.46 1.6 1.6 0 0 0 1.76-.32l.06-.06a1.94 1.94 0 1 1 2.74 2.74l-.06.06a1.6 1.6 0 0 0-.32 1.76v.08a1.6 1.6 0 0 0 1.46.97h.17a1.94 1.94 0 1 1 0 3.88h-.09a1.6 1.6 0 0 0-1.46.97Z"/>')
+}
+
 export default {
   name: 'Layout',
   setup() {
     const route = useRoute()
     const router = useRouter()
     const authStore = useAuthStore()
-    
+
     const sidebarCollapsed = ref(false)
     const mobileOpen = ref(false)
     const showDropdown = ref(false)
@@ -224,23 +185,83 @@ export default {
     const unreadCount = ref(0)
     let notificationInterval = null
 
-    const pageTitle = computed(() => {
-      const titles = {
-        '/dashboard': 'Dashboard',
-        '/patients': 'Patient Management',
-        '/doctors': 'Doctor Management',
-        '/appointments': 'Appointments',
-        '/emr': 'Electronic Medical Records',
-        '/pharmacy': 'Pharmacy Management',
-        '/ward': 'Wards & Beds',
-        '/laboratory': 'Laboratory Management',
-        '/billing': 'Billing & Payments',
-        '/reports': 'Reports & Analytics',
-        '/ai-assistant': 'AI Assistant',
-        '/users': 'User Management'
-      }
-      return titles[route.path] || 'Hospital Management System'
+    const logoIcon = svg('<path d="M12 6v12M6 12h12"/>')
+    const bellIcon = svg('<path d="M18 8.5a6 6 0 1 0-12 0c0 6.5-2.5 8.5-2.5 8.5h17S18 15 18 8.5"/><path d="M13.7 20.5a2 2 0 0 1-3.4 0"/>')
+    const chevronIcon = svg('<path d="M6 9.5l6 6 6-6"/>')
+    const logoutIcon = svg('<path d="M9.5 21H5.5A1.5 1.5 0 0 1 4 19.5v-15A1.5 1.5 0 0 1 5.5 3h4"/><path d="M16 16.5l4.5-4.5L16 7.5"/><path d="M20.5 12H9.5"/>')
+
+    const navSections = computed(() => {
+      const sections = [
+        {
+          title: 'Overview',
+          items: [
+            { to: '/dashboard', label: 'Dashboard', icon: icons.dashboard, exact: true }
+          ]
+        },
+        {
+          title: 'Clinical',
+          items: [
+            { to: '/patients', label: 'Patients', icon: icons.patients },
+            { to: '/doctors', label: 'Doctors', icon: icons.doctors },
+            { to: '/appointments', label: 'Appointments', icon: icons.appointments },
+            { to: '/emr', label: 'Medical Records', icon: icons.records }
+          ]
+        },
+        {
+          title: 'Departments',
+          items: [
+            { to: '/pharmacy', label: 'Pharmacy', icon: icons.pharmacy },
+            { to: '/ward', label: 'Wards & Beds', icon: icons.ward },
+            { to: '/laboratory', label: 'Laboratory', icon: icons.laboratory },
+            { to: '/billing', label: 'Billing', icon: icons.billing }
+          ]
+        },
+        {
+          title: 'Insights',
+          items: [
+            { to: '/reports', label: 'Reports', icon: icons.reports },
+            { to: '/ai-assistant', label: 'AI Assistant', icon: icons.ai }
+          ]
+        },
+        {
+          title: 'Administration',
+          items: authStore.userRole === 'admin'
+            ? [{ to: '/users', label: 'User Management', icon: icons.users, exact: true }]
+            : []
+        }
+      ]
+      return sections.filter(s => s.items.length)
     })
+
+    const routeLabels = [
+      { prefix: '/dashboard', label: 'Dashboard', section: 'Overview' },
+      { prefix: '/patients', label: 'Patient Management', section: 'Clinical' },
+      { prefix: '/doctors', label: 'Doctor Management', section: 'Clinical' },
+      { prefix: '/appointments', label: 'Appointments', section: 'Clinical' },
+      { prefix: '/emr', label: 'Electronic Medical Records', section: 'Clinical' },
+      { prefix: '/pharmacy', label: 'Pharmacy Management', section: 'Departments' },
+      { prefix: '/ward', label: 'Wards & Beds', section: 'Departments' },
+      { prefix: '/laboratory', label: 'Laboratory Management', section: 'Departments' },
+      { prefix: '/billing', label: 'Billing & Payments', section: 'Departments' },
+      { prefix: '/reports', label: 'Reports & Analytics', section: 'Insights' },
+      { prefix: '/ai-assistant', label: 'AI Assistant', section: 'Insights' },
+      { prefix: '/users', label: 'User Management', section: 'Administration' }
+    ]
+
+    const routeMeta = computed(() => {
+      const match = [...routeLabels].reverse().find(r => route.path.startsWith(r.prefix))
+      return match || { label: 'Hospital Management System', section: 'Workspace' }
+    })
+
+    const pageTitle = computed(() => routeMeta.value.label)
+    const pageKicker = computed(() => `${routeMeta.value.section} / Live view`)
+
+    const todayLabel = computed(() =>
+      new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+    )
+
+    const isActive = (item) =>
+      item.exact ? route.path === item.to : route.path.startsWith(item.to)
 
     const toggleSidebar = () => {
       if (window.innerWidth < 768) {
@@ -306,21 +327,29 @@ export default {
       window.removeEventListener('resize', handleResize)
     })
 
-    return { 
-      authStore, 
-      sidebarCollapsed, 
+    return {
+      authStore,
+      sidebarCollapsed,
       mobileOpen,
-      showDropdown, 
-      showNotifications, 
+      showDropdown,
+      showNotifications,
       notifications,
-      unreadCount, 
-      pageTitle, 
+      unreadCount,
+      pageTitle,
+      pageKicker,
+      todayLabel,
+      navSections,
+      isActive,
       toggleSidebar,
       closeMobileSidebar,
-      loadNotifications, 
-      markAllRead, 
-      formatTime, 
-      logout 
+      loadNotifications,
+      markAllRead,
+      formatTime,
+      logout,
+      logoIcon,
+      bellIcon,
+      chevronIcon,
+      logoutIcon
     }
   }
 }
@@ -363,31 +392,33 @@ export default {
 }
 
 .sidebar.collapsed {
-  width: 70px;
+  width: 76px;
 }
 
 @media (max-width: 768px) {
   .sidebar {
     transform: translateX(-100%);
   }
-  
+
   .sidebar.mobile-open {
     transform: translateX(0);
   }
 }
 
 .sidebar-header {
-  padding: 22px 18px;
+  padding: 20px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  min-height: 68px;
 }
 
 .logo {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .logo-icon {
@@ -398,19 +429,26 @@ export default {
   border-radius: 10px;
   background: #75e0cf;
   color: #14252b;
-  font-size: 19px;
+  flex-shrink: 0;
+}
+
+.logo-icon :deep(svg) {
+  width: 19px;
+  height: 19px;
+  stroke-width: 2.4;
 }
 
 .logo-lockup {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  min-width: 0;
 }
 
 .logo-text {
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 19px;
+  font-size: 18px;
   font-weight: 700;
+  letter-spacing: -0.02em;
   white-space: nowrap;
 }
 
@@ -425,57 +463,154 @@ export default {
 .sidebar-toggle {
   background: none;
   border: none;
-  color: white;
-  font-size: 18px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 17px;
   cursor: pointer;
-  padding: 5px;
-  border-radius: 4px;
+  padding: 6px;
+  border-radius: 6px;
+  line-height: 1;
+  transition: background 0.2s, color 0.2s;
 }
 
 .sidebar-toggle:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
 }
 
 .sidebar-nav {
   flex: 1;
-  padding: 10px 0;
+  padding: 8px 0 16px;
   overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.sidebar-section-title {
+  padding: 16px 20px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.34);
 }
 
 .nav-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 3px 12px;
-  padding: 11px 12px;
-  color: rgba(255, 255, 255, 0.8);
+  margin: 2px 12px;
+  padding: 10px 12px;
+  color: rgba(255, 255, 255, 0.78);
   text-decoration: none;
-  transition: all 0.2s;
+  transition: background 0.18s, color 0.18s;
   border-left: 2px solid transparent;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 13.5px;
+  font-weight: 500;
 }
 
 .nav-item:hover {
-  background: rgba(117, 224, 207, 0.08);
+  background: rgba(117, 224, 207, 0.09);
   color: white;
 }
 
 .nav-item.active {
-  background: rgba(117, 224, 207, 0.14);
+  background: rgba(117, 224, 207, 0.15);
   color: white;
   border-left-color: #75e0cf;
   font-weight: 600;
 }
 
 .nav-icon {
-  font-size: 18px;
-  width: 24px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.62);
+  transition: color 0.18s;
+}
+
+.nav-item:hover .nav-icon,
+.nav-item.active .nav-icon {
+  color: #75e0cf;
+}
+
+.nav-icon :deep(svg) {
+  width: 19px;
+  height: 19px;
 }
 
 .nav-text {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  margin: 2px 10px;
+  padding: 11px 0;
+}
+
+.sidebar.collapsed .sidebar-section-title {
+  font-size: 0;
+  letter-spacing: 0;
+  padding: 0;
+  margin: 10px 16px;
+  height: 1px;
+}
+
+.nav-item + .sidebar-section-title {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.sidebar.collapsed .nav-item + .sidebar-section-title {
+  padding: 0;
+}
+
+.sidebar-footer {
+  padding: 14px 14px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.facility-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.facility-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2fbf91;
+  box-shadow: 0 0 0 3px rgba(47, 191, 145, 0.18);
+  flex-shrink: 0;
+}
+
+.facility-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+  min-width: 0;
+}
+
+.facility-text strong {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.88);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.facility-text small {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.42);
 }
 
 .main-content {
@@ -487,50 +622,16 @@ export default {
 }
 
 .main-content.expanded {
-  margin-left: 70px;
-}
-
-@media (max-width: 768px) {
-  .main-content {
-    margin-left: 0;
-  }
-  
-  .main-content.expanded {
-    margin-left: 0;
-  }
-
-  .page-content {
-    padding: 16px;
-  }
-
-  .top-header {
-    padding: 12px 16px;
-  }
-
-  .notification-drawer {
-    width: 100%;
-    max-width: 100%;
-  }
-
-  .user-info {
-    display: none;
-  }
-
-  .system-status {
-    display: none;
-  }
-
-  .page-title {
-    font-size: 17px;
-  }
+  margin-left: 76px;
 }
 
 .top-header {
-  background: rgba(255, 255, 255, 0.9);
-  padding: 14px 28px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 13px 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 20px;
   border-bottom: 1px solid rgba(20, 37, 43, 0.08);
   box-shadow: 0 4px 18px rgba(20, 37, 43, 0.04);
   backdrop-filter: blur(16px);
@@ -543,6 +644,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 16px;
+  min-width: 0;
 }
 
 .mobile-menu-btn {
@@ -552,26 +654,24 @@ export default {
   font-size: 24px;
   cursor: pointer;
   padding: 4px;
-}
-
-@media (max-width: 768px) {
-  .mobile-menu-btn {
-    display: block;
-  }
+  color: var(--gray-700);
 }
 
 .page-title {
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 23px;
+  font-size: 22px;
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1.15;
   color: #14252b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .page-heading {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
 }
 
 .page-kicker {
@@ -585,7 +685,17 @@ export default {
 .header-right {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.header-date {
+  color: var(--gray-500);
+  font-size: 12px;
+  font-weight: 500;
+  padding-right: 16px;
+  border-right: 1px solid var(--gray-200);
+  white-space: nowrap;
 }
 
 .system-status {
@@ -596,6 +706,7 @@ export default {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .status-pulse {
@@ -609,25 +720,45 @@ export default {
 .notification-bell {
   position: relative;
   cursor: pointer;
-  font-size: 20px;
-  padding: 8px;
-  border-radius: 50%;
-  transition: background 0.2s;
+  padding: 9px;
+  border: 1px solid var(--gray-200);
+  border-radius: 10px;
+  background: white;
+  color: var(--gray-600);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
 }
 
 .notification-bell:hover {
-  background: #f1f5f9;
+  background: var(--gray-50);
+  border-color: var(--gray-300);
+  color: var(--gray-800);
+}
+
+.notification-bell :deep(svg) {
+  width: 18px;
+  height: 18px;
 }
 
 .notification-badge {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: -6px;
+  right: -6px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
   background: #ef4444;
   color: white;
-  font-size: 10px;
-  border-radius: 10px;
-  font-weight: 600;
+  font-size: 9.5px;
+  font-weight: 700;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid white;
+  line-height: 1;
 }
 
 .user-dropdown {
@@ -636,14 +767,21 @@ export default {
   align-items: center;
   gap: 10px;
   cursor: pointer;
+  padding: 5px 8px 5px 5px;
+  border-radius: 10px;
+  transition: background 0.2s;
+}
+
+.user-dropdown:hover {
+  background: var(--gray-100);
 }
 
 .user-avatar {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   background: #0b8f87;
   color: white;
-  border-radius: 50%;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -654,6 +792,7 @@ export default {
 .user-info {
   display: flex;
   flex-direction: column;
+  line-height: 1.3;
 }
 
 .user-name {
@@ -668,29 +807,74 @@ export default {
   text-transform: capitalize;
 }
 
+.chevron {
+  display: flex;
+  color: var(--gray-400);
+  transition: transform 0.2s;
+}
+
+.chevron.open {
+  transform: rotate(180deg);
+}
+
+.chevron :deep(svg) {
+  width: 15px;
+  height: 15px;
+}
+
 .dropdown-menu {
   position: absolute;
   top: 100%;
   right: 0;
   background: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  min-width: 160px;
+  border: 1px solid var(--gray-200);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  min-width: 230px;
   margin-top: 8px;
   overflow: hidden;
+  z-index: 60;
+}
+
+.dropdown-head {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--gray-100);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dropdown-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--gray-800);
+}
+
+.dropdown-mail {
+  font-size: 12px;
+  color: var(--gray-500);
+  word-break: break-all;
 }
 
 .dropdown-menu a {
-  display: block;
-  padding: 10px 16px;
-  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  color: #b91c1c;
   text-decoration: none;
-  font-size: 14px;
+  font-size: 13.5px;
+  font-weight: 500;
   transition: background 0.2s;
 }
 
 .dropdown-menu a:hover {
-  background: #f1f5f9;
+  background: var(--danger-bg);
+}
+
+.dropdown-menu a :deep(svg) {
+  width: 16px;
+  height: 16px;
 }
 
 .page-content {
@@ -727,35 +911,55 @@ export default {
   position: absolute;
   top: 0;
   right: 0;
-  width: 360px;
+  width: 370px;
   height: 100%;
   background: white;
   box-shadow: -14px 0 40px rgba(20, 37, 43, 0.14);
   display: flex;
   flex-direction: column;
-  transform: translateX(0);
-  transition: transform 0.3s ease;
 }
 
 .drawer-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--gray-200);
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-.btn-sm {
+.drawer-header h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gray-800);
+}
+
+.drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.drawer-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-bg);
+  padding: 3px 9px;
+  border-radius: 20px;
+}
+
+.btn-mark {
   padding: 6px 12px;
   font-size: 12px;
   background: #0d9488;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
+  transition: background 0.2s;
 }
 
-.btn-sm:hover {
+.btn-mark:hover {
   background: #0f766e;
 }
 
@@ -765,12 +969,32 @@ export default {
 }
 
 .notification-item {
-  padding: 12px 20px;
-  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  gap: 10px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--gray-100);
+  transition: background 0.2s;
+}
+
+.notification-item:hover {
+  background: var(--gray-50);
 }
 
 .notification-item.unread {
   background: #f0fdfa;
+}
+
+.notification-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  flex-shrink: 0;
+  margin-top: 6px;
+}
+
+.notification-body {
+  min-width: 0;
 }
 
 .notification-title {
@@ -783,17 +1007,78 @@ export default {
   font-size: 12px;
   color: #64748b;
   margin-top: 2px;
+  line-height: 1.5;
 }
 
 .notification-time {
   font-size: 11px;
   color: #94a3b8;
-  margin-top: 4px;
+  margin-top: 5px;
 }
 
 .notification-empty {
-  padding: 40px;
+  padding: 60px 30px;
   text-align: center;
   color: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.empty-bell {
+  color: var(--gray-300);
+  margin-bottom: 8px;
+}
+
+.empty-bell :deep(svg) {
+  width: 42px;
+  height: 42px;
+  stroke-width: 1.2;
+}
+
+.notification-empty p {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gray-600);
+}
+
+.notification-empty small {
+  font-size: 12.5px;
+}
+
+@media (max-width: 768px) {
+  .main-content,
+  .main-content.expanded {
+    margin-left: 0;
+  }
+
+  .page-content {
+    padding: 16px;
+  }
+
+  .top-header {
+    padding: 12px 16px;
+  }
+
+  .notification-drawer {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .user-info,
+  .system-status,
+  .header-date,
+  .chevron {
+    display: none;
+  }
+
+  .page-title {
+    font-size: 17px;
+  }
+
+  .page-kicker {
+    font-size: 9px;
+  }
 }
 </style>

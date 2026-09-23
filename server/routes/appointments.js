@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { validateAppointment } = require('../middleware/validation');
 
 function generateAppointmentNumber() {
   const prefix = 'APT';
@@ -87,7 +88,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // Create appointment
-router.post('/', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), async (req, res) => {
+router.post('/', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), validateAppointment, async (req, res) => {
   try {
     const { patient_id, doctor_id, appointment_date, appointment_time, type, reason, notes } = req.body;
     // Check for conflicts
