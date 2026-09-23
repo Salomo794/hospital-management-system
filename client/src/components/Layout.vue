@@ -15,7 +15,10 @@
       <div class="sidebar-header">
         <div class="logo">
           <span class="logo-icon">&#x2695;</span>
-          <span class="logo-text" v-show="!sidebarCollapsed">MediCare HMS</span>
+          <span class="logo-lockup" v-show="!sidebarCollapsed">
+            <span class="logo-text">MediCare</span>
+            <span class="logo-subtitle">Clinical operations</span>
+          </span>
         </div>
         <button class="sidebar-toggle" @click="toggleSidebar">
           <span v-if="sidebarCollapsed || mobileOpen">&#10005;</span>
@@ -143,9 +146,13 @@
           <button class="mobile-menu-btn" @click="mobileOpen = !mobileOpen">
             &#9776;
           </button>
-          <h1 class="page-title">{{ pageTitle }}</h1>
+          <div class="page-heading">
+            <span class="page-kicker">Workspace / Live view</span>
+            <h1 class="page-title">{{ pageTitle }}</h1>
+          </div>
         </div>
         <div class="header-right">
+          <div class="system-status"><span class="status-pulse"></span> Systems operational</div>
           <!-- Notification Bell -->
           <div class="notification-bell" @click="showNotifications = !showNotifications">
             <span>&#128276;</span>
@@ -323,7 +330,7 @@ export default {
 .layout {
   display: flex;
   min-height: 100vh;
-  background: linear-gradient(160deg, #f0fdfa 0%, #eff6ff 45%, #f8fafc 100%);
+  background: #f5f7f4;
 }
 
 .backdrop {
@@ -344,8 +351,8 @@ export default {
 }
 
 .sidebar {
-  width: 260px;
-  background: linear-gradient(180deg, #0f4c5c 0%, #0d9488 100%);
+  width: 248px;
+  background: #14252b;
   color: white;
   display: flex;
   flex-direction: column;
@@ -370,11 +377,11 @@ export default {
 }
 
 .sidebar-header {
-  padding: 20px;
+  padding: 22px 18px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
 }
 
 .logo {
@@ -384,12 +391,34 @@ export default {
 }
 
 .logo-icon {
-  font-size: 28px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #75e0cf;
+  color: #14252b;
+  font-size: 19px;
+}
+
+.logo-lockup {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .logo-text {
-  font-size: 18px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 19px;
   font-weight: 700;
+  white-space: nowrap;
+}
+
+.logo-subtitle {
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
@@ -417,23 +446,25 @@ export default {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 20px;
+  margin: 3px 12px;
+  padding: 11px 12px;
   color: rgba(255, 255, 255, 0.8);
   text-decoration: none;
   transition: all 0.2s;
-  border-left: 3px solid transparent;
+  border-left: 2px solid transparent;
+  border-radius: 8px;
   font-size: 14px;
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(117, 224, 207, 0.08);
   color: white;
 }
 
 .nav-item.active {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(117, 224, 207, 0.14);
   color: white;
-  border-left-color: #5eead4;
+  border-left-color: #75e0cf;
   font-weight: 600;
 }
 
@@ -449,7 +480,7 @@ export default {
 
 .main-content {
   flex: 1;
-  margin-left: 260px;
+  margin-left: 248px;
   display: flex;
   flex-direction: column;
   transition: margin-left 0.3s ease;
@@ -485,18 +516,24 @@ export default {
     display: none;
   }
 
+  .system-status {
+    display: none;
+  }
+
   .page-title {
     font-size: 17px;
   }
 }
 
 .top-header {
-  background: white;
-  padding: 16px 24px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 14px 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid rgba(20, 37, 43, 0.08);
+  box-shadow: 0 4px 18px rgba(20, 37, 43, 0.04);
+  backdrop-filter: blur(16px);
   position: sticky;
   top: 0;
   z-index: 50;
@@ -524,15 +561,49 @@ export default {
 }
 
 .page-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: #1e293b;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 23px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: #14252b;
+}
+
+.page-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.page-kicker {
+  color: #0b8f87;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
 }
 
 .header-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 18px;
+}
+
+.system-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #5c6472;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.status-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2fbf91;
+  box-shadow: 0 0 0 4px rgba(47, 191, 145, 0.12);
 }
 
 .notification-bell {
@@ -555,7 +626,6 @@ export default {
   background: #ef4444;
   color: white;
   font-size: 10px;
-  padding: 2px 5px;
   border-radius: 10px;
   font-weight: 600;
 }
@@ -571,7 +641,7 @@ export default {
 .user-avatar {
   width: 36px;
   height: 36px;
-  background: #0d9488;
+  background: #0b8f87;
   color: white;
   border-radius: 50%;
   display: flex;
@@ -624,7 +694,7 @@ export default {
 }
 
 .page-content {
-  padding: 24px;
+  padding: 28px;
   flex: 1;
 }
 
@@ -660,7 +730,7 @@ export default {
   width: 360px;
   height: 100%;
   background: white;
-  box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
+  box-shadow: -14px 0 40px rgba(20, 37, 43, 0.14);
   display: flex;
   flex-direction: column;
   transform: translateX(0);

@@ -1,9 +1,9 @@
 :root {
-  --primary: #0d9488;
-  --primary-dark: #0f4c5c;
-  --primary-light: #5eead4;
-  --primary-bg: #f0fdfa;
-  --secondary: #475569;
+  --primary: #0b8f87;
+  --primary-dark: #075e63;
+  --primary-light: #75e0cf;
+  --primary-bg: #e8f7f3;
+  --secondary: #5c6472;
   --secondary-light: #94a3b8;
   --success: #16a34a;
   --success-bg: #f0fdf4;
@@ -14,7 +14,7 @@
   --info: #0ea5e9;
   --info-bg: #f0f9ff;
   --white: #ffffff;
-  --gray-50: #f8fafc;
+  --gray-50: #f8faf9;
   --gray-100: #f1f5f9;
   --gray-200: #e2e8f0;
   --gray-300: #cbd5e1;
@@ -23,11 +23,11 @@
   --gray-600: #475569;
   --gray-700: #334155;
   --gray-800: #1e293b;
-  --gray-900: #0f172a;
+  --gray-900: #14252b;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow: 0 1px 2px rgba(20, 37, 43, 0.05), 0 8px 24px rgba(20, 37, 43, 0.05);
+  --shadow-md: 0 8px 22px rgba(20, 37, 43, 0.10);
+  --shadow-lg: 0 18px 44px rgba(20, 37, 43, 0.14);
   --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
   --radius-sm: 4px;
   --radius: 8px;
@@ -51,9 +51,9 @@ html {
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
   color: var(--gray-800);
-  background: linear-gradient(160deg, #f0fdfa 0%, #eff6ff 45%, #f8fafc 100%);
+  background: #f5f7f4;
   min-height: 100vh;
   line-height: 1.6;
 }
@@ -153,7 +153,8 @@ img {
 /* ===== CARDS ===== */
 .card {
   background: var(--white);
-  border-radius: var(--radius-lg);
+  border-radius: 10px;
+  border: 1px solid rgba(20, 37, 43, 0.06);
   box-shadow: var(--shadow);
   overflow: hidden;
 }
