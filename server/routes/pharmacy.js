@@ -122,7 +122,7 @@ router.post('/medicines', authenticate, authorize('admin', 'pharmacist'), async 
     // Log inventory transaction
     if (stock_quantity > 0) {
       await pool.query(
-        'INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, notes, performed_by) VALUES (?, "purchase", ?, "Initial stock", ?)',
+        "INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, notes, performed_by) VALUES (?, 'purchase', ?, 'Initial stock', ?)",
         [result.insertId, stock_quantity, req.user.id]
       );
     }
@@ -187,7 +187,7 @@ router.post('/dispense', authenticate, authorize('pharmacist'), async (req, res)
     await pool.query('UPDATE medicines SET stock_quantity = stock_quantity - ? WHERE id = ?', [quantity, pi[0].medicine_id]);
     await pool.query("UPDATE prescription_items SET dispensed = 1, dispensed_date = datetime('now') WHERE id = ?", [prescription_item_id]);
     await pool.query(
-      'INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, reference_number, performed_by) VALUES (?, "dispense", ?, ?, ?)',
+      "INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, reference_number, performed_by) VALUES (?, 'dispense', ?, ?, ?)",
       [pi[0].medicine_id, quantity, `RX-${prescription_item_id}`, req.user.id]
     );
     res.json({ message: 'Medicine dispensed successfully', warnings: safety.warnings, acknowledged: !!acknowledge_warnings });

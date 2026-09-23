@@ -106,7 +106,7 @@ router.post('/orders', authenticate, authorize('doctor', 'admin', 'nurse'), asyn
     const [techs] = await pool.query("SELECT id FROM users WHERE role = 'lab_technician' AND is_active = TRUE");
     for (const tech of techs) {
       await pool.query(
-        'INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, "lab", "New Lab Order", ?, ?)',
+        "INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, 'lab', 'New Lab Order', ?, ?)",
         [tech.id, `New ${priority || 'routine'} lab order: ${order_number}`, `/laboratory/orders/${result.insertId}`]
       );
     }
@@ -161,7 +161,7 @@ router.put('/orders/:id/results', authenticate, authorize('lab_technician', 'adm
     const [order] = await pool.query('SELECT doctor_id FROM lab_orders WHERE id = ?', [req.params.id]);
     if (order.length > 0) {
       await pool.query(
-        'INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, "lab", "Lab Results Ready", ?, ?)',
+        "INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, 'lab', 'Lab Results Ready', ?, ?)",
         [order[0].doctor_id, `Lab results for order are ready`, `/laboratory/orders/${req.params.id}`]
       );
     }

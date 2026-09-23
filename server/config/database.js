@@ -10,7 +10,12 @@ sqlite.pragma('journal_mode = WAL');
 sqlite.pragma('foreign_keys = ON');
 
 // --- Lightweight idempotent migrations (keeps existing DBs in sync) ---
+function tableExists(table) {
+  return !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+}
+
 function columnExists(table, column) {
+  if (!tableExists(table)) return false;
   const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all();
   return cols.some(c => c.name === column);
 }
@@ -44,37 +49,55 @@ function migrate() {
     FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL
   )`);
 
-  // patients.portal_pin — patient self-service login
-  if (!columnExists('patients', 'portal_pin')) {
-    sqlite.exec('ALTER TABLE patients ADD COLUMN portal_pin TEXT');
-  }
+  // A fresh database is created by setup.js, which imports this module before
+  // the base tables exist. Only run patient-column migrations when the table is
+  // already present; setup.js declares these columns for new installations.
+  if (tableExists('patients')) {
+    // patients.portal_pin — patient self-service login
+    if (!columnExists('patients', 'portal_pin')) {
+      sqlite.exec('ALTER TABLE patients ADD COLUMN portal_pin TEXT');
+    }
 
-  // patients.access_code — unique short code given to patient at registration
-  if (!columnExists('patients', 'access_code')) {
-    sqlite.exec('ALTER TABLE patients ADD COLUMN access_code TEXT');
-  }
+    // patients.access_code — unique short code given to patient at registration
+    if (!columnExists('patients', 'access_code')) {
+      sqlite.exec('ALTER TABLE patients ADD COLUMN access_code TEXT');
+    }
 
-  // Backfill a default demo PIN for any patient that still lacks one.
-  const defaultPinHash = bcrypt.hashSync('password123', 4);
-  sqlite.prepare("UPDATE patients SET portal_pin = ? WHERE portal_pin IS NULL OR portal_pin = ''").run(defaultPinHash);
+    // Backfill a default demo PIN for any patient that still lacks one.
+    const defaultPinHash = bcrypt.hashSync('password123', 4);
+    sqlite.prepare("UPDATE patients SET portal_pin = ? WHERE portal_pin IS NULL OR portal_pin = ''").run(defaultPinHash);
 
-  // Backfill access_code for existing patients who don't have one yet
-  const patientsWithoutCode = sqlite.prepare("SELECT id, mrn FROM patients WHERE access_code IS NULL OR access_code = ''").all();
-  const genCode = (mrn) => {
-    const suffix = Math.random().toString(36).substring(2, 7).toUpperCase();
-    return `HMS-${mrn.replace('MRN-', '').substring(0, 4)}-${suffix}`;
-  };
-  const updateCode = sqlite.prepare("UPDATE patients SET access_code = ? WHERE id = ?");
-  for (const p of patientsWithoutCode) {
-    updateCode.run(genCode(p.mrn), p.id);
+    // Backfill access_code for existing patients who don't have one yet
+    const patientsWithoutCode = sqlite.prepare("SELECT id, mrn FROM patients WHERE access_code IS NULL OR access_code = ''").all();
+    const genCode = (mrn) => {
+      const suffix = Math.random().toString(36).substring(2, 7).toUpperCase();
+      return `HMS-${String(mrn || '').replace('MRN-', '').substring(0, 4)}-${suffix}`;
+    };
+    const updateCode = sqlite.prepare("UPDATE patients SET access_code = ? WHERE id = ?");
+    for (const p of patientsWithoutCode) {
+      updateCode.run(genCode(p.mrn), p.id);
+    }
   }
 }
 
 migrate();
 
+// better-sqlite3 only binds numbers, strings, bigints, buffers and null.
+// Normalize params so routes can pass JS booleans (common for flags like
+// requires_prescription), Dates, or undefined for optional columns.
+function normalizeParams(params) {
+  return (params || []).map((p) => {
+    if (p === undefined || p === null) return null;
+    if (typeof p === 'boolean') return p ? 1 : 0;
+    if (p instanceof Date) return isNaN(p.getTime()) ? null : p.toISOString();
+    return p;
+  });
+}
+
 // MySQL2-compatible pool interface
 const pool = {
   query(sql, params = []) {
+    params = normalizeParams(params);
     // MySQL2 returns [rows, fields]. We emulate that.
     const trimmed = sql.trim().toUpperCase();
 

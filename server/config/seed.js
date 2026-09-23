@@ -460,6 +460,7 @@ async function seed() {
   } catch (error) {
     await conn.rollback();
     console.error('Seeding failed:', error);
+    process.exitCode = 1;
   } finally {
     conn.release();
     process.exit();
