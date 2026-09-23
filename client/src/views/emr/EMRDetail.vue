@@ -666,13 +666,13 @@ export default {
   justify-content: center;
   padding: 80px 0;
   gap: 16px;
-  color: #64748b;
+  color: var(--gray-500);
 }
 
 .spinner {
   width: 36px;
   height: 36px;
-  border: 3px solid #e2e8f0;
+  border: 3px solid var(--gray-200);
   border-top-color: #0d9488;
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
@@ -695,11 +695,11 @@ export default {
 
 .record-title h2 {
   font-size: 20px;
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 .text-muted {
-  color: #94a3b8;
+  color: var(--gray-400);
   font-size: 13px;
 }
 
@@ -713,17 +713,17 @@ export default {
   display: flex;
   justify-content: space-between;
   padding: 6px 0;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--gray-100);
   font-size: 14px;
 }
 
 .info-row label {
-  color: #64748b;
+  color: var(--gray-500);
 }
 
 .info-row span {
   font-weight: 500;
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 .vitals-grid {
@@ -754,35 +754,35 @@ export default {
 }
 
 .vital-red {
-  background: #fef2f2;
+  background: var(--danger-bg);
   border: 1px solid #fecaca;
 }
 .vital-red .vital-label { color: #dc2626; }
 .vital-red .vital-value { color: #dc2626; }
 
 .vital-orange {
-  background: #fff7ed;
+  background: var(--warning-bg);
   border: 1px solid #fed7aa;
 }
 .vital-orange .vital-label { color: #ea580c; }
 .vital-orange .vital-value { color: #ea580c; }
 
 .vital-blue {
-  background: #eff6ff;
+  background: var(--info-bg);
   border: 1px solid #bfdbfe;
 }
 .vital-blue .vital-label { color: #2563eb; }
 .vital-blue .vital-value { color: #2563eb; }
 
 .vital-green {
-  background: #f0fdf4;
+  background: var(--success-bg);
   border: 1px solid #bbf7d0;
 }
 .vital-green .vital-label { color: #16a34a; }
 .vital-green .vital-value { color: #16a34a; }
 
 .vital-teal {
-  background: #f0fdfa;
+  background: var(--brand-50);
   border: 1px solid #99f6e4;
 }
 .vital-teal .vital-label { color: #0d9488; }
@@ -801,13 +801,13 @@ export default {
 
 .clinical-section p {
   font-size: 14px;
-  color: #334155;
+  color: var(--gray-700);
   line-height: 1.6;
   white-space: pre-wrap;
 }
 
 .diagnosis {
-  background: #fef2f2;
+  background: var(--danger-bg);
   padding: 8px 12px;
   border-radius: 6px;
   border-left: 3px solid #ef4444;
@@ -827,10 +827,10 @@ export default {
 }
 
 .prescription-card {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   padding: 14px;
-  background: #fafffe;
+  background: var(--gray-50);
 }
 
 .rx-header {
@@ -849,16 +849,16 @@ export default {
 .rx-date {
   margin-left: auto;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--gray-400);
 }
 
 .rx-body {
   font-size: 14px;
-  color: #334155;
+  color: var(--gray-700);
 }
 
 .rx-summary {
-  color: #475569;
+  color: var(--gray-600);
   margin-bottom: 8px;
 }
 
@@ -874,30 +874,30 @@ export default {
   gap: 8px;
   font-size: 13px;
   padding: 4px 0;
-  border-bottom: 1px dashed #f1f5f9;
+  border-bottom: 1px dashed var(--gray-100);
 }
 
 .rx-med {
   font-weight: 600;
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 .rx-detail {
-  color: #64748b;
+  color: var(--gray-500);
 }
 
 .rx-notes {
   margin-top: 8px;
   font-size: 13px;
-  color: #64748b;
+  color: var(--gray-500);
   font-style: italic;
 }
 
 .lab-order-card {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   padding: 14px;
-  background: #fafffe;
+  background: var(--gray-50);
 }
 
 .lo-header {
@@ -916,8 +916,8 @@ export default {
 .lo-priority {
   font-size: 12px;
   text-transform: capitalize;
-  color: #64748b;
-  background: #f1f5f9;
+  color: var(--gray-500);
+  background: var(--gray-100);
   padding: 2px 8px;
   border-radius: 4px;
 }
@@ -925,17 +925,17 @@ export default {
 .lo-date {
   margin-left: auto;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--gray-400);
 }
 
 .lo-body {
   font-size: 14px;
-  color: #334155;
+  color: var(--gray-700);
 }
 
 .lo-tests {
   font-weight: 500;
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 .lo-tests-list {
@@ -946,7 +946,7 @@ export default {
 }
 
 .lo-test-tag {
-  background: #eff6ff;
+  background: var(--info-bg);
   color: #2563eb;
   font-size: 12px;
   padding: 3px 10px;
@@ -957,12 +957,12 @@ export default {
 .lo-notes {
   margin-top: 8px;
   font-size: 13px;
-  color: #64748b;
+  color: var(--gray-500);
   font-style: italic;
 }
 
 .empty-state {
-  color: #94a3b8;
+  color: var(--gray-400);
   font-size: 14px;
   text-align: center;
   padding: 20px;
@@ -985,7 +985,7 @@ export default {
 }
 
 .modal-content {
-  background: white;
+  background: var(--white);
   border-radius: 12px;
   width: 90%;
   max-height: 85vh;
@@ -1008,12 +1008,12 @@ export default {
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--gray-200);
 }
 
 .modal-header h3 {
   font-size: 18px;
-  color: #1e293b;
+  color: var(--gray-800);
   margin: 0;
 }
 
@@ -1021,13 +1021,13 @@ export default {
   background: none;
   border: none;
   font-size: 24px;
-  color: #94a3b8;
+  color: var(--gray-400);
   cursor: pointer;
   line-height: 1;
 }
 
 .modal-close:hover {
-  color: #475569;
+  color: var(--gray-600);
 }
 
 .modal-body {
@@ -1041,7 +1041,7 @@ export default {
   justify-content: flex-end;
   gap: 10px;
   padding: 16px 20px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--gray-200);
 }
 
 .form-group {
@@ -1052,18 +1052,18 @@ export default {
   display: block;
   font-size: 13px;
   font-weight: 600;
-  color: #374151;
+  color: var(--gray-700);
   margin-bottom: 4px;
 }
 
 .form-control {
   width: 100%;
   padding: 8px 12px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--gray-300);
   border-radius: 6px;
   font-size: 14px;
-  color: #1e293b;
-  background: white;
+  color: var(--gray-800);
+  background: var(--white);
   box-sizing: border-box;
 }
 
@@ -1103,16 +1103,16 @@ select.form-control {
 
 .items-header h4 {
   font-size: 15px;
-  color: #1e293b;
+  color: var(--gray-800);
   margin: 0;
 }
 
 .prescription-item-form {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   padding: 14px;
   margin-bottom: 12px;
-  background: #fafffe;
+  background: var(--gray-50);
 }
 
 .item-header {
@@ -1139,8 +1139,8 @@ select.form-control {
   top: 100%;
   left: 0;
   right: 0;
-  background: white;
-  border: 1px solid #d1d5db;
+  background: var(--white);
+  border: 1px solid var(--gray-300);
   border-top: none;
   border-radius: 0 0 6px 6px;
   max-height: 180px;
@@ -1159,17 +1159,17 @@ select.form-control {
 }
 
 .medicine-option:hover {
-  background: #f0fdfa;
+  background: var(--brand-50);
 }
 
 .med-name {
   font-weight: 500;
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 .med-generic {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--gray-400);
 }
 
 .lab-tests-checklist {
@@ -1178,7 +1178,7 @@ select.form-control {
   gap: 6px;
   max-height: 300px;
   overflow-y: auto;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 6px;
   padding: 8px;
 }
@@ -1194,7 +1194,7 @@ select.form-control {
 }
 
 .lab-test-checkbox:hover {
-  background: #f8fafc;
+  background: var(--gray-50);
 }
 
 .lab-test-checkbox input[type="checkbox"] {
@@ -1202,19 +1202,19 @@ select.form-control {
 }
 
 .test-name {
-  color: #1e293b;
+  color: var(--gray-800);
   font-weight: 500;
 }
 
 .test-category {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--gray-400);
   margin-left: auto;
 }
 
 .loading-small {
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--gray-400);
   padding: 10px;
 }
 
@@ -1223,18 +1223,18 @@ select.form-control {
   align-items: center;
   justify-content: center;
   padding: 8px 16px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--gray-300);
   border-radius: 6px;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  background: white;
-  color: #374151;
+  background: var(--white);
+  color: var(--gray-700);
   transition: all 0.15s;
 }
 
 .btn:hover {
-  background: #f8fafc;
+  background: var(--gray-50);
 }
 
 .btn:disabled {
@@ -1277,28 +1277,28 @@ select.form-control {
 }
 
 .badge-success {
-  background: #dcfce7;
-  color: #16a34a;
+  background: var(--success-bg);
+  color: var(--success-fg);
 }
 
 .badge-warning {
-  background: #fef9c3;
-  color: #ca8a04;
+  background: var(--warning-bg);
+  color: var(--warning-fg);
 }
 
 .badge-info {
-  background: #e0f2fe;
-  color: #0284c7;
+  background: var(--info-bg);
+  color: var(--info-fg);
 }
 
 .badge-danger {
-  background: #fee2e2;
-  color: #dc2626;
+  background: var(--danger-bg);
+  color: var(--danger-fg);
 }
 
 .badge-gray {
-  background: #f1f5f9;
-  color: #64748b;
+  background: var(--gray-100);
+  color: var(--gray-500);
 }
 
 @media (max-width: 768px) {

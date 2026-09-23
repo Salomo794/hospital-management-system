@@ -2,6 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <!-- Apply saved theme before anything renders to avoid a light/dark flash -->
+  <script>
+    try {
+      document.documentElement.setAttribute(
+        'data-theme',
+        localStorage.getItem('theme-dark') === '1' ? 'dark' : 'light'
+      )
+    } catch (e) { document.documentElement.setAttribute('data-theme', 'light') }
+  </script>
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏥</text></svg>">
   <title>Hospital Management System</title>

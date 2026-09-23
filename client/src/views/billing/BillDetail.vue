@@ -184,25 +184,25 @@ export default {
 <style scoped>
 .detail-header { display: flex; align-items: center; gap: 20px; margin-bottom: 24px; }
 .record-title { flex: 1; }
-.text-muted { color: #94a3b8; font-size: 12px; }
+.text-muted { color: var(--gray-400); font-size: 12px; }
 .bill-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; }
-.info-row label { color: #64748b; }
+.info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--gray-100); font-size: 14px; }
+.info-row label { color: var(--gray-500); }
 .info-row span { font-weight: 500; }
 .info-row.total { border-bottom: none; font-weight: 700; font-size: 16px; }
-.payment-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
+.payment-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--gray-100); }
 .payment-info { display: flex; gap: 16px; align-items: center; font-size: 14px; }
 .action-bar { margin-top: 20px; display: flex; justify-content: flex-end; }
-.modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #64748b; }
+.modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--gray-500); }
 
-.btn-outline { border: 1px solid #e2e8f0; background: white; color: #475569; }
-.btn-outline:hover { background: #f8fafc; border-color: #cbd5e1; }
+.btn-outline { border: 1px solid var(--gray-200); background: var(--white); color: var(--gray-600); }
+.btn-outline:hover { background: var(--gray-50); border-color: var(--gray-300); }
 
-.empty-state { text-align: center; padding: 32px 16px; color: #94a3b8; }
+.empty-state { text-align: center; padding: 32px 16px; color: var(--gray-400); }
 .empty-icon { font-size: 32px; display: block; margin-bottom: 8px; }
 
-.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: #64748b; }
-.spinner { width: 40px; height: 40px; border: 4px solid #e2e8f0; border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
+.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: var(--gray-500); }
+.spinner { width: 40px; height: 40px; border: 4px solid var(--gray-200); border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 768px) {

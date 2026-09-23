@@ -411,7 +411,7 @@ export default {
 .search-filters select,
 .search-filters input {
   padding: 10px 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   font-size: 14px;
 }
@@ -424,7 +424,7 @@ export default {
 }
 
 .stat-card {
-  background: white;
+  background: var(--white);
   padding: 20px;
   border-radius: 12px;
   text-align: center;
@@ -442,17 +442,17 @@ export default {
 
 .stat-label {
   font-size: 13px;
-  color: #64748b;
+  color: var(--gray-500);
   margin-top: 4px;
 }
 
 .text-danger { color: #ef4444; }
 .text-success { color: #10b981; }
 .text-mono { font-family: monospace; font-size: 13px; }
-.text-muted { color: #94a3b8; text-align: center; padding: 20px; }
+.text-muted { color: var(--gray-400); text-align: center; padding: 20px; }
 
 .card {
-  background: white;
+  background: var(--white);
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   overflow: hidden;
@@ -460,7 +460,7 @@ export default {
 
 .card-header {
   padding: 16px 20px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--gray-200);
 }
 
 .card-header h3 {
@@ -474,13 +474,13 @@ export default {
   justify-content: center;
   gap: 12px;
   padding: 48px;
-  color: #64748b;
+  color: var(--gray-500);
 }
 
 .spinner {
   width: 24px;
   height: 24px;
-  border: 3px solid #e2e8f0;
+  border: 3px solid var(--gray-200);
   border-top-color: #0d9488;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
@@ -499,14 +499,14 @@ export default {
 .data-table td {
   padding: 12px 16px;
   text-align: left;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--gray-100);
   font-size: 14px;
 }
 
 .data-table th {
-  background: #f8fafc;
+  background: var(--gray-50);
   font-weight: 600;
-  color: #475569;
+  color: var(--gray-600);
 }
 
 .badge {
@@ -517,11 +517,11 @@ export default {
   text-transform: capitalize;
 }
 
-.badge-success { background: #d1fae5; color: #065f46; }
-.badge-warning { background: #fef3c7; color: #92400e; }
-.badge-danger { background: #fee2e2; color: #991b1b; }
-.badge-info { background: #dbeafe; color: #1e40af; }
-.badge-gray { background: #f1f5f9; color: #475569; }
+.badge-success { background: var(--success-bg); color: var(--success-fg); }
+.badge-warning { background: var(--warning-bg); color: var(--warning-fg); }
+.badge-danger { background: var(--danger-bg); color: var(--danger-fg); }
+.badge-info { background: var(--info-bg); color: var(--info-fg); }
+.badge-gray { background: var(--gray-100); color: var(--gray-600); }
 
 .btn {
   padding: 8px 16px;
@@ -543,18 +543,18 @@ export default {
 
 .btn-outline {
   background: transparent;
-  border: 1px solid #e2e8f0;
-  color: #475569;
+  border: 1px solid var(--gray-200);
+  color: var(--gray-600);
 }
 
-.btn-outline:hover { background: #f8fafc; }
+.btn-outline:hover { background: var(--gray-50); }
 
 .btn-sm { padding: 6px 12px; font-size: 13px; }
 
 .empty-state {
   text-align: center;
   padding: 48px 24px;
-  color: #64748b;
+  color: var(--gray-500);
 }
 
 .empty-icon {
@@ -564,7 +564,7 @@ export default {
 
 .empty-state h4 {
   margin: 0 0 8px;
-  color: #334155;
+  color: var(--gray-700);
 }
 
 .empty-state p {
@@ -583,7 +583,7 @@ export default {
 }
 
 .modal {
-  background: white;
+  background: var(--white);
   border-radius: 16px;
   width: 100%;
   max-width: 720px;
@@ -598,7 +598,7 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 20px 24px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--gray-200);
 }
 
 .modal-header h3 { margin: 0; }
@@ -608,11 +608,11 @@ export default {
   border: none;
   font-size: 24px;
   cursor: pointer;
-  color: #64748b;
+  color: var(--gray-500);
   padding: 0 4px;
 }
 
-.modal-close:hover { color: #1e293b; }
+.modal-close:hover { color: var(--gray-800); }
 
 .modal-body {
   padding: 24px;
@@ -624,7 +624,7 @@ export default {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 24px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--gray-200);
 }
 
 .form-group {
@@ -635,7 +635,7 @@ export default {
   display: block;
   font-size: 13px;
   font-weight: 600;
-  color: #475569;
+  color: var(--gray-600);
   margin-bottom: 6px;
 }
 
@@ -644,7 +644,7 @@ export default {
 .form-group textarea {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   font-size: 14px;
   box-sizing: border-box;
@@ -669,8 +669,8 @@ export default {
   top: 100%;
   left: 0;
   right: 0;
-  background: white;
-  border: 1px solid #e2e8f0;
+  background: var(--white);
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   max-height: 200px;
   overflow-y: auto;
@@ -685,14 +685,14 @@ export default {
 }
 
 .search-result-item:hover {
-  background: #f1f5f9;
+  background: var(--gray-100);
 }
 
 .selected-patient {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #eff6ff;
+  background: var(--info-bg);
   border: 1px solid #bfdbfe;
   border-radius: 8px;
   padding: 8px 12px;
@@ -705,7 +705,7 @@ export default {
   border: none;
   font-size: 18px;
   cursor: pointer;
-  color: #64748b;
+  color: var(--gray-500);
 }
 
 .bill-items {
@@ -723,7 +723,7 @@ export default {
 .bill-item input,
 .bill-item select {
   padding: 8px 10px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 6px;
   font-size: 13px;
 }
@@ -734,9 +734,9 @@ export default {
 .input-price { flex: 1.2; }
 
 .btn-remove {
-  background: #fee2e2;
+  background: var(--danger-bg);
   border: none;
-  color: #991b1b;
+  color: var(--danger-fg);
   width: 32px;
   height: 32px;
   border-radius: 6px;
@@ -745,7 +745,7 @@ export default {
   flex-shrink: 0;
 }
 
-.btn-remove:hover { background: #fecaca; }
+.btn-remove:hover { background: var(--danger-bg-hover); }
 .btn-remove:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .btn-add-item {
@@ -761,7 +761,7 @@ export default {
 }
 
 .totals-display {
-  background: #f8fafc;
+  background: var(--gray-50);
   border-radius: 8px;
   padding: 16px;
 }
@@ -774,7 +774,7 @@ export default {
 }
 
 .total-net {
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--gray-200);
   margin-top: 8px;
   padding-top: 8px;
   font-weight: 700;

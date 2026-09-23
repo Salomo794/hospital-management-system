@@ -208,7 +208,7 @@ export default {
 .page-header h1 {
   font-size: 22px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--gray-900);
   margin: 0;
 }
 
@@ -219,12 +219,12 @@ export default {
 
 .tabs-inline button {
   padding: 10px 20px;
-  border: 1px solid #e2e8f0;
-  background: white;
+  border: 1px solid var(--gray-200);
+  background: var(--white);
   cursor: pointer;
   font-size: 14px;
   font-weight: 500;
-  color: #475569;
+  color: var(--gray-600);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -246,7 +246,7 @@ export default {
 }
 
 .tabs-inline button:not(.active):hover {
-  background: #f1f5f9;
+  background: var(--gray-100);
 }
 
 .tab-count {
@@ -258,8 +258,8 @@ export default {
 }
 
 .tabs-inline button:not(.active) .tab-count {
-  background: #e2e8f0;
-  color: #64748b;
+  background: var(--gray-200);
+  color: var(--gray-500);
 }
 
 .search-filters {
@@ -268,18 +268,18 @@ export default {
 
 .search-filters select {
   padding: 10px 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   font-size: 14px;
-  color: #334155;
-  background: white;
+  color: var(--gray-700);
+  background: var(--white);
   min-width: 180px;
 }
 
 .text-mono {
   font-family: monospace;
   font-size: 13px;
-  color: #475569;
+  color: var(--gray-600);
 }
 
 .tests-cell {
@@ -287,7 +287,7 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #64748b;
+  color: var(--gray-500);
 }
 
 /* Loading spinner */
@@ -297,14 +297,14 @@ export default {
   align-items: center;
   gap: 12px;
   padding: 48px 20px;
-  color: #94a3b8;
+  color: var(--gray-400);
   font-size: 14px;
 }
 
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid #e2e8f0;
+  border: 3px solid var(--gray-200);
   border-top-color: #0d9488;
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
@@ -333,13 +333,13 @@ export default {
 .empty-state h4 {
   font-size: 16px;
   font-weight: 600;
-  color: #334155;
+  color: var(--gray-700);
   margin: 0;
 }
 
 .empty-state p {
   font-size: 14px;
-  color: #94a3b8;
+  color: var(--gray-400);
   margin: 0;
 }
 
@@ -352,7 +352,7 @@ export default {
 
 .text-muted-inline {
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--gray-400);
 }
 
 /* Responsive */

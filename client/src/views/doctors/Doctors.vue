@@ -161,7 +161,7 @@ export default {
 
 .header-left h2 {
   margin: 0;
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 .doctor-count {
@@ -182,7 +182,7 @@ export default {
 
 .search-bar input {
   padding: 10px 16px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   width: 280px;
   font-size: 14px;
@@ -197,10 +197,10 @@ export default {
 
 .filter-group select {
   padding: 10px 16px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   font-size: 14px;
-  background: white;
+  background: var(--white);
   transition: border-color 0.2s;
 }
 
@@ -216,14 +216,14 @@ export default {
   align-items: center;
   justify-content: center;
   padding: 64px 20px;
-  color: #64748b;
+  color: var(--gray-500);
   gap: 12px;
 }
 
 .spinner {
   width: 36px;
   height: 36px;
-  border: 3px solid #e2e8f0;
+  border: 3px solid var(--gray-200);
   border-top-color: #0d9488;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -241,13 +241,13 @@ export default {
 }
 
 .doctor-card {
-  background: white;
+  background: var(--white);
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   text-align: center;
   transition: transform 0.2s, box-shadow 0.2s;
-  border: 1px solid #f1f5f9;
+  border: 1px solid var(--gray-100);
 }
 
 .doctor-card:hover {
@@ -272,7 +272,7 @@ export default {
 
 .doctor-card h3 {
   font-size: 16px;
-  color: #1e293b;
+  color: var(--gray-800);
   margin: 0 0 4px;
 }
 
@@ -292,7 +292,7 @@ export default {
 
 .detail-item {
   font-size: 12px;
-  color: #64748b;
+  color: var(--gray-500);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -327,7 +327,7 @@ export default {
 .empty-state {
   text-align: center;
   padding: 64px 20px;
-  color: #64748b;
+  color: var(--gray-500);
 }
 
 .empty-icon {
@@ -337,7 +337,7 @@ export default {
 
 .empty-state h4 {
   margin: 0 0 8px;
-  color: #334155;
+  color: var(--gray-700);
 }
 
 .empty-state p {

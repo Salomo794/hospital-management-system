@@ -705,7 +705,7 @@ export default {
 }
 .blood-chip {
   font-size: 12px; font-weight: 700; color: #b91c1c;
-  background: #fef2f2; padding: 2px 8px; border-radius: 6px;
+  background: var(--danger-bg); padding: 2px 8px; border-radius: 6px;
   border: 1px solid #fecaca;
 }
 

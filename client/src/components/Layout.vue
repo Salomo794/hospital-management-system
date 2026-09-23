@@ -82,6 +82,16 @@
             Live
           </div>
 
+          <!-- Theme toggle -->
+          <button
+            class="icon-btn"
+            @click="uiStore.toggleDark()"
+            :aria-label="uiStore.dark ? 'Switch to light mode' : 'Switch to dark mode'"
+            :title="uiStore.dark ? 'Light mode' : 'Dark mode'"
+          >
+            <span v-html="uiStore.dark ? icons.sun : icons.moon" />
+          </button>
+
           <!-- Notification bell -->
           <button
             class="icon-btn"
@@ -181,6 +191,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../store/auth'
+import { useUiStore } from '../store/ui'
 import axios from 'axios'
 
 /* ── inline SVG helper ── */
@@ -199,6 +210,8 @@ const icons = {
   chevronDown:  s('<path d="M6 9l6 6 6-6"/>'),
   chevronSmall: s('<path d="M9 18l6-6-6-6"/>', 'width="14" height="14"'),
   calendar:     s('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>'),
+  sun:          s('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>'),
+  moon:         s('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/>'),
 
   // nav icons
   dashboard:    s('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>'),
@@ -236,6 +249,7 @@ export default {
     const route      = useRoute()
     const router     = useRouter()
     const authStore  = useAuthStore()
+    const uiStore    = useUiStore()
 
     const collapsed      = ref(false)
     const mobileOpen     = ref(false)
@@ -346,7 +360,7 @@ export default {
     })
 
     return {
-      authStore, collapsed, mobileOpen, dropdownOpen, panelOpen,
+      authStore, uiStore, collapsed, mobileOpen, dropdownOpen, panelOpen,
       notifications, unreadCount, isMobile,
       navSections, pageTitle, pageSection, todayLabel,
       isActive, toggleSidebar, closeMobile,
@@ -542,10 +556,10 @@ export default {
   gap: 16px;
   padding: 0 26px;
   height: 62px;
-  background: rgba(255,255,255,.78);
+  background: var(--header-bg);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border-bottom: 1px solid rgba(255,255,255,.6);
+  border-bottom: 1px solid var(--header-border);
   box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 4px 20px rgba(0,0,0,.05);
   position: sticky; top: 0; z-index: 50;
   flex-shrink: 0;
@@ -584,10 +598,10 @@ export default {
 
 .status-pill {
   display: flex; align-items: center; gap: 6px;
-  background: var(--success-bg); color: #166534;
+  background: var(--success-bg); color: var(--success-text);
   font-size: 11.5px; font-weight: 600;
   padding: 4px 10px; border-radius: var(--radius-full);
-  border: 1px solid #bbf7d0;
+  border: 1px solid var(--success-border);
   white-space: nowrap;
 }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #16a34a; animation: breathe 2.5s ease-in-out infinite; }
@@ -718,8 +732,8 @@ export default {
   transition: background .15s;
 }
 .notif-item:hover { background: var(--gray-50); }
-.notif-item--unread { background: #f0fdfa; }
-.notif-item--unread:hover { background: #e6faf7; }
+.notif-item--unread { background: var(--brand-50); }
+.notif-item--unread:hover { background: var(--brand-100); }
 
 .notif-type-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
 .dot-teal   { background: #14b8a6; }

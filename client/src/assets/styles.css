@@ -80,6 +80,118 @@
   --transition:        all 0.2s ease;
   --transition-slow:   all 0.35s ease;
   --transition-spring: all 0.3s cubic-bezier(.34,1.56,.64,1);
+
+  /* Glass header (Layout top bar) */
+  --header-bg:     rgba(255,255,255,.78);
+  --header-border: rgba(255,255,255,.6);
+
+  /* Semantic text/border accents */
+  --success-text:   #166534;
+  --success-border: #bbf7d0;
+
+  /* Semantic badge/chip foregrounds */
+  --success-fg: #166534;
+  --warning-fg: #92400e;
+  --danger-fg:  #991b1b;
+  --info-fg:    #1e40af;
+
+  /* Hover tints */
+  --danger-bg-hover: #fecaca;
+}
+
+/* ───── DARK THEME ───── */
+[data-theme="dark"] {
+  /* Neutrals remapped: surfaces go dark, text goes light */
+  --white:     #111823;
+  --gray-50:   #151d29;
+  --gray-100:  #1b2432;
+  --gray-200:  #2a3444;
+  --gray-300:  #3c4759;
+  --gray-400:  #5b6779;
+  --gray-500:  #8b95a5;
+  --gray-600:  #aab4c2;
+  --gray-700:  #c6cedb;
+  --gray-800:  #dfe5ee;
+  --gray-900:  #f1f5f9;
+
+  /* Brand tints retuned for dark backgrounds */
+  --brand-50:  #0f2b2c;
+  --brand-100: #14363a;
+  --brand-200: #1c4a4d;
+  --primary-bg: #0f2b2c;
+
+  /* Semantic tints */
+  --success-bg: #0d2a1c;
+  --danger-bg:  #321519;
+  --warning-bg: #32240e;
+  --info-bg:    #12233d;
+
+  /* Surfaces */
+  --surface:          #111823;
+  --surface-elevated: #17202d;
+  --bg-app:           #0a1019;
+
+  /* Glass header */
+  --header-bg:     rgba(13,19,28,.85);
+  --header-border: rgba(255,255,255,.06);
+
+  /* Semantic text/border accents */
+  --success-text:   #86efac;
+  --success-border: #14532d;
+
+  /* Semantic badge/chip foregrounds */
+  --success-fg: #86efac;
+  --warning-fg: #fcd34d;
+  --danger-fg:  #fca5a5;
+  --info-fg:    #93c5fd;
+
+  /* Hover tints */
+  --danger-bg-hover: #4c1d22;
+
+  /* Shadows get deeper */
+  --shadow-card: 0 1px 3px rgba(0,0,0,.5), 0 4px 16px rgba(0,0,0,.35);
+  --shadow-card-hover: 0 4px 12px rgba(0,0,0,.55), 0 12px 32px rgba(0,0,0,.4);
+  --shadow-xl: 0 25px 50px -12px rgba(0,0,0,.7);
+}
+
+/* Dark-mode component fixes for values that were hardcoded light */
+[data-theme="dark"] body { color: var(--gray-800); }
+[data-theme="dark"] .card,
+[data-theme="dark"] .stats-card { border-color: rgba(255,255,255,.07); }
+[data-theme="dark"] .card-glass { background: rgba(17,24,35,.72); border-color: rgba(255,255,255,.08); }
+[data-theme="dark"] .card-footer,
+[data-theme="dark"] .modal-footer { background: var(--gray-50); }
+[data-theme="dark"] .modal { border-color: rgba(255,255,255,.08); }
+[data-theme="dark"] .data-table tbody tr:hover { background: rgba(20,184,166,.09); }
+[data-theme="dark"] .loading-overlay { background: rgba(10,16,25,.75); }
+[data-theme="dark"] .badge-success  { color: #86efac; }
+[data-theme="dark"] .badge-warning  { color: #fcd34d; }
+[data-theme="dark"] .badge-danger   { color: #fca5a5; }
+[data-theme="dark"] .badge-info     { color: #93c5fd; }
+[data-theme="dark"] .badge-primary  { color: var(--brand-300); }
+[data-theme="dark"] .badge-gray     { background: var(--gray-100); color: var(--gray-300); }
+[data-theme="dark"] .alert-success  { color: #86efac; border-color: #14532d; }
+[data-theme="dark"] .alert-danger   { color: #fca5a5; border-color: #7f1d1d; }
+[data-theme="dark"] .alert-warning  { color: #fcd34d; border-color: #78350f; }
+[data-theme="dark"] .alert-info     { color: #93c5fd; border-color: #1e3a5f; }
+[data-theme="dark"] .btn-secondary  { background: var(--gray-100); color: var(--gray-700); }
+[data-theme="dark"] .btn-secondary:hover:not(:disabled) { background: var(--gray-200); }
+[data-theme="dark"] .form-group select {
+  /* dropdown arrow needs to be lighter on dark inputs */
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+}
+[data-theme="dark"] .filter-bar select {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+}
+[data-theme="dark"] body::before {
+  background:
+    radial-gradient(ellipse 90% 60% at 0% 0%,   rgba(13,148,136,.10) 0%, transparent 55%),
+    radial-gradient(ellipse 70% 50% at 100% 100%, rgba(37,99,235,.08)  0%, transparent 55%),
+    radial-gradient(ellipse 60% 40% at 50% 0%,   rgba(139,92,246,.05) 0%, transparent 60%);
+}
+[data-theme="dark"] ::-webkit-scrollbar-thumb { background: var(--gray-300); }
+[data-theme="dark"] .skeleton {
+  background: linear-gradient(90deg, var(--gray-200) 25%, var(--gray-100) 50%, var(--gray-200) 75%);
 }
 
 /* ───── RESET ───── */

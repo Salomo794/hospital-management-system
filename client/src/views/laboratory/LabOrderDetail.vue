@@ -229,7 +229,7 @@ export default {
 .record-title h2 {
   font-size: 20px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--gray-900);
   margin: 0 0 2px 0;
 }
 
@@ -239,7 +239,7 @@ export default {
 }
 
 .text-muted {
-  color: #94a3b8;
+  color: var(--gray-400);
   font-size: 13px;
 }
 
@@ -252,13 +252,13 @@ export default {
 .info-bar {
   display: flex;
   gap: 28px;
-  background: white;
+  background: var(--white);
   padding: 14px 20px;
   border-radius: 10px;
   margin-bottom: 16px;
   font-size: 14px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-  border: 1px solid #f1f5f9;
+  border: 1px solid var(--gray-100);
 }
 
 .info-item {
@@ -272,18 +272,18 @@ export default {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: #94a3b8;
+  color: var(--gray-400);
 }
 
 .info-value {
-  color: #334155;
+  color: var(--gray-700);
   font-weight: 500;
 }
 
 /* Demographics */
 .demographics-card {
-  background: white;
-  border: 1px solid #e2e8f0;
+  background: var(--white);
+  border: 1px solid var(--gray-200);
   border-radius: 10px;
   padding: 16px 20px;
   margin-bottom: 16px;
@@ -294,7 +294,7 @@ export default {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: #94a3b8;
+  color: var(--gray-400);
   margin: 0 0 12px 0;
 }
 
@@ -311,7 +311,7 @@ export default {
 
 .demo-label {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--gray-400);
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
@@ -319,7 +319,7 @@ export default {
 .demo-value {
   font-size: 14px;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 /* Loading */
@@ -329,14 +329,14 @@ export default {
   align-items: center;
   gap: 12px;
   padding: 48px 20px;
-  color: #94a3b8;
+  color: var(--gray-400);
   font-size: 14px;
 }
 
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid #e2e8f0;
+  border: 3px solid var(--gray-200);
   border-top-color: #0d9488;
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
@@ -365,19 +365,19 @@ export default {
 .empty-state h4 {
   font-size: 16px;
   font-weight: 600;
-  color: #334155;
+  color: var(--gray-700);
   margin: 0;
 }
 
 .empty-state p {
   font-size: 14px;
-  color: #94a3b8;
+  color: var(--gray-400);
   margin: 0;
 }
 
 /* Result cards */
 .result-card {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 10px;
   margin-bottom: 14px;
   overflow: hidden;
@@ -393,12 +393,12 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 14px 18px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
 }
 
 .result-card-header.abnormal {
-  background: #fef2f2;
+  background: var(--danger-bg);
   border-bottom-color: #fecaca;
 }
 
@@ -411,7 +411,7 @@ export default {
 .result-card-title h4 {
   font-size: 15px;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--gray-800);
   margin: 0;
 }
 
@@ -420,8 +420,8 @@ export default {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: #dc2626;
-  background: #fee2e2;
+  color: var(--danger-fg);
+  background: var(--danger-bg);
   padding: 3px 10px;
   border-radius: 4px;
 }
@@ -431,8 +431,8 @@ export default {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: #16a34a;
-  background: #dcfce7;
+  color: var(--success-fg);
+  background: var(--success-bg);
   padding: 3px 10px;
   border-radius: 4px;
 }
@@ -454,7 +454,7 @@ export default {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.3px;
-  color: #94a3b8;
+  color: var(--gray-400);
   margin-bottom: 4px;
 }
 
@@ -462,11 +462,11 @@ export default {
 .form-group textarea {
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 6px;
   font-size: 14px;
-  color: #334155;
-  background: white;
+  color: var(--gray-700);
+  background: var(--white);
   box-sizing: border-box;
   transition: border-color 0.15s ease;
 }
@@ -480,8 +480,8 @@ export default {
 
 .form-group input:disabled,
 .form-group textarea:disabled {
-  background: #f1f5f9;
-  color: #94a3b8;
+  background: var(--gray-100);
+  color: var(--gray-400);
   cursor: not-allowed;
 }
 

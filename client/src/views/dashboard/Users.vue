@@ -19,6 +19,10 @@
             <option value="lab_technician">Lab Technician</option>
           </select>
         </div>
+        <button class="btn btn-primary add-user-btn" @click="openCreate">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          Add User
+        </button>
       </div>
     </div>
 
@@ -50,11 +54,68 @@
         </tbody>
       </table>
     </div>
+
+    <!-- ──── ADD USER MODAL ──── -->
+    <div class="modal-overlay" v-if="showCreate" @click.self="showCreate = false">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-user-title">
+        <div class="modal-header">
+          <h2 id="add-user-title">Add New User</h2>
+          <button class="modal-close" type="button" @click="showCreate = false" aria-label="Close">✕</button>
+        </div>
+        <form @submit.prevent="createUser">
+          <div class="modal-body">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="nu-first">First name *</label>
+                <input id="nu-first" type="text" v-model.trim="form.first_name" required autocomplete="off" />
+              </div>
+              <div class="form-group">
+                <label for="nu-last">Last name *</label>
+                <input id="nu-last" type="text" v-model.trim="form.last_name" required autocomplete="off" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="nu-email">Email *</label>
+              <input id="nu-email" type="email" v-model.trim="form.email" required autocomplete="off" />
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="nu-role">Role *</label>
+                <select id="nu-role" v-model="form.role" required>
+                  <option value="" disabled>Select a role</option>
+                  <option value="admin">Admin</option>
+                  <option value="doctor">Doctor</option>
+                  <option value="nurse">Nurse</option>
+                  <option value="receptionist">Receptionist</option>
+                  <option value="pharmacist">Pharmacist</option>
+                  <option value="lab_technician">Lab Technician</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="nu-phone">Phone</label>
+                <input id="nu-phone" type="tel" v-model.trim="form.phone" placeholder="Optional" autocomplete="off" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="nu-password">Password *</label>
+              <input id="nu-password" type="password" v-model="form.password" required minlength="6" autocomplete="new-password" />
+              <span class="form-hint">At least 6 characters. The user can change it after signing in.</span>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="showCreate = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="creating">
+              {{ creating ? 'Creating…' : 'Create User' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { formatDateTime, getStatusLabel, debounce } from '../../utils/helpers'
@@ -68,6 +129,46 @@ export default {
     const search = ref('')
     const roleFilter = ref('')
     const loading = ref(true)
+
+    /* ── create-user modal ── */
+    const showCreate = ref(false)
+    const creating = ref(false)
+    const emptyForm = () => ({
+      first_name: '', last_name: '', email: '',
+      password: '', role: '', phone: ''
+    })
+    const form = reactive(emptyForm())
+
+    const openCreate = () => {
+      Object.assign(form, emptyForm())
+      showCreate.value = true
+    }
+
+    const createUser = async () => {
+      if (creating.value) return
+      creating.value = true
+      try {
+        await axios.post('/api/auth/register', {
+          first_name: form.first_name,
+          last_name: form.last_name,
+          email: form.email,
+          password: form.password,
+          role: form.role,
+          phone: form.phone || null
+        })
+        toast.success(`User ${form.first_name} ${form.last_name} created.`)
+        showCreate.value = false
+        loadUsers()
+      } catch (e) {
+        const data = e.response?.data
+        const msg = data?.message
+          || data?.errors?.map(err => err.msg).join(', ')
+          || 'Failed to create user.'
+        toast.error(msg)
+      } finally {
+        creating.value = false
+      }
+    }
 
     const loadUsers = async () => {
       loading.value = true
@@ -95,7 +196,11 @@ export default {
     const formatStatusLabel = (status) => getStatusLabel(status)
 
     onMounted(loadUsers)
-    return { users, total, search, roleFilter, loading, loadUsers, debouncedLoad, getRoleColor, formatDateTime, formatStatusLabel }
+    return {
+      users, total, search, roleFilter, loading, loadUsers, debouncedLoad,
+      getRoleColor, formatDateTime, formatStatusLabel,
+      showCreate, creating, form, openCreate, createUser
+    }
   }
 }
 </script>
@@ -106,16 +211,18 @@ export default {
 .header-left h2 { margin: 0; }
 .user-count { font-size: 12px; }
 .header-actions { display: flex; gap: 12px; }
-.search-bar input { padding: 10px 16px; border: 1px solid #e2e8f0; border-radius: 8px; width: 300px; font-size: 14px; }
+.search-bar input { padding: 10px 16px; border: 1px solid var(--gray-200); border-radius: 8px; width: 300px; font-size: 14px; }
 .search-bar input:focus { border-color: #0d9488; outline: none; }
-.filter-group select { padding: 10px 16px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; }
+.filter-group select { padding: 10px 16px; border: 1px solid var(--gray-200); border-radius: 8px; font-size: 14px; background: var(--white); color: var(--gray-700); }
+.add-user-btn { white-space: nowrap; }
+.add-user-btn svg { width: 15px; height: 15px; }
 
-.empty-state { text-align: center; padding: 60px 20px; color: #64748b; }
+.empty-state { text-align: center; padding: 60px 20px; color: var(--gray-500); }
 .empty-icon { font-size: 40px; display: block; margin-bottom: 12px; }
-.text-muted { color: #94a3b8; font-size: 13px; }
+.text-muted { color: var(--gray-400); font-size: 13px; }
 
-.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; color: #64748b; }
-.spinner { width: 40px; height: 40px; border: 4px solid #e2e8f0; border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
+.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; color: var(--gray-500); }
+.spinner { width: 40px; height: 40px; border: 4px solid var(--gray-200); border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 768px) {

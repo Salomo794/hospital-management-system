@@ -191,24 +191,24 @@ export default {
 <style scoped>
 .page-header { display: flex; justify-content: space-between; margin-bottom: 20px; gap: 16px; }
 .search-bar { position: relative; flex: 1; max-width: 400px; }
-.search-bar input { width: 100%; padding: 10px 16px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; }
-.search-results { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.search-bar input { width: 100%; padding: 10px 16px; border: 1px solid var(--gray-200); border-radius: 8px; font-size: 14px; }
+.search-results { position: absolute; top: 100%; left: 0; right: 0; background: var(--white); border: 1px solid var(--gray-200); border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
 .result-item { padding: 10px 14px; cursor: pointer; font-size: 14px; }
-.result-item:hover { background: #f0fdfa; }
-.selected-patient-banner { background: #f0fdfa; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #99f6e4; }
+.result-item:hover { background: var(--brand-50); }
+.selected-patient-banner { background: var(--brand-50); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #99f6e4; }
 .modal-lg { max-width: 700px; }
-.modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #64748b; }
+.modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--gray-500); }
 
 .loading-container { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 40px 20px; }
-.spinner { width: 36px; height: 36px; border: 3px solid #e2e8f0; border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; }
+.spinner { width: 36px; height: 36px; border: 3px solid var(--gray-200); border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; }
 .spinner-sm { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 6px; vertical-align: middle; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.loading-text { font-size: 14px; color: #94a3b8; }
+.loading-text { font-size: 14px; color: var(--gray-400); }
 
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 20px; text-align: center; }
 .empty-icon { font-size: 48px; line-height: 1; }
-.empty-state p { font-size: 15px; color: #475569; margin: 0; }
-.empty-hint { font-size: 13px; color: #94a3b8; }
+.empty-state p { font-size: 15px; color: var(--gray-600); margin: 0; }
+.empty-hint { font-size: 13px; color: var(--gray-400); }
 .full-page-empty { padding: 80px 20px; }
 
 /* Responsive */

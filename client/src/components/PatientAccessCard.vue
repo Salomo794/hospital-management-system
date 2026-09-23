@@ -433,7 +433,7 @@ export default {
 /* MRN value */
 .pac-cred-value.pac-mono {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 16px; font-weight: 700; color: #e2e8f0;
+  font-size: 16px; font-weight: 700; color: var(--gray-200);
   letter-spacing: .08em;
 }
 

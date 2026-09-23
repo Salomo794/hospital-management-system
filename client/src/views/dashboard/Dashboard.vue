@@ -166,7 +166,7 @@
           </div>
           <div class="card-body">
             <div class="chart-container" v-if="weeklyStats.length">
-              <BarChart :data="weeklyChartData" :options="chartOptions" />
+              <BarChart :key="uiStore.dark ? 'dark' : 'light'" :data="weeklyChartData" :options="chartOptions" />
             </div>
             <div class="empty-state" v-else>
               <span class="empty-state-icon">📊</span>
@@ -204,6 +204,7 @@ import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { useAuthStore } from '../../store/auth'
+import { useUiStore } from '../../store/ui'
 import { formatCurrency, formatTime, getStatusColor } from '../../utils/helpers'
 
 export default {
@@ -211,6 +212,7 @@ export default {
   setup() {
     const toast      = useToast()
     const authStore  = useAuthStore()
+    const uiStore    = useUiStore()
     const stats      = ref({})
     const insights   = ref([])
     const recentAppointments = ref([])
@@ -280,23 +282,26 @@ export default {
       }]
     }))
 
-    const chartOptions = {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { display: true, position: 'top', labels: { usePointStyle: true, pointStyle: 'circle', font: { family: 'Inter', size: 12 }, color: '#64748b', boxWidth: 8, padding: 16 } },
-        tooltip: {
-          backgroundColor: '#0f172a', titleColor: '#f1f5f9', bodyColor: '#94a3b8',
-          borderColor: '#1e293b', borderWidth: 1,
-          titleFont: { family: 'Inter', weight: '600' },
-          bodyFont:  { family: 'Inter' },
-          padding: 12, cornerRadius: 10
+    const chartOptions = computed(() => {
+      const dark = uiStore.dark
+      return {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'top', labels: { usePointStyle: true, pointStyle: 'circle', font: { family: 'Inter', size: 12 }, color: dark ? '#8b95a5' : '#64748b', boxWidth: 8, padding: 16 } },
+          tooltip: {
+            backgroundColor: dark ? '#0a1019' : '#0f172a', titleColor: '#f1f5f9', bodyColor: '#94a3b8',
+            borderColor: dark ? '#2a3444' : '#1e293b', borderWidth: 1,
+            titleFont: { family: 'Inter', weight: '600' },
+            bodyFont:  { family: 'Inter' },
+            padding: 12, cornerRadius: 10
+          }
+        },
+        scales: {
+          y: { beginAtZero: true, ticks: { precision: 0, color: '#94a3b8', font: { family: 'Inter', size: 11 } }, grid: { color: dark ? '#2a3444' : '#f1f5f9', drawBorder: false }, border: { display: false } },
+          x: { ticks: { color: '#94a3b8', font: { family: 'Inter', size: 11 } }, grid: { display: false }, border: { display: false } }
         }
-      },
-      scales: {
-        y: { beginAtZero: true, ticks: { precision: 0, color: '#94a3b8', font: { family: 'Inter', size: 11 } }, grid: { color: '#f1f5f9', drawBorder: false }, border: { display: false } },
-        x: { ticks: { color: '#94a3b8', font: { family: 'Inter', size: 11 } }, grid: { display: false }, border: { display: false } }
       }
-    }
+    })
 
     const quickActions = [
       { to: '/patients',     icon: '🏥', label: 'New Patient' },
@@ -313,7 +318,7 @@ export default {
       loading, stats, statCards, insights,
       recentAppointments, recentPatients,
       weeklyStats, weeklyChartData, chartOptions,
-      quickActions, greeting, firstName,
+      quickActions, greeting, firstName, uiStore,
       formatTime, getStatusColor,
     }
   }
@@ -342,7 +347,7 @@ export default {
 }
 
 .stat-card {
-  background: #fff;
+  background: var(--white);
   border-radius: 14px;
   padding: 16px 18px;
   display: flex; align-items: center; gap: 14px;
@@ -365,13 +370,13 @@ export default {
 .stat-label { font-size: 12px; color: var(--gray-500); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .stat-trend { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 20px; flex-shrink: 0; }
-.trend-up   { background: #dcfce7; color: #166534; }
-.trend-down { background: #fee2e2; color: #991b1b; }
+.trend-up   { background: var(--success-bg); color: var(--success-fg); }
+.trend-down { background: var(--danger-bg); color: var(--danger-fg); }
 .trend-flat { background: var(--gray-100); color: var(--gray-500); }
 
 /* Skeleton cards */
 .skeleton-card {
-  background: #fff; border-radius: 14px; padding: 18px;
+  background: var(--white); border-radius: 14px; padding: 18px;
   border: 1px solid rgba(0,0,0,.04);
   box-shadow: 0 1px 3px rgba(0,0,0,.05);
 }
@@ -385,7 +390,7 @@ export default {
 .dash-insights { grid-column: 1 / -1; }
 
 /* Card overrides */
-.card { background: #fff; border-radius: 14px; border: 1px solid rgba(0,0,0,.05); box-shadow: 0 1px 3px rgba(0,0,0,.05), 0 4px 14px rgba(0,0,0,.03); overflow: hidden; }
+.card { background: var(--white); border-radius: 14px; border: 1px solid rgba(0,0,0,.05); box-shadow: 0 1px 3px rgba(0,0,0,.05), 0 4px 14px rgba(0,0,0,.03); overflow: hidden; }
 .card-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--gray-100); gap: 10px; }
 .card-header h3 { font-size: 14px; font-weight: 600; color: var(--gray-800); margin: 0; }
 .card-body { padding: 16px 18px; }
@@ -405,10 +410,10 @@ export default {
   transition: transform .18s, box-shadow .18s;
 }
 .insight-card:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,.06); }
-.insight-success  { background: #f0fdf4; border-color: #86efac; border-left-color: #16a34a; }
-.insight-warning  { background: #fffbeb; border-color: #fde68a; border-left-color: #d97706; }
-.insight-danger   { background: #fef2f2; border-color: #fecaca; border-left-color: #dc2626; }
-.insight-info     { background: #eff6ff; border-color: #bfdbfe; border-left-color: #2563eb; }
+.insight-success  { background: var(--success-bg); border-color: #86efac; border-left-color: #16a34a; }
+.insight-warning  { background: var(--warning-bg); border-color: #fde68a; border-left-color: #d97706; }
+.insight-danger   { background: var(--danger-bg); border-color: #fecaca; border-left-color: #dc2626; }
+.insight-info     { background: var(--info-bg); border-color: #bfdbfe; border-left-color: #2563eb; }
 .insight-emoji { font-size: 20px; flex-shrink: 0; margin-top: 1px; line-height: 1; }
 .insight-body  { flex: 1; min-width: 0; }
 .insight-title { font-size: 13px; font-weight: 600; color: var(--gray-800); }
@@ -450,7 +455,7 @@ export default {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; padding: 16px 8px; border-radius: 12px;
   border: 1.5px solid var(--gray-200); text-decoration: none;
-  color: var(--gray-700); transition: all .2s; background: #fff;
+  color: var(--gray-700); transition: all .2s; background: var(--white);
   font-size: 12px; font-weight: 500;
 }
 .quick-btn:hover { border-color: var(--brand-400); background: var(--brand-50); color: var(--brand-700); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(20,184,166,.15); }

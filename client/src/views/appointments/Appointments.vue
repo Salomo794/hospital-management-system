@@ -369,10 +369,10 @@ export default {
 .filter-group select,
 .filter-group input {
   padding: 10px 16px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   font-size: 14px;
-  background: white;
+  background: var(--white);
   transition: border-color 0.2s;
 }
 
@@ -403,14 +403,14 @@ export default {
   align-items: center;
   justify-content: center;
   padding: 48px 20px;
-  color: #64748b;
+  color: var(--gray-500);
   gap: 12px;
 }
 
 .spinner {
   width: 36px;
   height: 36px;
-  border: 3px solid #e2e8f0;
+  border: 3px solid var(--gray-200);
   border-top-color: #0d9488;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -419,7 +419,7 @@ export default {
 .spinner-small {
   width: 16px;
   height: 16px;
-  border: 2px solid #e2e8f0;
+  border: 2px solid var(--gray-200);
   border-top-color: #0d9488;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -435,7 +435,7 @@ export default {
 .empty-state {
   text-align: center;
   padding: 48px 20px;
-  color: #64748b;
+  color: var(--gray-500);
 }
 
 .empty-icon {
@@ -445,7 +445,7 @@ export default {
 
 .empty-state h4 {
   margin: 0 0 8px;
-  color: #334155;
+  color: var(--gray-700);
 }
 
 .empty-state p {
@@ -459,7 +459,7 @@ export default {
   align-items: center;
   gap: 16px;
   padding: 16px;
-  border-top: 1px solid #f1f5f9;
+  border-top: 1px solid var(--gray-100);
 }
 
 /* Modal */
@@ -468,17 +468,17 @@ export default {
   border: none;
   font-size: 24px;
   cursor: pointer;
-  color: #64748b;
+  color: var(--gray-500);
   transition: color 0.2s;
 }
 
 .modal-close:hover {
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 /* Search */
 .search-results {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   max-height: 150px;
   overflow-y: auto;
@@ -493,12 +493,12 @@ export default {
 }
 
 .result-item:hover {
-  background: #f0fdfa;
+  background: var(--brand-50);
 }
 
 .selected-item {
   padding: 8px 12px;
-  background: #f0fdfa;
+  background: var(--brand-50);
   border: 1px solid #99f6e4;
   border-radius: 6px;
   margin-top: 4px;
@@ -509,7 +509,7 @@ export default {
 }
 
 .selected-label {
-  color: #64748b;
+  color: var(--gray-500);
 }
 
 .btn-clear {
@@ -517,7 +517,7 @@ export default {
   border: none;
   font-size: 18px;
   cursor: pointer;
-  color: #94a3b8;
+  color: var(--gray-400);
   padding: 0 4px;
   transition: color 0.2s;
 }
@@ -528,7 +528,7 @@ export default {
 
 .search-hint {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--gray-400);
   padding: 6px 0;
   display: flex;
   align-items: center;
