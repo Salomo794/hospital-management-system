@@ -373,7 +373,7 @@ export default {
 ══════════════════════════════════════ */
 .sidebar {
   width: 244px;
-  background: #0d1f26;
+  background: linear-gradient(180deg, #0a1a22 0%, #0d1f26 40%, #091519 100%);
   color: #fff;
   display: flex;
   flex-direction: column;
@@ -382,6 +382,22 @@ export default {
   z-index: 100;
   transition: width 0.3s cubic-bezier(.4,0,.2,1), transform 0.3s ease;
   overflow: hidden;
+}
+
+/* Decorative glow behind the sidebar */
+.sidebar::before {
+  content: '';
+  position: absolute;
+  top: -80px; left: -60px;
+  width: 280px; height: 280px;
+  background: radial-gradient(circle, rgba(20,184,166,.18) 0%, transparent 70%);
+  pointer-events: none;
+  border-radius: 50%;
+  animation: sideGlow 8s ease-in-out infinite alternate;
+}
+@keyframes sideGlow {
+  0%   { transform: translate(0,0) scale(1); opacity: .8; }
+  100% { transform: translate(20px,30px) scale(1.15); opacity: 1; }
 }
 
 .sidebar.is-collapsed { width: 68px; }
@@ -526,11 +542,11 @@ export default {
   gap: 16px;
   padding: 0 26px;
   height: 62px;
-  background: rgba(255,255,255,.85);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(0,0,0,.06);
-  box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 4px 20px rgba(0,0,0,.04);
+  background: rgba(255,255,255,.78);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border-bottom: 1px solid rgba(255,255,255,.6);
+  box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 4px 20px rgba(0,0,0,.05);
   position: sticky; top: 0; z-index: 50;
   flex-shrink: 0;
 }
@@ -659,7 +675,15 @@ export default {
 .dropdown-item :deep(svg) { width: 15px; height: 15px; }
 
 /* Page wrap */
-.page-wrap { padding: 26px; flex: 1; min-width: 0; }
+.page-wrap {
+  padding: 26px;
+  flex: 1;
+  min-width: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 100% 0%,   rgba(13,148,136,.05) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 0%   100%,  rgba(37,99,235,.04)  0%, transparent 60%);
+  min-height: calc(100vh - 62px);
+}
 @media (max-width: 768px) { .page-wrap { padding: 16px; } }
 
 /* ══════════════════════════════════════

@@ -39,6 +39,7 @@ async function setup() {
       allergies TEXT,
       chronic_conditions TEXT,
       portal_pin TEXT,
+      access_code TEXT UNIQUE,
       photo TEXT,
       status TEXT DEFAULT 'active' CHECK(status IN ('active','inactive','deceased')),
       created_at TEXT DEFAULT (datetime('now')),

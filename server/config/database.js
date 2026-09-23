@@ -47,12 +47,27 @@ function migrate() {
   // patients.portal_pin — patient self-service login
   if (!columnExists('patients', 'portal_pin')) {
     sqlite.exec('ALTER TABLE patients ADD COLUMN portal_pin TEXT');
-    sqlite.exec("UPDATE patients SET portal_pin = '' WHERE portal_pin IS NULL");
+  }
+
+  // patients.access_code — unique short code given to patient at registration
+  if (!columnExists('patients', 'access_code')) {
+    sqlite.exec('ALTER TABLE patients ADD COLUMN access_code TEXT');
   }
 
   // Backfill a default demo PIN for any patient that still lacks one.
   const defaultPinHash = bcrypt.hashSync('password123', 4);
   sqlite.prepare("UPDATE patients SET portal_pin = ? WHERE portal_pin IS NULL OR portal_pin = ''").run(defaultPinHash);
+
+  // Backfill access_code for existing patients who don't have one yet
+  const patientsWithoutCode = sqlite.prepare("SELECT id, mrn FROM patients WHERE access_code IS NULL OR access_code = ''").all();
+  const genCode = (mrn) => {
+    const suffix = Math.random().toString(36).substring(2, 7).toUpperCase();
+    return `HMS-${mrn.replace('MRN-', '').substring(0, 4)}-${suffix}`;
+  };
+  const updateCode = sqlite.prepare("UPDATE patients SET access_code = ? WHERE id = ?");
+  for (const p of patientsWithoutCode) {
+    updateCode.run(genCode(p.mrn), p.id);
+  }
 }
 
 migrate();

@@ -141,28 +141,93 @@ export default {
 
 <style scoped>
 .login-page {
-  min-height: 100vh; display: flex; align-items: center;
-  justify-content: center; background: linear-gradient(135deg, #0d9488 0%, #0f4c5c 100%);
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
   padding: 20px;
+  position: relative;
+  overflow: hidden;
+
+  /* Rich animated mesh gradient */
+  background:
+    radial-gradient(ellipse 80% 60% at 10% 20%, #0d9488 0%, transparent 60%),
+    radial-gradient(ellipse 70% 70% at 90% 80%, #0f4c5c 0%, transparent 55%),
+    radial-gradient(ellipse 60% 50% at 50% 50%, #0c2340 0%, transparent 70%),
+    linear-gradient(135deg, #071e2b 0%, #0d2d3a 50%, #071520 100%);
+  background-attachment: fixed;
 }
+
+/* Floating blobs behind the card */
+.login-page::before,
+.login-page::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  pointer-events: none;
+  animation: blobFloat 12s ease-in-out infinite alternate;
+}
+.login-page::before {
+  width: 560px; height: 560px;
+  background: radial-gradient(circle, rgba(13,148,136,.45) 0%, transparent 70%);
+  top: -160px; left: -120px;
+}
+.login-page::after {
+  width: 480px; height: 480px;
+  background: radial-gradient(circle, rgba(20,40,90,.55) 0%, transparent 70%);
+  bottom: -140px; right: -100px;
+  animation-delay: -6s;
+}
+@keyframes blobFloat {
+  0%   { transform: translate(0,0) scale(1); }
+  50%  { transform: translate(30px,20px) scale(1.08); }
+  100% { transform: translate(-20px,10px) scale(.95); }
+}
+
 .login-container {
-  display: flex; max-width: 900px; width: 100%; background: white;
-  border-radius: 16px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  position: relative; z-index: 1;
+  display: flex; max-width: 920px; width: 100%;
+  border-radius: 20px; overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,.08),
+    0 30px 80px rgba(0,0,0,.55),
+    0 8px 24px rgba(0,0,0,.3);
 }
 .login-left {
-  flex: 1; background: linear-gradient(135deg, #0d9488 0%, #0f4c5c 100%);
-  color: white; padding: 40px; display: flex; flex-direction: column;
+  flex: 1;
+  background: linear-gradient(155deg, #0d9488 0%, #0b6e65 40%, #083d4a 100%);
+  color: white; padding: 44px; display: flex; flex-direction: column;
   justify-content: center; position: relative; overflow: hidden;
 }
 .login-pattern {
-  position: absolute; inset: 0;
+  position: absolute; inset: 0; pointer-events: none;
   background-image:
-    radial-gradient(circle at 82% 12%, rgba(255,255,255,0.16) 0, transparent 34%),
-    radial-gradient(circle at 12% 88%, rgba(117,224,207,0.22) 0, transparent 40%),
-    linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
-  background-size: auto, auto, 34px 34px, 34px 34px;
+    /* big soft glow top-right */
+    radial-gradient(ellipse 70% 55% at 85% 8%, rgba(94,234,212,.22) 0%, transparent 65%),
+    /* smaller glow bottom-left */
+    radial-gradient(ellipse 50% 45% at 8% 92%, rgba(45,212,191,.18) 0%, transparent 60%),
+    /* fine dot grid */
+    radial-gradient(rgba(255,255,255,.12) 1px, transparent 1px);
+  background-size: auto, auto, 28px 28px;
+}
+
+/* Decorative rings */
+.login-left::before,
+.login-left::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.1);
   pointer-events: none;
+}
+.login-left::before {
+  width: 340px; height: 340px;
+  top: -120px; right: -80px;
+  box-shadow: inset 0 0 60px rgba(255,255,255,.04);
+}
+.login-left::after {
+  width: 200px; height: 200px;
+  bottom: -60px; left: -40px;
+  border-color: rgba(255,255,255,.07);
 }
 .login-left > *:not(.login-pattern) { position: relative; z-index: 1; }
 .brand-icon {
@@ -190,7 +255,11 @@ export default {
   padding: 8px 0; font-size: 14px; opacity: 0.9;
 }
 .feature span { color: #5eead4; font-size: 16px; }
-.login-right { flex: 1; padding: 40px; }
+.login-right {
+  flex: 1; padding: 44px;
+  background: rgba(255,255,255,.97);
+  backdrop-filter: blur(20px);
+}
 .login-form h2 { font-size: 24px; color: #1e293b; margin-bottom: 4px; }
 .subtitle { color: #64748b; margin-bottom: 24px; font-size: 14px; }
 .btn-block { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; }
@@ -224,7 +293,9 @@ export default {
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 768px) {
   .login-container { flex-direction: column; }
-  .login-left { padding: 26px 24px; }
+  .login-left { padding: 30px 24px; min-height: auto; }
+  .login-left::before { width: 200px; height: 200px; top: -80px; right: -50px; }
+  .login-left::after  { width: 130px; height: 130px; bottom: -40px; left: -30px; }
   .login-right { padding: 28px; }
 }
 
