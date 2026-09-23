@@ -3,26 +3,14 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
-
-// Ward configuration: name -> total bed capacity
-const WARDS = {
-  'General Medicine': 20,
-  'Surgery': 12,
-  'ICU': 10,
-  'Pediatrics': 10,
-  'Maternity': 14,
-  'Ward A': 20,
-  'Ward B': 20
-};
-
-// Capacity for any ward (configured or discovered in data) defaults to 20 beds
-const wardCapacity = ward => WARDS[ward] || 20;
+const { WARDS, wardCapacity, wardCapacityOrDefault } = require('../config/wards');
 
 const pad = n => String(n).padStart(2, '0');
 
-// Helper: resolve a free bed number inside a ward, honor existing occupied beds
+// Helper: resolve a free bed number inside a ward, honoring existing occupied beds.
+// Accepts either a pool or a connection object — both expose .query().
 async function findFreeBed(conn, ward) {
-  const total = wardCapacity(ward);
+  const total = wardCapacityOrDefault(ward);
   const [rows] = await conn.query(
     "SELECT bed_number FROM admissions WHERE ward = ? AND status = 'admitted' ORDER BY bed_number",
     [ward]
@@ -89,9 +77,11 @@ router.get('/wards', authenticate, async (req, res) => {
       occupiedByWard[a.ward].push(a);
     });
 
-    // Combine configured wards with any ward discovered in live data (falls back to default capacity)
+    // Combine configured wards with any ward discovered in live data
     const wardTotals = {};
-    [...Object.keys(WARDS), ...Object.keys(occupiedByWard)].forEach(w => { wardTotals[w] = wardCapacity(w); });
+    [...Object.keys(WARDS), ...Object.keys(occupiedByWard)].forEach(w => {
+      wardTotals[w] = wardCapacityOrDefault(w);
+    });
 
     const wards = Object.entries(wardTotals).map(([ward, total]) => {
       const occupied = occupiedByWard[ward] ? occupiedByWard[ward].length : 0;
@@ -99,7 +89,9 @@ router.get('/wards', authenticate, async (req, res) => {
       for (let i = 1; i <= Math.min(total, 40); i++) {
         const bed = pad(i);
         const adm = (occupiedByWard[ward] || []).find(a => a.bed_number === bed);
-        beds.push(adm ? { bed, status: 'occupied', admissionId: adm.id, patientId: adm.patient_id, diagnosis: adm.diagnosis } : { bed, status: 'available' });
+        beds.push(adm
+          ? { bed, status: 'occupied', admissionId: adm.id, patientId: adm.patient_id, diagnosis: adm.diagnosis }
+          : { bed, status: 'available' });
       }
       return { ward, total, occupied, available: total - occupied, percentage: Math.round((occupied / total) * 100), beds };
     });
@@ -129,8 +121,9 @@ router.post('/', authenticate, authorize('admin', 'doctor', 'nurse', 'receptioni
     if (!patient_id || !doctor_id || !ward) {
       return res.status(400).json({ message: 'patient_id, doctor_id and ward are required' });
     }
-    if (!wardCapacity(ward)) {
-      return res.status(400).json({ message: `Unknown ward "${ward}".` });
+    // FIX: use WARDS directly so unknown wards are properly rejected
+    if (WARDS[ward] === undefined) {
+      return res.status(400).json({ message: `Unknown ward "${ward}". Valid wards: ${Object.keys(WARDS).join(', ')}` });
     }
 
     const conn = await pool.getConnection();
@@ -143,6 +136,7 @@ router.post('/', authenticate, authorize('admin', 'doctor', 'nurse', 'receptioni
       if (activeInWard[0].count >= capacity) {
         return res.status(409).json({ message: `${ward} ward is full (${capacity}/${capacity} beds).` });
       }
+      // FIX: pass conn (not pool) so findFreeBed sees the same transaction context
       const freeBed = bed_number || await findFreeBed(conn, ward);
       if (!freeBed) {
         return res.status(409).json({ message: `${ward} ward is full (${capacity}/${capacity} beds).` });
@@ -156,9 +150,9 @@ router.post('/', authenticate, authorize('admin', 'doctor', 'nurse', 'receptioni
         [uuid, admNum, patient_id, doctor_id, ward, freeBed, diagnosis || null, treatment_plan || null, notes || null]
       );
 
-      // Notify nursing staff for the ward
+      // Notify nursing staff
       const [nurses] = await conn.query(
-        "SELECT id FROM users WHERE role = 'nurse' AND is_active = TRUE"
+        "SELECT id FROM users WHERE role = 'nurse' AND is_active = 1"
       );
       const [patient] = await conn.query('SELECT first_name, last_name FROM patients WHERE id = ?', [patient_id]);
       const [doctor] = await conn.query('SELECT first_name, last_name FROM users WHERE id = ?', [doctor_id]);
@@ -196,13 +190,14 @@ router.put('/:id', authenticate, authorize('admin', 'doctor', 'nurse', 'receptio
     const updates = [];
     const values = [];
 
-    if (ward && wardCapacity(ward) === undefined) {
-      return res.status(400).json({ message: `Unknown ward "${ward}".` });
+    // FIX: use WARDS directly instead of wardCapacity() which always returns a number
+    if (ward !== undefined && WARDS[ward] === undefined) {
+      return res.status(400).json({ message: `Unknown ward "${ward}". Valid wards: ${Object.keys(WARDS).join(', ')}` });
     }
     const targetWard = ward || adm.ward;
     const targetBed = bed_number || adm.bed_number;
 
-    // If the ward/bed is changing, verify capacity and bed availability
+    // If the ward is changing, verify capacity and find a free bed
     if (ward !== undefined && ward !== adm.ward) {
       const [activeInTarget] = await pool.query(
         "SELECT COUNT(*) as count FROM admissions WHERE ward = ? AND status = 'admitted' AND id != ?",
@@ -213,6 +208,7 @@ router.put('/:id', authenticate, authorize('admin', 'doctor', 'nurse', 'receptio
       }
       let newBed = bed_number;
       if (!newBed) {
+        // FIX: pass pool.query-compatible shim — consistent with findFreeBed interface
         newBed = await findFreeBed(pool, targetWard);
         if (!newBed) return res.status(409).json({ message: `${targetWard} ward is full.` });
       }
@@ -239,7 +235,13 @@ router.put('/:id', authenticate, authorize('admin', 'doctor', 'nurse', 'receptio
       }
       updates.push('status = ?');
       values.push(status);
-      updates.push(status === 'discharged' ? "discharge_date = datetime('now')" : 'discharge_date = NULL');
+      // FIX: push the SQL expression as a literal column=expression fragment, NOT as a parameterized value.
+      // We use a dedicated column expression string that does not add a ? placeholder.
+      if (status === 'discharged') {
+        updates.push("discharge_date = datetime('now')");
+      } else {
+        updates.push('discharge_date = NULL');
+      }
     }
 
     if (updates.length === 0) return res.status(400).json({ message: 'Nothing to update' });

@@ -255,10 +255,13 @@ router.post('/bills/:id/pay', authenticatePortal, async (req, res) => {
       'UPDATE bills SET paid_amount = paid_amount + ?, payment_status = CASE WHEN paid_amount + ? >= net_amount THEN ? ELSE ? END, payment_method = COALESCE(payment_method, ?) WHERE id = ?',
       [payAmount, payAmount, 'paid', 'partial', payment_method, bill.id]
     );
+    // FIX: re-query updated bill to get accurate balance_remaining (avoids stale pre-update values)
+    const [updatedBillRows] = await pool.query('SELECT net_amount, paid_amount FROM bills WHERE id = ?', [bill.id]);
+    const updatedBill = updatedBillRows[0];
     res.json({
       success: true,
       amount: payAmount,
-      balance_remaining: Math.max(bill.net_amount - (bill.paid_amount + payAmount), 0),
+      balance_remaining: Math.max(updatedBill.net_amount - updatedBill.paid_amount, 0),
       message: 'Payment recorded successfully. Thank you!'
     });
   } catch (error) {

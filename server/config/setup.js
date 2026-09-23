@@ -328,7 +328,7 @@ async function setup() {
       medicine_a_id INTEGER NOT NULL,
       medicine_b_id INTEGER NOT NULL,
       severity TEXT NOT NULL CHECK(severity IN ('mild','moderate','severe','contraindicated')),
-      description TEXT NOT NULL,
+      description TEXT,
       clinical_management TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (medicine_a_id) REFERENCES medicines(id) ON DELETE CASCADE,

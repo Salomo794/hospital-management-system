@@ -60,7 +60,20 @@ router.get('/orders', authenticate, async (req, res) => {
     if (status) { query += ' AND lo.status = ?'; params.push(status); }
     if (patient_id) { query += ' AND lo.patient_id = ?'; params.push(patient_id); }
     query += ' GROUP BY lo.id';
-    const [countRes] = await pool.query(query.replace(/SELECT lo\.[\s\S]*?FROM lab_orders lo/, 'SELECT COUNT(*) as total FROM lab_orders lo').replace(/GROUP BY lo.id/, ''), params);
+    // FIX: build a clean count query without the multi-join row expansion problem.
+    // The original regex approach kept all JOINs which inflated counts due to lab_order_items.
+    let countWhere = 'WHERE 1=1';
+    const countParams = [];
+    if (status) { countWhere += ' AND lo.status = ?'; countParams.push(status); }
+    if (patient_id) { countWhere += ' AND lo.patient_id = ?'; countParams.push(patient_id); }
+    const [countRes] = await pool.query(
+      `SELECT COUNT(*) as total
+       FROM lab_orders lo
+       JOIN patients p ON lo.patient_id = p.id
+       JOIN users u ON lo.doctor_id = u.id
+       ${countWhere}`,
+      countParams
+    );
     query += ' ORDER BY lo.order_date DESC LIMIT ? OFFSET ?';
     params.push(parseInt(limit), parseInt(offset));
     const [rows] = await pool.query(query, params);

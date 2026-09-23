@@ -13,7 +13,7 @@ router.get('/medicines', authenticate, async (req, res) => {
     const params = [];
     if (search) { query += ' AND (name LIKE ? OR generic_name LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
     if (category) { query += ' AND category = ?'; params.push(category); }
-    if (low_stock === 'true') { query += ' AND stock_quantity <= min_stock_level AND is_active = TRUE'; }
+    if (low_stock === 'true') { query += ' AND stock_quantity <= min_stock_level AND is_active = 1'; }
     const [countRes] = await pool.query(query.replace('SELECT *', 'SELECT COUNT(*) as total'), params);
     query += ' ORDER BY name LIMIT ? OFFSET ?';
     params.push(parseInt(limit), parseInt(offset));
@@ -29,10 +29,10 @@ router.get('/medicines', authenticate, async (req, res) => {
 router.get('/alerts', authenticate, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      "SELECT * FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = TRUE ORDER BY stock_quantity ASC"
+      "SELECT * FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1 ORDER BY stock_quantity ASC"
     );
     const [expired] = await pool.query(
-      "SELECT * FROM medicines WHERE expiry_date < date('now') AND is_active = TRUE"
+      "SELECT * FROM medicines WHERE expiry_date < date('now') AND is_active = 1"
     );
     res.json({ low_stock: rows, expired });
   } catch (error) {
@@ -185,7 +185,7 @@ router.post('/dispense', authenticate, authorize('pharmacist'), async (req, res)
     }
 
     await pool.query('UPDATE medicines SET stock_quantity = stock_quantity - ? WHERE id = ?', [quantity, pi[0].medicine_id]);
-    await pool.query("UPDATE prescription_items SET dispensed = TRUE, dispensed_date = datetime('now') WHERE id = ?", [prescription_item_id]);
+    await pool.query("UPDATE prescription_items SET dispensed = 1, dispensed_date = datetime('now') WHERE id = ?", [prescription_item_id]);
     await pool.query(
       'INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, reference_number, performed_by) VALUES (?, "dispense", ?, ?, ?)',
       [pi[0].medicine_id, quantity, `RX-${prescription_item_id}`, req.user.id]

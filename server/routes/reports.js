@@ -2,14 +2,14 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
-const { WARD_CAPACITY } = require('./admissions');
+const { WARDS: WARD_CAPACITY, wardCapacityOrDefault } = require('../config/wards');
 
 // Dashboard stats
 router.get('/dashboard', authenticate, async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
     const [totalPatients] = await pool.query("SELECT COUNT(*) as count FROM patients WHERE status = 'active'");
-    const [totalDoctors] = await pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'doctor' AND is_active = TRUE");
+    const [totalDoctors] = await pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'doctor' AND is_active = 1");
     const [todayAppointments] = await pool.query('SELECT COUNT(*) as count FROM appointments WHERE appointment_date = ?', [today]);
     const [pendingAppointments] = await pool.query("SELECT COUNT(*) as count FROM appointments WHERE status = 'scheduled' AND appointment_date >= ?", [today]);
     const [todayRevenue] = await pool.query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE DATE(payment_date) = ?", [today]);
@@ -17,7 +17,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
       "SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE CAST(strftime('%m', payment_date) AS INTEGER) = CAST(strftime('%m', 'now') AS INTEGER) AND CAST(strftime('%Y', payment_date) AS INTEGER) = CAST(strftime('%Y', 'now') AS INTEGER)"
     );
     const [pendingBills] = await pool.query("SELECT COUNT(*) as count, COALESCE(SUM(net_amount - paid_amount), 0) as amount FROM bills WHERE payment_status IN ('pending','partial')");
-    const [lowStockMeds] = await pool.query("SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = TRUE");
+    const [lowStockMeds] = await pool.query("SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1");
     const [pendingLabOrders] = await pool.query("SELECT COUNT(*) as count FROM lab_orders WHERE status IN ('ordered','in_progress')");
     const [recentAppointments] = await pool.query(
       `SELECT a.*, p.first_name as patient_first_name, p.last_name as patient_last_name,
@@ -119,7 +119,7 @@ router.get('/insights', authenticate, async (req, res) => {
 
     // 2. Medicines expiring soon
     const [expiring] = await pool.query(
-      "SELECT COUNT(*) as count FROM medicines WHERE expiry_date >= date('now') AND expiry_date <= date('now', '+30 days') AND is_active = TRUE"
+      "SELECT COUNT(*) as count FROM medicines WHERE expiry_date >= date('now') AND expiry_date <= date('now', '+30 days') AND is_active = 1"
     );
     if (expiring[0].count > 0) {
       insights.push({
@@ -133,7 +133,7 @@ router.get('/insights', authenticate, async (req, res) => {
 
     // 3. Low stock
     const [lowStock] = await pool.query(
-      "SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = TRUE"
+      "SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1"
     );
     if (lowStock[0].count > 0) {
       insights.push({

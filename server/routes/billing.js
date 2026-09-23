@@ -70,6 +70,10 @@ router.get('/:id', authenticate, async (req, res) => {
 router.post('/', authenticate, authorize('admin', 'receptionist'), async (req, res) => {
   try {
     const { patient_id, appointment_id, items, discount, tax, payment_method, due_date, notes } = req.body;
+    // FIX: validate items array before calling .reduce()
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ message: 'At least one bill item is required' });
+    }
     const uuid = uuidv4();
     const bill_number = generateBillNumber();
     const total_amount = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);

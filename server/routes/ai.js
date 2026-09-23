@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate } = require('../middleware/auth');
-const { WARD_CAPACITY } = require('./admissions');
+const { WARDS: WARD_CAPACITY } = require('../config/wards');
 
 // AI Assistant endpoint - processes natural language queries
 router.post('/chat', authenticate, async (req, res) => {
@@ -43,7 +43,7 @@ router.post('/chat', authenticate, async (req, res) => {
         `SELECT u.first_name, u.last_name, s.name as specialty, dp.license_number, dp.consultation_fee
          FROM users u LEFT JOIN doctor_profiles dp ON u.id = dp.user_id
          LEFT JOIN specialties s ON dp.specialty_id = s.id
-         WHERE u.role = 'doctor' AND u.is_active = TRUE
+         WHERE u.role = 'doctor' AND u.is_active = 1
          AND (u.first_name LIKE ? OR u.last_name LIKE ? OR s.name LIKE ?) LIMIT 5`,
         [`%${searchName}%`, `%${searchName}%`, `%${searchName}%`]
       );
@@ -166,7 +166,7 @@ router.post('/chat', authenticate, async (req, res) => {
     // Medicine stock checks (specific + low stock)
     else if (lowerMsg.includes('low stock') || lowerMsg.includes('stock alert') || lowerMsg.includes('stock alerts')) {
       const [low] = await pool.query(
-        "SELECT name, generic_name, stock_quantity, min_stock_level, unit FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = TRUE ORDER BY stock_quantity ASC"
+        "SELECT name, generic_name, stock_quantity, min_stock_level, unit FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1 ORDER BY stock_quantity ASC"
       );
       if (low.length > 0) {
         response = `Found ${low.length} medicine(s) at or below minimum stock:`;
@@ -206,13 +206,13 @@ router.post('/chat', authenticate, async (req, res) => {
         }
       } else {
         const [meds] = await pool.query(
-          "SELECT COUNT(*) as count FROM medicines WHERE is_active = TRUE"
+          "SELECT COUNT(*) as count FROM medicines WHERE is_active = 1"
         );
         const [low] = await pool.query(
-          "SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = TRUE"
+          "SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1"
         );
         const [expiring] = await pool.query(
-          "SELECT COUNT(*) as count FROM medicines WHERE expiry_date >= date('now') AND expiry_date <= date('now', '+30 days') AND is_active = TRUE"
+          "SELECT COUNT(*) as count FROM medicines WHERE expiry_date >= date('now') AND expiry_date <= date('now', '+30 days') AND is_active = 1"
         );
         response = 'Pharmacy inventory overview:';
         data = {

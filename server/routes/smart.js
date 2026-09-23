@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate } = require('../middleware/auth');
-const { WARD_CAPACITY } = require('./admissions');
+const { WARDS: WARD_CAPACITY, wardCapacityOrDefault } = require('../config/wards');
 
 function isoDate(offsetDays = 0) {
   const d = new Date();

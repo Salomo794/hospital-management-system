@@ -120,7 +120,7 @@ router.post('/', authenticate, authorize('admin', 'receptionist', 'doctor', 'nur
 });
 
 // Update appointment status
-router.put('/:id', authenticate, async (req, res) => {
+router.put('/:id', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), async (req, res) => {
   try {
     const { status, notes } = req.body;
     const updates = [];

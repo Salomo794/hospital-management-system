@@ -11,7 +11,7 @@ router.get('/', authenticate, async (req, res) => {
       [req.user.id]
     );
     const [unread] = await pool.query(
-      'SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND is_read = FALSE',
+      'SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND is_read = 0',
       [req.user.id]
     );
     res.json({ notifications: rows, unread_count: unread[0].count });
@@ -23,7 +23,7 @@ router.get('/', authenticate, async (req, res) => {
 // Mark as read
 router.put('/:id/read', authenticate, async (req, res) => {
   try {
-    await pool.query('UPDATE notifications SET is_read = TRUE WHERE id = ? AND user_id = ?',
+    await pool.query('UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?',
       [req.params.id, req.user.id]);
     res.json({ message: 'Marked as read' });
   } catch (error) {
@@ -34,7 +34,7 @@ router.put('/:id/read', authenticate, async (req, res) => {
 // Mark all as read
 router.put('/read-all', authenticate, async (req, res) => {
   try {
-    await pool.query('UPDATE notifications SET is_read = TRUE WHERE user_id = ? AND is_read = FALSE', [req.user.id]);
+    await pool.query('UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0', [req.user.id]);
     res.json({ message: 'All notifications marked as read' });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
