@@ -311,14 +311,19 @@
 import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
-import { formatDate, formatCurrency } from '../../utils/helpers'
+import { useAuthStore } from '../../store/auth'
+import { formatDate, formatCurrency, debounce, hasAllergy } from '../../utils/helpers'
 
 export default {
   name: 'Pharmacy',
   setup() {
     const toast = useToast()
+    const authStore = useAuthStore()
     const view = ref('medicines')
     const medicines = ref([])
+    const total = ref(0)
+    const page = ref(1)
+    const limit = ref(20)
     const search = ref('')
     const categoryFilter = ref('')
     const lowStockOnly = ref(false)
@@ -328,7 +333,7 @@ export default {
     const loadingMedicines = ref(false)
     const loadingAlerts = ref(false)
     const savingMedicine = ref(false)
-    const medForm = ref({ name: '', generic_name: '', category: '', manufacturer: '', unit_price: 0, cost_price: 0, stock_quantity: 0, unit: 'tablet', min_stock_level: 10, expiry_date: '' })
+    const medForm = ref({ name: '', generic_name: '', category: 'Analgesic', manufacturer: '', unit_price: 0, cost_price: 0, stock_quantity: 0, unit: 'tablet', min_stock_level: 10, expiry_date: '' })
 
     const showDispenseModal = ref(false)
     const dispensing = ref(false)

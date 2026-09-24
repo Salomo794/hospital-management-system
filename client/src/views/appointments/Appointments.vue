@@ -237,9 +237,12 @@ export default {
       showModal.value = true
     }
 
+    let slotRequestId = 0
     const closeModal = () => {
+      slotRequestId += 1
       showModal.value = false
       formError.value = ''
+      availableSlots.value = []
     }
 
     let appointmentRequestId = 0

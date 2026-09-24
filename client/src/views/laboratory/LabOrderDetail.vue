@@ -76,7 +76,7 @@
                     v-model="item.result_value"
                     :disabled="order.status === 'completed'"
                     required
-                     placeholder="Enter result..."
+                    placeholder="Enter result..."
                   />
                 </div>
                 <div class="form-group">
