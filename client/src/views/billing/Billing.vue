@@ -207,6 +207,7 @@ export default {
     const toast = useToast()
 
     const bills = ref([])
+    const summary = ref({ unpaid_count: 0, pending_amount: 0, collected_today: 0 })
     const loading = ref(false)
     const statusFilter = ref('')
     const fromDate = ref('')
@@ -228,38 +229,39 @@ export default {
       notes: ''
     })
 
+    const finiteNonNegative = (value) => {
+      const number = Number(value)
+      return Number.isFinite(number) && number >= 0 ? number : 0
+    }
     const subtotal = computed(() =>
-      billForm.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0)
+      billForm.items.reduce((sum, item) => sum + (finiteNonNegative(item.quantity) * finiteNonNegative(item.unit_price)), 0)
     )
-    const taxAmount = computed(() => Math.max(0, (subtotal.value - (billForm.discount || 0)) * 0.10))
-    const netAmount = computed(() => Math.max(0, subtotal.value - (billForm.discount || 0) + taxAmount.value))
+    const taxAmount = computed(() => Math.max(0, (subtotal.value - finiteNonNegative(billForm.discount)) * 0.10))
+    const netAmount = computed(() => Math.max(0, subtotal.value - finiteNonNegative(billForm.discount) + taxAmount.value))
 
-    const totalPending = computed(() =>
-      bills.value
-        .filter(b => b.payment_status !== 'paid')
-        .reduce((s, b) => s + (parseFloat(b.net_amount) - parseFloat(b.paid_amount)), 0)
-    )
-    const totalCollectedToday = computed(() => {
-      const today = new Date().toISOString().slice(0, 10)
-      return bills.value
-        .filter(b => b.created_at && b.created_at.slice(0, 10) === today && b.payment_status === 'paid')
-        .reduce((s, b) => s + parseFloat(b.paid_amount), 0)
-    })
-    const unpaidCount = computed(() => bills.value.filter(b => b.payment_status !== 'paid').length)
+    const totalPending = computed(() => Number(summary.value.pending_amount) || 0)
+    const totalCollectedToday = computed(() => Number(summary.value.collected_today) || 0)
+    const unpaidCount = computed(() => Number(summary.value.unpaid_count) || 0)
 
     let searchTimeout = null
+    let patientSearchRequest = 0
     const searchPatients = () => {
       clearTimeout(searchTimeout)
       if (!billForm.patientSearch || billForm.patientSearch.length < 2) {
+        patientSearchRequest += 1
         patientResults.value = []
         return
       }
+      const requestId = ++patientSearchRequest
+      const query = billForm.patientSearch
       searchTimeout = setTimeout(async () => {
         try {
-          const { data } = await axios.get('/api/patients', { params: { search: billForm.patientSearch } })
-          patientResults.value = data.patients || data || []
+          const { data } = await axios.get('/api/patients', { params: { search: query } })
+          if (requestId === patientSearchRequest && billForm.patientSearch === query) {
+            patientResults.value = data.patients || (Array.isArray(data) ? data : [])
+          }
         } catch {
-          patientResults.value = []
+          if (requestId === patientSearchRequest) patientResults.value = []
         }
       }, 300)
     }
@@ -313,6 +315,22 @@ export default {
         toast.error('Please select a patient')
         return
       }
+      const invalidItem = billForm.items.find(item => {
+        const quantity = Number(item.quantity)
+        const unitPrice = Number(item.unit_price)
+        return !String(item.description || '').trim() || !String(item.category || '').trim() ||
+          !Number.isInteger(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0
+      })
+      if (invalidItem) {
+        toast.error('Complete every bill item with a description, category, positive quantity, and non-negative price.')
+        return
+      }
+      const subtotalValue = subtotal.value
+      const discountValue = finiteNonNegative(billForm.discount)
+      if (discountValue > subtotalValue) {
+        toast.error('Discount cannot exceed the subtotal.')
+        return
+      }
       submitting.value = true
       try {
         await axios.post('/api/billing', {
@@ -320,10 +338,10 @@ export default {
           items: billForm.items.map(i => ({
             description: i.description,
             category: i.category,
-            quantity: i.quantity,
-            unit_price: i.unit_price
+            quantity: Number(i.quantity),
+            unit_price: Number(i.unit_price)
           })),
-          discount: billForm.discount || 0,
+          discount: discountValue,
           tax: taxAmount.value,
           payment_method: billForm.payment_method,
           due_date: billForm.due_date || null,
@@ -346,8 +364,12 @@ export default {
         if (statusFilter.value) params.status = statusFilter.value
         if (fromDate.value) params.from_date = fromDate.value
         if (toDate.value) params.to_date = toDate.value
-        const { data } = await axios.get('/api/billing', { params })
-        bills.value = data.bills
+        const [billResponse, summaryResponse] = await Promise.all([
+          axios.get('/api/billing', { params }),
+          axios.get('/api/billing/summary')
+        ])
+        bills.value = billResponse.data.bills
+        summary.value = summaryResponse.data
       } catch {
         toast.error('Failed to load bills')
       } finally {

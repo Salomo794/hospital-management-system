@@ -174,7 +174,7 @@
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
@@ -188,6 +188,7 @@ export default {
     const toast = useToast()
     const route = useRoute()
     const { confirm } = useConfirm()
+    const authStore = useAuthStore()
 
     const appointments = ref([])
     const doctors = ref([])
@@ -196,6 +197,7 @@ export default {
     const limit = ref(20)
     const statusFilter = ref('')
     const dateFilter = ref('')
+    const doctorFilter = ref('')
     const showModal = ref(false)
     const saving = ref(false)
     const formError = ref('')
@@ -206,7 +208,7 @@ export default {
     const loadingSlots = ref(false)
     const searchingPatients = ref(false)
 
-    const today = computed(() => new Date().toISOString().split('T')[0])
+    const today = ref(new Date().toISOString().slice(0, 10))
 
     const defaultForm = () => ({
       patient_id: null,
@@ -220,19 +222,43 @@ export default {
 
     const form = ref(defaultForm())
 
+    const openCreateModal = (patient = null) => {
+      today.value = new Date().toISOString().slice(0, 10)
+      form.value = defaultForm()
+      if (authStore.userRole === 'doctor') form.value.doctor_id = authStore.user?.id || ''
+      if (patient) {
+        form.value.patient_id = patient.id
+        form.value.patientName = `${patient.first_name || ''} ${patient.last_name || ''}`.trim()
+      }
+      patientSearch.value = ''
+      patientResults.value = []
+      availableSlots.value = []
+      formError.value = ''
+      showModal.value = true
+    }
+
+    const closeModal = () => {
+      showModal.value = false
+      formError.value = ''
+    }
+
+    let appointmentRequestId = 0
     const loadAppointments = async () => {
+      const requestId = ++appointmentRequestId
       loadingAppointments.value = true
       try {
         const params = { page: page.value, limit: limit.value }
         if (statusFilter.value) params.status = statusFilter.value
         if (dateFilter.value) params.date = dateFilter.value
+        if (doctorFilter.value) params.doctor_id = doctorFilter.value
         const { data } = await axios.get('/api/appointments', { params })
+        if (requestId !== appointmentRequestId) return
         appointments.value = data.appointments
         total.value = data.total
       } catch (e) {
         toast.error('Failed to load appointments')
       } finally {
-        loadingAppointments.value = false
+        if (requestId === appointmentRequestId) loadingAppointments.value = false
       }
     }
 
@@ -245,7 +271,9 @@ export default {
       }
     }
 
+    let patientRequestId = 0
     const searchPatients = async () => {
+      const requestId = ++patientRequestId
       if (patientSearch.value.length < 2) {
         patientResults.value = []
         return
@@ -253,11 +281,11 @@ export default {
       searchingPatients.value = true
       try {
         const { data } = await axios.get('/api/patients', { params: { search: patientSearch.value, limit: 5 } })
-        patientResults.value = data.patients
+        if (requestId === patientRequestId) patientResults.value = data.patients
       } catch (e) {
         toast.error('Failed to search patients')
       } finally {
-        searchingPatients.value = false
+        if (requestId === patientRequestId) searchingPatients.value = false
       }
     }
 
