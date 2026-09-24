@@ -14,7 +14,7 @@
 
     <div v-if="view === 'medicines'">
       <div class="search-filters">
-        <input type="text" v-model="search" placeholder="Search medicines..." @input="loadMedicines" />
+        <input type="text" v-model="search" placeholder="Search medicines..." @input="debouncedSearch" />
         <select v-model="categoryFilter" @change="loadMedicines">
           <option value="">All Categories</option>
           <option>Analgesic</option><option>Antibiotic</option><option>Antihistamine</option>
@@ -56,6 +56,11 @@
             <span class="empty-hint">Add a medicine or adjust your search filters.</span>
           </div>
         </template>
+      </div>
+      <div class="pagination" v-if="total > limit">
+        <button class="btn btn-sm" :disabled="page <= 1" @click="page--; loadMedicines()">Previous</button>
+        <span>Page {{ page }} of {{ Math.ceil(total / limit) }}</span>
+        <button class="btn btn-sm" :disabled="page >= Math.ceil(total / limit)" @click="page++; loadMedicines()">Next</button>
       </div>
     </div>
 
@@ -153,9 +158,9 @@
         </div>
       </template>
     </div>
-    <div class="modal-overlay" v-if="showAddModal" @click.self="showAddModal = false">
+    <div class="modal-overlay" v-if="showAddModal" @click.self="closeAddModal">
       <div class="modal">
-        <div class="modal-header"><h3>Add New Medicine</h3><button class="modal-close" @click="showAddModal = false">&times;</button></div>
+        <div class="modal-header"><h3>Add New Medicine</h3><button class="modal-close" @click="closeAddModal">&times;</button></div>
         <div class="modal-body">
           <form @submit.prevent="addMedicine">
             <div class="form-row">
@@ -182,7 +187,7 @@
               <div class="form-group"><label>Expiry Date</label><input type="date" v-model="medForm.expiry_date" /></div>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" @click="showAddModal = false">Cancel</button>
+              <button type="button" class="btn btn-secondary" @click="closeAddModal">Cancel</button>
               <button type="submit" class="btn btn-primary" :disabled="savingMedicine">
                 <span v-if="savingMedicine" class="spinner-sm"></span>
                 {{ savingMedicine ? 'Adding...' : 'Add Medicine' }}
@@ -228,7 +233,7 @@
                     Rx #{{ item.prescription_id }} &mdash; {{ item.patient_name }} ({{ item.patient_mrn }})
                   </span>
                 </div>
-                <div class="rx-qty">Qty: {{ item.quantity_prescribed }}</div>
+                <div class="rx-qty">Remaining: {{ item.quantity_remaining ?? item.quantity_prescribed }}</div>
               </div>
             </div>
             <div v-else-if="prescriptionSearch.length >= 2" class="empty-state">
