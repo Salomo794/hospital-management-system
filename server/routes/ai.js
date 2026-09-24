@@ -7,7 +7,10 @@ const { WARDS: WARD_CAPACITY } = require('../config/wards');
 // AI Assistant endpoint - processes natural language queries
 router.post('/chat', authenticate, async (req, res) => {
   try {
-    const { message } = req.body;
+    const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+    if (!message) {
+      return res.status(400).json({ response: 'Please enter a question.', data: null });
+    }
     const lowerMsg = message.toLowerCase();
     let response = '';
     let data = null;

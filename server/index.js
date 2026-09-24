@@ -25,13 +25,15 @@ const portalRoutes = require('./routes/portal');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Fail loudly in development if the JWT secret is missing or still the
-// placeholder from .env.example — otherwise every token is forgeable.
+// Do not start a production server with a missing or example JWT secret.
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'change_this_to_a_secure_random_string') {
-  console.warn(
+  const message =
     '[security] JWT_SECRET is missing or still the .env.example placeholder. ' +
-    'Set a long random value in server/.env before deploying.'
-  );
+    'Set a long random value in server/.env before deploying.';
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(message);
+  }
+  console.warn(message);
 }
 
 // Middleware
@@ -77,8 +79,28 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`Hospital Management System API running on port ${PORT}`);
-});
+function startServer() {
+  const server = app.listen(PORT, () => {
+    console.log(`Hospital Management System API running on port ${PORT}`);
+  });
+
+  server.on('error', (error) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`[startup] Port ${PORT} is already in use. Stop the existing server or set PORT to a free port.`);
+    } else {
+      console.error('[startup] Unable to start server:', error.message);
+    }
+    process.exitCode = 1;
+  });
+
+  return server;
+}
+
+// Keep route/module checks side-effect free. Requiring the app should not start
+// a second listener (which used to produce EADDRINUSE during diagnostics).
+if (require.main === module) {
+  startServer();
+}
 
 module.exports = app;
+module.exports.startServer = startServer;

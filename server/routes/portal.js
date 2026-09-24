@@ -9,8 +9,8 @@ const { authenticatePortal } = require('../middleware/auth');
 async function findPatientByIdentifier(identifier) {
   const value = String(identifier || '').trim();
   if (!value) return null;
-  const isQrToken = value.startsWith('HMS:CHECKIN:');
-  const lookup = isQrToken ? value.replace('HMS:CHECKIN:', '') : value;
+  const isQrToken = /^HMS:CHECKIN:/i.test(value);
+  const lookup = isQrToken ? value.replace(/^HMS:CHECKIN:/i, '') : value;
   const q = isQrToken
     ? 'SELECT * FROM patients WHERE uuid = ?'
     : 'SELECT * FROM patients WHERE mrn = ? OR email = ? OR phone = ? OR uuid = ?';

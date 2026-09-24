@@ -26,7 +26,8 @@ router.get('/dashboard', authenticate, async (req, res) => {
         WHERE a.appointment_date >= ? ORDER BY a.appointment_date, a.appointment_time LIMIT 10`, [today]
     );
     const [recentPatients] = await pool.query(
-      'SELECT * FROM patients ORDER BY created_at DESC LIMIT 5'
+      `SELECT id, mrn, first_name, last_name, phone, status, created_at
+       FROM patients ORDER BY created_at DESC LIMIT 5`
     );
     // Weekly appointment stats
     const [weeklyStats] = await pool.query(

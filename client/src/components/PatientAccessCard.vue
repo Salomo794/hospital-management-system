@@ -102,9 +102,9 @@
 
               </div>
 
-              <!-- ── QR-STYLE CODE MATRIX ── -->
+              <!-- ── QR CODE ── -->
               <div class="pac-qr-area">
-                <canvas ref="qrCanvas" class="pac-qr-canvas" width="90" height="90" aria-label="Visual code pattern" />
+                <canvas ref="qrCanvas" class="pac-qr-canvas" width="90" height="90" aria-label="Patient check-in QR code" />
                 <div class="pac-qr-info">
                   <div class="pac-qr-label">Scan or type code above</div>
                   <div class="pac-qr-issued">Issued: {{ today }}</div>
@@ -150,6 +150,7 @@
 
 <script>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { buildCheckinPayload, renderQR } from '../utils/qrcode'
 
 export default {
   name: 'PatientAccessCard',
@@ -187,47 +188,19 @@ export default {
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     }
 
-    /** Draw a deterministic dot-matrix from the access code string */
-    const drawQr = () => {
+    /** Render the real QR payload used by the kiosk. */
+    const drawQr = async () => {
       const canvas = qrCanvas.value
-      if (!canvas || !props.patient.access_code) return
-      const ctx  = canvas.getContext('2d')
-      const code = props.patient.access_code
-      const size = 90
-      const cell = size / 11          // 11×11 grid
-      ctx.clearRect(0, 0, size, size)
+      const payload = buildCheckinPayload(props.patient)
+      if (!canvas || !payload) return
 
-      // Seed from code characters
-      let seed = 0
-      for (let i = 0; i < code.length; i++) seed += code.charCodeAt(i) * (i + 1)
-      const rng = (s) => { s = (s * 9301 + 49297) % 233280; return s / 233280 }
-
-      let s = seed
-      for (let row = 0; row < 11; row++) {
-        for (let col = 0; col < 11; col++) {
-          s = Math.floor(rng(s) * 233280)
-          const on = rng(s) > 0.48
-          // Force corner finder squares (top-left, top-right, bottom-left)
-          const corner = (row < 3 && col < 3) || (row < 3 && col > 7) || (row > 7 && col < 3)
-          const active = corner ? ((row === 0 || row === 2 || col === 0 || col === 2) || (row === 1 && col === 1)) : on
-          if (active) {
-            ctx.fillStyle = corner ? '#0d9488' : 'rgba(255,255,255,0.85)'
-            const radius = cell * 0.3
-            const x = col * cell + 1, y = row * cell + 1, w = cell - 2, h = cell - 2
-            ctx.beginPath()
-            ctx.moveTo(x + radius, y)
-            ctx.lineTo(x + w - radius, y)
-            ctx.quadraticCurveTo(x + w, y, x + w, y + radius)
-            ctx.lineTo(x + w, y + h - radius)
-            ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h)
-            ctx.lineTo(x + radius, y + h)
-            ctx.quadraticCurveTo(x, y + h, x, y + h - radius)
-            ctx.lineTo(x, y + radius)
-            ctx.quadraticCurveTo(x, y, x + radius, y)
-            ctx.closePath()
-            ctx.fill()
-          }
-        }
+      try {
+        const rendered = await renderQR(payload, { size: 180 })
+        const ctx = canvas.getContext('2d')
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        ctx.drawImage(rendered, 0, 0, canvas.width, canvas.height)
+      } catch (error) {
+        console.error('Unable to render patient QR code', error)
       }
     }
 
@@ -249,6 +222,16 @@ export default {
       const el = document.getElementById('pac-print-root')
       if (!el) return
       const win = window.open('', '_blank', 'width=700,height=600')
+      if (!win) return
+
+      // Canvas contents are not included in outerHTML. Convert the generated QR
+      // to a data URL before opening the print window so the code remains
+      // scannable on paper.
+      const qrDataUrl = qrCanvas.value?.toDataURL('image/png')
+      const cardMarkup = qrDataUrl
+        ? el.outerHTML.replace(new RegExp('<canvas[^>]*></canvas>', 'i'), `<img class="pac-qr-canvas" width="90" height="90" alt="Patient check-in QR code" src="${qrDataUrl}" />`)
+        : el.outerHTML
+
       win.document.write(`
         <!DOCTYPE html>
         <html>
@@ -261,15 +244,9 @@ export default {
           </style>
         </head>
         <body>
-          ${el.outerHTML}
+          ${cardMarkup}
           <script>
             window.onload = function() {
-              // Replace canvas with a blank placeholder for print
-              document.querySelectorAll('canvas').forEach(c => {
-                const d = document.createElement('div');
-                d.style.cssText = 'width:90px;height:90px;background:rgba(255,255,255,0.1);border-radius:8px;';
-                c.replaceWith(d);
-              });
               window.print();
               setTimeout(() => window.close(), 800);
             }

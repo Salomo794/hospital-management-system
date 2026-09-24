@@ -7,6 +7,17 @@ const { WARDS, wardCapacity, wardCapacityOrDefault } = require('../config/wards'
 
 const pad = n => String(n).padStart(2, '0');
 
+// Returns null when no bed was supplied, or undefined when the supplied value
+// is not a valid bed for the selected ward.
+function parseBedNumber(value, total) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const text = String(value).trim();
+  if (!/^\d{1,2}$/.test(text)) return undefined;
+  const number = Number(text);
+  if (!Number.isInteger(number) || number < 1 || number > total) return undefined;
+  return pad(number);
+}
+
 // Helper: resolve a free bed number inside a ward, honoring existing occupied beds.
 // Accepts either a pool or a connection object — both expose .query().
 async function findFreeBed(conn, ward) {
@@ -127,18 +138,41 @@ router.post('/', authenticate, authorize('admin', 'doctor', 'nurse', 'receptioni
     }
 
     const conn = await pool.getConnection();
+    let transactionOpen = false;
     try {
+      await conn.beginTransaction();
+      transactionOpen = true;
+
       const [activeInWard] = await conn.query(
         "SELECT COUNT(*) as count FROM admissions WHERE ward = ? AND status = 'admitted'",
         [ward]
       );
       const capacity = wardCapacity(ward);
       if (activeInWard[0].count >= capacity) {
+        await conn.rollback(); transactionOpen = false;
         return res.status(409).json({ message: `${ward} ward is full (${capacity}/${capacity} beds).` });
       }
-      // FIX: pass conn (not pool) so findFreeBed sees the same transaction context
-      const freeBed = bed_number || await findFreeBed(conn, ward);
+
+      const requestedBed = parseBedNumber(bed_number, capacity);
+      if (requestedBed === undefined) {
+        await conn.rollback(); transactionOpen = false;
+        return res.status(400).json({ message: `Bed must be a number from 01 to ${pad(capacity)}.` });
+      }
+      if (requestedBed) {
+        const [occupied] = await conn.query(
+          "SELECT id FROM admissions WHERE ward = ? AND bed_number = ? AND status = 'admitted'",
+          [ward, requestedBed]
+        );
+        if (occupied.length > 0) {
+          await conn.rollback(); transactionOpen = false;
+          return res.status(409).json({ message: `Bed ${requestedBed} in ${ward} is already occupied.` });
+        }
+      }
+
+      // Pass conn (not pool) so findFreeBed sees the same connection context.
+      const freeBed = requestedBed || await findFreeBed(conn, ward);
       if (!freeBed) {
+        await conn.rollback(); transactionOpen = false;
         return res.status(409).json({ message: `${ward} ward is full (${capacity}/${capacity} beds).` });
       }
 
@@ -169,7 +203,14 @@ router.post('/', authenticate, authorize('admin', 'doctor', 'nurse', 'receptioni
          FROM admissions a JOIN patients p ON a.patient_id = p.id WHERE a.id = ?`,
         [result.insertId]
       );
+      await conn.commit();
+      transactionOpen = false;
       res.status(201).json(created[0]);
+    } catch (error) {
+      if (transactionOpen) {
+        try { await conn.rollback(); } catch (_) { /* preserve original error */ }
+      }
+      throw error;
     } finally {
       conn.release();
     }
@@ -195,7 +236,12 @@ router.put('/:id', authenticate, authorize('admin', 'doctor', 'nurse', 'receptio
       return res.status(400).json({ message: `Unknown ward "${ward}". Valid wards: ${Object.keys(WARDS).join(', ')}` });
     }
     const targetWard = ward || adm.ward;
-    const targetBed = bed_number || adm.bed_number;
+    const targetCapacity = wardCapacity(targetWard);
+    const requestedBed = parseBedNumber(bed_number, targetCapacity);
+    if (requestedBed === undefined) {
+      return res.status(400).json({ message: `Bed must be a number from 01 to ${pad(targetCapacity)}.` });
+    }
+    const targetBed = requestedBed || adm.bed_number;
 
     // If the ward is changing, verify capacity and find a free bed
     if (ward !== undefined && ward !== adm.ward) {
@@ -206,7 +252,7 @@ router.put('/:id', authenticate, authorize('admin', 'doctor', 'nurse', 'receptio
       if (activeInTarget[0].count >= wardCapacity(targetWard)) {
         return res.status(409).json({ message: `${targetWard} ward is full (${wardCapacity(targetWard)}/${wardCapacity(targetWard)} beds).` });
       }
-      let newBed = bed_number;
+      let newBed = requestedBed;
       if (!newBed) {
         // FIX: pass pool.query-compatible shim — consistent with findFreeBed interface
         newBed = await findFreeBed(pool, targetWard);
@@ -214,7 +260,7 @@ router.put('/:id', authenticate, authorize('admin', 'doctor', 'nurse', 'receptio
       }
       updates.push('ward = ?'); values.push(targetWard);
       updates.push('bed_number = ?'); values.push(newBed);
-    } else if (bed_number !== undefined && bed_number !== adm.bed_number) {
+    } else if (requestedBed && requestedBed !== adm.bed_number) {
       const [conflict] = await pool.query(
         "SELECT id FROM admissions WHERE ward = ? AND bed_number = ? AND status = 'admitted' AND id != ?",
         [targetWard, targetBed, adm.id]

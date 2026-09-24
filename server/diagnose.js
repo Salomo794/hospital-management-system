@@ -6,7 +6,8 @@ process.on('uncaughtException', (err) => {
 });
 
 try {
-  require('./index.js');
+  const app = require('./index.js');
+  if (require.main === module) app.startServer();
 } catch (err) {
   const fs = require('fs');
   fs.writeFileSync('diag-error.txt', err.stack || err.message, 'utf8');

@@ -29,7 +29,7 @@ A modern Hospital Management System with a Vue 3 frontend and a Node.js/Express 
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22+ (required by `better-sqlite3`)
 - npm
 
 ### 1. Install dependencies
@@ -117,3 +117,5 @@ cd client && npm run build
 cd ..
 NODE_ENV=production npm run server
 ```
+
+On Windows, `start-hms.cmd` performs the same startup and automatically builds `client/dist` when it is missing. Set a unique `JWT_SECRET` in `server/.env` before production use.

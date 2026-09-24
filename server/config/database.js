@@ -1,6 +1,5 @@
 const Database = require('better-sqlite3');
 const path = require('path');
-const bcrypt = require('bcryptjs');
 
 const dbPath = path.join(__dirname, '..', 'hospital.db');
 const sqlite = new Database(dbPath);
@@ -63,9 +62,8 @@ function migrate() {
       sqlite.exec('ALTER TABLE patients ADD COLUMN access_code TEXT');
     }
 
-    // Backfill a default demo PIN for any patient that still lacks one.
-    const defaultPinHash = bcrypt.hashSync('password123', 4);
-    sqlite.prepare("UPDATE patients SET portal_pin = ? WHERE portal_pin IS NULL OR portal_pin = ''").run(defaultPinHash);
+    // Portal PINs are provisioned explicitly during registration or by the
+    // demo seed. Never assign a shared fallback PIN during normal migrations.
 
     // Backfill access_code for existing patients who don't have one yet
     const patientsWithoutCode = sqlite.prepare("SELECT id, mrn FROM patients WHERE access_code IS NULL OR access_code = ''").all();

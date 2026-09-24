@@ -172,6 +172,7 @@
 
 <script>
 import { ref, onMounted, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { useConfirm } from '../../store/confirm'
@@ -181,6 +182,7 @@ export default {
   name: 'Appointments',
   setup() {
     const toast = useToast()
+    const route = useRoute()
     const { confirm } = useConfirm()
 
     const appointments = ref([])
@@ -334,9 +336,19 @@ export default {
       loadAppointments()
     }
 
-    onMounted(() => {
-      loadAppointments()
-      loadDoctors()
+    onMounted(async () => {
+      await Promise.all([loadAppointments(), loadDoctors()])
+
+      const patientId = route.query.patient_id
+      if (!patientId) return
+      try {
+        const { data } = await axios.get(`/api/patients/${encodeURIComponent(patientId)}`)
+        form.value.patient_id = data.id
+        form.value.patientName = `${data.first_name} ${data.last_name}`
+        showModal.value = true
+      } catch (e) {
+        toast.error('Unable to load the selected patient')
+      }
     })
 
     return {

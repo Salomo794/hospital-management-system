@@ -29,7 +29,7 @@
           <div class="message-avatar" v-if="msg.role === 'system'">&#129302;</div>
           <div class="message-avatar user-avatar" v-else>&#128100;</div>
           <div class="message-content">
-            <div class="message-text" v-html="formatMessage(msg.text)"></div>
+            <div class="message-text">{{ msg.text }}</div>
             <div class="message-data" v-if="msg.data">
               <table class="data-table" v-if="Array.isArray(msg.data) && msg.data.length">
                 <thead>
@@ -127,7 +127,6 @@ export default {
       scrollToBottom()
     }
 
-    const formatMessage = (text) => text ? text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>') : ''
     const formatKey = (key) => key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
     const formatValue = (val) => {
       if (val === null || val === undefined) return '-'
@@ -142,7 +141,7 @@ export default {
       chatInput.value?.focus()
     })
 
-    return { messages, input, loading, chatContainer, chatInput, sendMessage, formatMessage, formatKey, formatValue, formatTime }
+    return { messages, input, loading, chatContainer, chatInput, sendMessage, formatKey, formatValue, formatTime }
   }
 }
 </script>

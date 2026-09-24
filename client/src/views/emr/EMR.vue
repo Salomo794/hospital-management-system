@@ -110,8 +110,8 @@
 </template>
 
 <script>
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { formatDate, getStatusColor } from '../../utils/helpers'
@@ -120,6 +120,7 @@ export default {
   name: 'EMR',
   setup() {
     const router = useRouter()
+    const route = useRoute()
     const toast = useToast()
     const search = ref('')
     const patientResults = ref([])
@@ -182,6 +183,17 @@ export default {
         saving.value = false
       }
     }
+
+    onMounted(async () => {
+      const patientId = route.query.patient_id
+      if (!patientId) return
+      try {
+        const { data } = await axios.get(`/api/patients/${encodeURIComponent(patientId)}`)
+        await selectPatient(data)
+      } catch (e) {
+        toast.error('Unable to load the selected patient')
+      }
+    })
 
     return { search, patientResults, selectedPatient, records, showNewModal, saving, loadingPatients, loadingRecords, vitalSigns, recordForm, searchPatients, selectPatient, createRecord, formatDate, getStatusColor }
   }

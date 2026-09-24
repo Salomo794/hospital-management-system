@@ -112,18 +112,28 @@ router.post('/medicines', authenticate, authorize('admin', 'pharmacist'), async 
   try {
     const { name, generic_name, category, manufacturer, unit_price, cost_price, stock_quantity,
       min_stock_level, max_stock_level, unit, expiry_date, batch_number, requires_prescription } = req.body;
+    const price = Number(unit_price);
+    const cost = Number(cost_price || 0);
+    const stock = Number(stock_quantity || 0);
+    const minimum = Number(min_stock_level || 10);
+    const maximum = Number(max_stock_level || 1000);
+    if (!name || !Number.isFinite(price) || price < 0 || !Number.isFinite(cost) || cost < 0 ||
+        !Number.isInteger(stock) || stock < 0 || !Number.isInteger(minimum) || minimum < 0 ||
+        !Number.isInteger(maximum) || maximum < minimum) {
+      return res.status(400).json({ message: 'Provide a name, non-negative price/cost, and valid stock levels' });
+    }
     const [result] = await pool.query(
       `INSERT INTO medicines (name, generic_name, category, manufacturer, unit_price, cost_price,
         stock_quantity, min_stock_level, max_stock_level, unit, expiry_date, batch_number, requires_prescription)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [name, generic_name, category, manufacturer, unit_price, cost_price, stock_quantity,
-        min_stock_level || 10, max_stock_level || 1000, unit || 'tablet', expiry_date, batch_number, requires_prescription !== false]
+      [name, generic_name, category, manufacturer, price, cost, stock,
+        minimum, maximum, unit || 'tablet', expiry_date, batch_number, requires_prescription !== false]
     );
     // Log inventory transaction
-    if (stock_quantity > 0) {
+    if (stock > 0) {
       await pool.query(
         "INSERT INTO inventory_transactions (medicine_id, transaction_type, quantity, notes, performed_by) VALUES (?, 'purchase', ?, 'Initial stock', ?)",
-        [result.insertId, stock_quantity, req.user.id]
+        [result.insertId, stock, req.user.id]
       );
     }
     const [newMed] = await pool.query('SELECT * FROM medicines WHERE id = ?', [result.insertId]);
@@ -157,7 +167,11 @@ router.put('/medicines/:id', authenticate, authorize('admin', 'pharmacist'), asy
 // Dispense medicine
 router.post('/dispense', authenticate, authorize('pharmacist'), async (req, res) => {
   try {
-    const { prescription_item_id, quantity, acknowledge_warnings } = req.body;
+    const { prescription_item_id, quantity: requestedQuantity, acknowledge_warnings } = req.body;
+    const quantity = Number(requestedQuantity);
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      return res.status(400).json({ message: 'quantity must be a positive whole number' });
+    }
     const [pi] = await pool.query('SELECT * FROM prescription_items WHERE id = ?', [prescription_item_id]);
     if (pi.length === 0) return res.status(404).json({ message: 'Prescription item not found' });
     const [med] = await pool.query('SELECT * FROM medicines WHERE id = ?', [pi[0].medicine_id]);

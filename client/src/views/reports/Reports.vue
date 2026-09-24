@@ -263,7 +263,7 @@ export default {
 
     const totalExpenses = computed(() => {
       if (!financial.value.expenses || !financial.value.expenses.length) return 0
-      return financial.value.expenses.reduce((s, e) => s + parseFloat(e.total || 0), 0)
+      return financial.value.expenses.reduce((s, e) => s + parseFloat(e.expenses || 0), 0)
     })
 
     const netIncome = computed(() => totalRevenue.value - totalExpenses.value)
