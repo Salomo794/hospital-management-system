@@ -7,8 +7,9 @@ const { ApiError, asyncHandler, getPagination, isDateOnly, parseFiniteNumber, pa
 const { randomUUID } = require('../utils/ids');
 
 const PHARMACY_ROLES = ['admin', 'pharmacist'];
+const PHARMACY_READ_ROLES = ['admin', 'pharmacist', 'doctor', 'nurse'];
 
-router.get('/medicines', authenticate, authorize(...PHARMACY_ROLES), asyncHandler(async (req, res) => {
+router.get('/medicines', authenticate, authorize(...PHARMACY_READ_ROLES), asyncHandler(async (req, res) => {
   const { page, limit, offset } = getPagination(req.query);
   const { search, category, low_stock } = req.query;
   let where = 'WHERE 1=1';
@@ -39,7 +40,7 @@ router.get('/alerts', authenticate, authorize(...PHARMACY_ROLES), asyncHandler(a
   res.json({ low_stock: lowStock, expired });
 }));
 
-router.post('/interactions/check', authenticate, authorize(...PHARMACY_ROLES), asyncHandler(async (req, res) => {
+router.post('/interactions/check', authenticate, authorize(...PHARMACY_READ_ROLES), asyncHandler(async (req, res) => {
   const { medicineIds } = req.body;
   if (!Array.isArray(medicineIds) || medicineIds.length < 2) {
     throw new ApiError(400, 'Provide at least two medicineIds to check');
@@ -62,14 +63,14 @@ router.post('/interactions/check', authenticate, authorize(...PHARMACY_ROLES), a
   res.json({ interactions: rows, checkedIds: uniqueIds });
 }));
 
-router.get('/interactions/summary', authenticate, authorize(...PHARMACY_ROLES), asyncHandler(async (req, res) => {
+router.get('/interactions/summary', authenticate, authorize(...PHARMACY_READ_ROLES), asyncHandler(async (req, res) => {
   const [rows] = await pool.query('SELECT severity, COUNT(*) as count FROM drug_interactions GROUP BY severity');
   const summary = { mild: 0, moderate: 0, severe: 0, contraindicated: 0 };
   rows.forEach(row => { summary[row.severity] = row.count; });
   res.json({ summary, total: rows.reduce((sum, row) => sum + row.count, 0) });
 }));
 
-router.get('/interactions/:medicineId', authenticate, authorize(...PHARMACY_ROLES), asyncHandler(async (req, res) => {
+router.get('/interactions/:medicineId', authenticate, authorize(...PHARMACY_READ_ROLES), asyncHandler(async (req, res) => {
   const medicineId = parseInteger(req.params.medicineId, 'medicineId', { min: 1 });
   const [rows] = await pool.query(
     `SELECT di.id, di.severity, di.description, di.clinical_management,
@@ -235,7 +236,7 @@ router.post('/dispense', authenticate, authorize('pharmacist'), asyncHandler(asy
       [referenceNumber]
     );
     if (replayRows.length > 0) {
-      if (replayRows[0].medicine_id !== item.medicine_id || Number(replayRows[0].quantity) !== quantity) {
+      if (Number(replayRows[0].medicine_id) !== Number(item.medicine_id) || Number(replayRows[0].quantity) !== quantity) {
         throw new ApiError(409, 'request_id has already been used for a different dispense request');
       }
       const [currentItem] = await connection.query(

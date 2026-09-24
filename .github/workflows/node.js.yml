@@ -8,12 +8,15 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
         node-version: [22.x, 24.x]
+
+    env:
+      NODE_ENV: test
+      JWT_SECRET: ci-secret-that-is-at-least-32-characters-long
+      DB_PATH: ${{ runner.temp }}/hms-ci/hospital.db
 
     steps:
     - uses: actions/checkout@v4
@@ -22,14 +25,22 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
+        cache-dependency-path: |
+          package-lock.json
+          client/package-lock.json
+          server/package-lock.json
     - name: Install dependencies
       run: |
         npm ci
         npm ci --prefix client
         npm ci --prefix server
-    - name: Initialize database tables
-      run: node server/config/setup.js
-    - name: Seed database
-      run: node server/config/seed.js
+    - name: Initialize and seed database
+      run: |
+        npm run db:setup
+        npm run db:seed
+    - name: Test server
+      run: npm test
     - name: Build client
-      run: npm run build --prefix client
+      run: npm run build
+    - name: Audit production dependencies
+      run: npm run audit

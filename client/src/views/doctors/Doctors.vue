@@ -58,14 +58,14 @@
       </div>
     </div>
 
-    <div class="pagination" v-if="total > limit">
+    <div class="pagination" v-if="!loading && total > limit">
       <button class="btn btn-sm" :disabled="page <= 1" @click="page--; loadDoctors()">Previous</button>
       <span>Page {{ page }} of {{ Math.ceil(total / limit) }}</span>
       <button class="btn btn-sm" :disabled="page >= Math.ceil(total / limit)" @click="page++; loadDoctors()">Next</button>
     </div>
 
     <!-- Empty State -->
-    <div v-else class="empty-state">
+    <div v-if="!loading && !doctors.length" class="empty-state">
       <div class="empty-icon">👨‍⚕️</div>
       <h4>No doctors found</h4>
       <p v-if="search || specialtyFilter">

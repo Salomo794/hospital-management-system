@@ -2,14 +2,14 @@
   <div class="billing-page">
     <div class="page-header">
       <div class="search-filters">
-        <select v-model="statusFilter" @change="loadBills">
+        <select v-model="statusFilter" @change="page = 1; loadBills()">
           <option value="">All Status</option>
           <option value="pending">Pending</option>
           <option value="partial">Partial</option>
           <option value="paid">Paid</option>
         </select>
-        <input type="date" v-model="fromDate" @change="loadBills" />
-        <input type="date" v-model="toDate" @change="loadBills" />
+        <input type="date" v-model="fromDate" @change="page = 1; loadBills()" />
+        <input type="date" v-model="toDate" @change="page = 1; loadBills()" />
       </div>
       <button class="btn btn-primary" @click="openNewBillModal">+ New Bill</button>
     </div>
@@ -31,7 +31,7 @@
 
     <div class="card">
       <div class="card-header">
-        <h3>Bills ({{ bills.length }})</h3>
+        <h3>Bills ({{ total }})</h3>
       </div>
 
       <div v-if="loading" class="loading-state">
@@ -79,6 +79,11 @@
           <p>No bills match your current filters. Try adjusting the filters or create a new bill.</p>
         </div>
       </template>
+      <div class="pagination" v-if="total > limit">
+        <button class="btn btn-sm" :disabled="page <= 1" @click="page--; loadBills()">Previous</button>
+        <span>Page {{ page }} of {{ Math.ceil(total / limit) }}</span>
+        <button class="btn btn-sm" :disabled="page >= Math.ceil(total / limit)" @click="page++; loadBills()">Next</button>
+      </div>
     </div>
 
     <div class="modal-overlay" v-if="showBillModal" @click.self="closeModal">
@@ -119,7 +124,7 @@
             <label>Bill Items</label>
             <div class="bill-items">
               <div class="bill-item" v-for="(item, index) in billForm.items" :key="index">
-                <input v-model="item.description" type="text" placeholder="Description" class="input-desc" />
+                <input v-model="item.description" type="text" placeholder="Description" class="input-desc" required />
                 <select v-model="item.category">
                   <option value="consultation">Consultation</option>
                   <option value="medicine">Medicine</option>
@@ -129,7 +134,7 @@
                   <option value="other">Other</option>
                 </select>
                 <input v-model.number="item.quantity" type="number" min="1" placeholder="Qty" class="input-num" />
-                <input v-model.number="item.unit_price" type="number" min="0" step="0.01" placeholder="Unit Price" class="input-price" />
+                <input v-model.number="item.unit_price" type="number" min="0" step="0.01" placeholder="Unit Price" class="input-price" required />
                 <button class="btn-remove" @click="removeItem(index)" :disabled="billForm.items.length <= 1">&times;</button>
               </div>
             </div>
@@ -207,6 +212,9 @@ export default {
     const toast = useToast()
 
     const bills = ref([])
+    const total = ref(0)
+    const page = ref(1)
+    const limit = ref(20)
     const summary = ref({ unpaid_count: 0, pending_amount: 0, collected_today: 0 })
     const loading = ref(false)
     const statusFilter = ref('')
@@ -357,10 +365,12 @@ export default {
       }
     }
 
+    let billsRequestId = 0
     const loadBills = async () => {
+      const requestId = ++billsRequestId
       loading.value = true
       try {
-        const params = {}
+        const params = { page: page.value, limit: limit.value }
         if (statusFilter.value) params.status = statusFilter.value
         if (fromDate.value) params.from_date = fromDate.value
         if (toDate.value) params.to_date = toDate.value
@@ -368,12 +378,14 @@ export default {
           axios.get('/api/billing', { params }),
           axios.get('/api/billing/summary')
         ])
+        if (requestId !== billsRequestId) return
         bills.value = billResponse.data.bills
+        total.value = billResponse.data.total
         summary.value = summaryResponse.data
       } catch {
         toast.error('Failed to load bills')
       } finally {
-        loading.value = false
+        if (requestId === billsRequestId) loading.value = false
       }
     }
 
@@ -381,6 +393,9 @@ export default {
 
     return {
       bills,
+      total,
+      page,
+      limit,
       loading,
       statusFilter,
       fromDate,

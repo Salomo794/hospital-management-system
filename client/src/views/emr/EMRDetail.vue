@@ -601,6 +601,7 @@ export default {
       try {
         await axios.post('/api/laboratory/orders', {
           patient_id: record.value.patient_id,
+          doctor_id: record.value.doctor_id,
           medical_record_id: record.value.id,
           test_ids: labOrderForm.test_ids,
           priority: labOrderForm.priority,

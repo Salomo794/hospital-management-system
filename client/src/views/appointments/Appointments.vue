@@ -5,7 +5,6 @@
         <select v-model="statusFilter" @change="page = 1; loadAppointments()">
           <option value="">All Status</option>
           <option value="scheduled">Scheduled</option>
-          <option value="confirmed">Confirmed</option>
           <option value="in_progress">In Progress</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>

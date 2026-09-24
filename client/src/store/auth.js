@@ -38,7 +38,7 @@ export const useAuthStore = defineStore('auth', {
         const token = this.token || getStoredItem('token')
         if (token) {
           config.headers = config.headers || {}
-          config.headers.Authorization = `Bearer ${token}`
+          if (!config.headers.Authorization) config.headers.Authorization = `Bearer ${token}`
         }
         return config
       })

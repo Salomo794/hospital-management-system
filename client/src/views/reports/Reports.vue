@@ -3,7 +3,7 @@
     <div class="page-header">
       <div class="tabs-inline">
         <button :class="{ active: activeTab === 'overview' }" @click="switchTab('overview')">Overview</button>
-        <button :class="{ active: activeTab === 'financial' }" @click="switchTab('financial')">Financial</button>
+        <button v-if="authStore.can('admin')" :class="{ active: activeTab === 'financial' }" @click="switchTab('financial')">Financial</button>
         <button :class="{ active: activeTab === 'patients' }" @click="switchTab('patients')">Patient Stats</button>
       </div>
     </div>
@@ -57,7 +57,7 @@
     </div>
 
     <!-- Financial Tab -->
-    <div v-if="activeTab === 'financial'">
+    <div v-if="activeTab === 'financial' && authStore.can('admin')">
       <div class="filter-bar">
         <select v-model="period" @change="loadFinancial">
           <option value="daily">Daily</option>
@@ -114,7 +114,7 @@
                 </div>
                 <div v-for="s in financial.topServices" :key="s.category" class="report-row">
                   <span class="row-label">{{ formatCategory(s.category) }}</span>
-                  <span class="row-value">{{ formatCurrency(s.total_revenue) }}</span>
+                  <span class="row-value">{{ formatCurrency(s.collected_revenue) }}</span>
                   <span class="row-sub">{{ s.count }} items</span>
                 </div>
               </div>
@@ -226,6 +226,7 @@ import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { useUiStore } from '../../store/ui'
+import { useAuthStore } from '../../store/auth'
 import { formatDate, formatCurrency } from '../../utils/helpers'
 
 export default {
@@ -233,6 +234,7 @@ export default {
   setup() {
     const toast = useToast()
     const uiStore = useUiStore()
+    const authStore = useAuthStore()
     const activeTab = ref('overview')
     const stats = ref({})
     const weeklyStats = ref([])
@@ -278,7 +280,7 @@ export default {
       return Object.values(map).sort((a, b) => b.period.localeCompare(a.period))
     })
 
-    const formatDay = (d) => new Date(d).toLocaleDateString('en', { weekday: 'short' })
+    const formatDay = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en', { weekday: 'short' })
     const formatCategory = (c) => c ? c.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) : ''
 
     const weeklyChartData = computed(() => ({
@@ -327,7 +329,7 @@ export default {
         labels: (financial.value.topServices || []).map(s => formatCategory(s.category)),
         datasets: [{
           label: 'Revenue',
-          data: (financial.value.topServices || []).map(s => parseFloat(s.total_revenue) || 0),
+          data: (financial.value.topServices || []).map(s => parseFloat(s.collected_revenue) || 0),
           backgroundColor: ['#0d9488', '#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4'],
           borderWidth: 2,
           borderColor: dark ? '#111823' : '#ffffff'
@@ -391,7 +393,8 @@ export default {
       }
     }
 
-    const switchTab = (tab) => {
+    const switchTab = tab => {
+      if (tab === 'financial' && !authStore.can('admin')) return
       activeTab.value = tab
       if (tab === 'overview' && !stats.value.totalPatients && stats.value.totalPatients !== 0) loadDashboard()
       if (tab === 'financial' && !financial.value.revenue.length) loadFinancial()
@@ -403,7 +406,7 @@ export default {
       activeTab, stats, weeklyStats, period, year, financial, patientStats,
       totalPatients, maxDiagnosisCount, hasPatientData,
       totalRevenue, totalExpenses, netIncome, groupedRevenue,
-      weeklyChartData, categoryChartData, barOptions, chartOptions, uiStore,
+      weeklyChartData, categoryChartData, barOptions, chartOptions, uiStore, authStore,
       formatDate, formatCurrency, formatDay, formatCategory,
       loadFinancial, loadPatientStats, switchTab,
       loadingOverview, loadingFinancial, loadingPatients

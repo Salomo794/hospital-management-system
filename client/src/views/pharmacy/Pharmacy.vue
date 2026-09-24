@@ -7,7 +7,7 @@
         <button :class="{ active: view === 'interactions' }" @click="view = 'interactions'; loadInteractionView()">Interactions</button>
       </div>
       <div class="header-actions">
-        <button v-if="view === 'medicines' && authStore.can('pharmacist')" class="btn btn-outline" @click="openDispenseModal">Dispense</button>
+        <button v-if="view === 'medicines' && authStore.can('admin', 'pharmacist')" class="btn btn-outline" @click="openDispenseModal">Dispense</button>
         <button class="btn btn-primary" @click="openAddModal" v-if="view === 'medicines'">+ Add Medicine</button>
       </div>
     </div>
@@ -391,6 +391,7 @@ export default {
     let interactionRequestId = 0
     const clearInteractionResults = () => {
       interactionRequestId += 1
+      checkingInteractions.value = false
       interactionResults.value = []
       checkedIds.value = []
     }
@@ -577,9 +578,9 @@ export default {
 
     onMounted(loadMedicines)
     return {
-      view, medicines, search, categoryFilter, lowStockOnly, showAddModal, lowStock, expired, medForm,
-      loadingMedicines, loadingAlerts, savingMedicine,
-      loadMedicines, loadAlerts, addMedicine, formatDate, formatCurrency,
+      view, medicines, total, page, limit, search, categoryFilter, lowStockOnly, showAddModal, lowStock, expired, medForm,
+      loadingMedicines, loadingAlerts, savingMedicine, authStore,
+      loadMedicines, debouncedSearch, loadAlerts, openAddModal, closeAddModal, addMedicine, formatDate, formatCurrency,
       showDispenseModal, dispensing, loadingPrescriptions, prescriptionSearch,
       filteredPrescriptionItems, selectedPrescriptionItem, dispenseForm,
       safetyWarnings, noAllergy, dispenseQuantityValid,

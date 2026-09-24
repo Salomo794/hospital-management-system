@@ -42,7 +42,7 @@ async function findPatientByIdentifier(identifier) {
 router.post('/login', asyncHandler(async (req, res) => {
   const identifier = typeof req.body?.identifier === 'string' ? req.body.identifier.trim() : '';
   const portalPin = typeof req.body?.portal_pin === 'string' ? req.body.portal_pin : '';
-  if (!identifier || !portalPin) throw new ApiError(400, 'MRN/access code and portal PIN are required');
+  if (!identifier || !portalPin) throw new ApiError(400, 'MRN, access code, phone, or email and portal PIN are required');
 
   const limitKey = `portal:${req.ip}:${identifier.toLowerCase()}`;
   const limit = portalLoginLimiter.consume(limitKey);

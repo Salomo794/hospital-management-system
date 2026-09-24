@@ -5,9 +5,11 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { WARDS: WARD_CAPACITY, wardCapacityOrDefault } = require('../config/wards');
 
 // Dashboard stats
-router.get('/dashboard', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), async (req, res) => {
+router.get('/dashboard', authenticate, async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
+    const canViewClinical = ['admin', 'receptionist', 'doctor', 'nurse'].includes(req.user.role);
+    const canViewRevenue = ['admin', 'receptionist'].includes(req.user.role);
     const [totalPatients] = await pool.query("SELECT COUNT(*) as count FROM patients WHERE status = 'active'");
     const [totalDoctors] = await pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'doctor' AND is_active = 1");
     const [todayAppointments] = await pool.query('SELECT COUNT(*) as count FROM appointments WHERE appointment_date = ?', [today]);
@@ -39,19 +41,19 @@ router.get('/dashboard', authenticate, authorize('admin', 'receptionist', 'docto
     );
     res.json({
       stats: {
-        totalPatients: totalPatients[0].count,
+        totalPatients: canViewClinical ? totalPatients[0].count : null,
         totalDoctors: totalDoctors[0].count,
-        todayAppointments: todayAppointments[0].count,
-        pendingAppointments: pendingAppointments[0].count,
-        todayRevenue: todayRevenue[0].total,
-        monthlyRevenue: monthlyRevenue[0].total,
-        pendingBills: pendingBills[0].count,
-        pendingBillAmount: pendingBills[0].amount,
+        todayAppointments: canViewClinical ? todayAppointments[0].count : null,
+        pendingAppointments: canViewClinical ? pendingAppointments[0].count : null,
+        todayRevenue: canViewRevenue ? todayRevenue[0].total : null,
+        monthlyRevenue: canViewRevenue ? monthlyRevenue[0].total : null,
+        pendingBills: canViewRevenue ? pendingBills[0].count : null,
+        pendingBillAmount: canViewRevenue ? pendingBills[0].amount : null,
         lowStockMedications: lowStockMeds[0].count,
         pendingLabOrders: pendingLabOrders[0].count
       },
-      recentAppointments,
-      recentPatients,
+      recentAppointments: canViewClinical ? recentAppointments : [],
+      recentPatients: canViewClinical ? recentPatients : [],
       weeklyStats
     });
   } catch (error) {

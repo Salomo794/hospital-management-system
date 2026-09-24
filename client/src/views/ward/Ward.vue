@@ -249,7 +249,7 @@ export default {
     const authStore = useAuthStore()
 
     const canAdmit = ['admin', 'doctor', 'nurse', 'receptionist'].includes(authStore.userRole)
-    const canDischarge = ['admin', 'doctor', 'nurse'].includes(authStore.userRole)
+    const canDischarge = ['admin', 'doctor', 'nurse', 'receptionist'].includes(authStore.userRole)
 
     const wards = ref([])
     const totals = ref({})
@@ -325,7 +325,7 @@ export default {
       }
       if (!patients.value.length) {
         try {
-          const { data } = await axios.get('/api/patients', { params: { limit: 200 } })
+          const { data } = await axios.get('/api/patients', { params: { limit: 100 } })
           patients.value = data.patients || []
           filteredPatients.value = patients.value
         } catch (e) {

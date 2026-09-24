@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
 const { WARDS: WARD_CAPACITY, wardCapacityOrDefault } = require('../config/wards');
 
 function isoDate(offsetDays = 0) {
@@ -15,8 +15,10 @@ function weekDayName(dateStr) {
   return d.toLocaleDateString('en-US', { weekday: 'short' });
 }
 
+const OPERATIONS_ROLES = ['admin', 'receptionist', 'doctor', 'nurse'];
+
 // ---- Predictive / Smart Hospital intelligence ----
-router.get('/forecast', authenticate, async (req, res) => {
+router.get('/forecast', authenticate, authorize(...OPERATIONS_ROLES), async (req, res) => {
   try {
     const today = isoDate(0);
 
@@ -158,7 +160,7 @@ router.get('/forecast', authenticate, async (req, res) => {
 });
 
 // ---- Unified Command Center (live operational overview) ----
-router.get('/command-center', authenticate, async (req, res) => {
+router.get('/command-center', authenticate, authorize(...OPERATIONS_ROLES), async (req, res) => {
   try {
     const today = isoDate(0);
     const now = new Date().toISOString();

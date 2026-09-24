@@ -89,7 +89,7 @@ app.get('/api/health', async (req, res, next) => {
     await pool.isReady();
     res.json({ status: 'OK', timestamp: new Date().toISOString() });
   } catch (error) {
-    next(error);
+    res.status(503).json({ status: 'UNAVAILABLE', message: error.message });
   }
 });
 

@@ -2,8 +2,12 @@ node_modules/
 _old_modules/
 .env
 .env.*
+!.env.example
+*.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
 dist/
 .DS_Store
 *.log

@@ -97,7 +97,7 @@
                       {{ showPin ? '🙈' : '👁' }}
                     </button>
                   </div>
-                  <div class="pac-pin-hint">Use to log in to the Patient Portal</div>
+                  <div class="pac-pin-hint">Use to log in to the <a href="/portal" target="_blank" rel="noopener">Patient Portal</a></div>
                 </div>
 
               </div>
@@ -128,6 +128,7 @@
             <button class="pac-btn pac-btn--print" @click="printCard" type="button">
               <span>🖨</span> Print Card
             </button>
+            <a class="pac-btn pac-btn--copy" href="/portal">Open Portal</a>
             <button class="pac-btn pac-btn--copy" @click="copyCode" type="button">
               <span>{{ copied ? '✓' : '📋' }}</span> {{ copied ? 'Copied!' : 'Copy Code' }}
             </button>
@@ -498,13 +499,13 @@ export default {
 
 /* ══ ACTION BUTTONS ══ */
 .pac-actions {
-  display: grid; grid-template-columns: 1fr 1fr 1fr 1fr;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 10px;
 }
 .pac-btn {
   display: flex; align-items: center; justify-content: center; gap: 7px;
   padding: 11px 14px; border-radius: 11px;
-  font-size: 13px; font-weight: 600; cursor: pointer;
+  font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none;
   border: 1.5px solid transparent; transition: all .2s;
   font-family: 'Inter', sans-serif;
 }

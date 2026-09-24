@@ -5,6 +5,11 @@
       <p>Loading bill details...</p>
     </div>
 
+    <div v-else-if="error" class="loading-state">
+      <p>{{ error }}</p>
+      <button class="btn btn-primary" @click="loadBill">Retry</button>
+    </div>
+
     <template v-else-if="bill">
       <div class="detail-header">
         <button class="btn btn-sm" @click="$router.back()">&larr; Back</button>
@@ -34,7 +39,7 @@
             <div class="info-row"><label>Tax:</label><span>{{ formatCurrency(bill.tax) }}</span></div>
             <div class="info-row total"><label>Net Amount:</label><span>{{ formatCurrency(bill.net_amount) }}</span></div>
             <div class="info-row"><label>Paid:</label><span class="text-success">{{ formatCurrency(bill.paid_amount) }}</span></div>
-            <div class="info-row"><label>Balance:</label><span class="text-danger">{{ formatCurrency(parseFloat(bill.net_amount) - parseFloat(bill.paid_amount)) }}</span></div>
+            <div class="info-row"><label>Balance:</label><span class="text-danger">{{ formatCurrency(outstandingBalance) }}</span></div>
           </div>
         </div>
       </div>
@@ -74,8 +79,8 @@
         </div>
       </div>
 
-      <div class="action-bar" v-if="bill.payment_status !== 'paid'">
-        <button class="btn btn-success" @click="showPaymentModal = true">Record Payment</button>
+      <div class="action-bar" v-if="outstandingBalance > 0 && bill.payment_status !== 'cancelled'">
+        <button class="btn btn-success" @click="openPaymentModal">Record Payment</button>
       </div>
 
       <!-- Payment Modal -->
@@ -89,7 +94,7 @@
             <form @submit.prevent="recordPayment">
               <div class="form-group">
                 <label>Amount *</label>
-                <input type="number" step="0.01" v-model.number="paymentForm.amount" :max="parseFloat(bill.net_amount) - parseFloat(bill.paid_amount)" required />
+                <input type="number" step="0.01" min="0.01" v-model.number="paymentForm.amount" :max="outstandingBalance" required />
               </div>
               <div class="form-group">
                 <label>Payment Method *</label>
@@ -120,7 +125,7 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
@@ -133,25 +138,40 @@ export default {
     const toast = useToast()
     const bill = ref(null)
     const loading = ref(true)
+    const error = ref('')
     const showPaymentModal = ref(false)
     const recordingPayment = ref(false)
     const paymentForm = ref({ amount: 0, payment_method: 'cash', transaction_reference: '' })
+    const outstandingBalance = computed(() => Math.max(Number(bill.value?.net_amount || 0) - Number(bill.value?.paid_amount || 0), 0))
 
     const loadBill = async () => {
       loading.value = true
+      error.value = ''
+      bill.value = null
       try {
         const { data } = await axios.get(`/api/billing/${route.params.id}`)
         bill.value = data
       } catch (e) {
-        toast.error('Failed to load bill details.')
+        error.value = e.response?.data?.message || 'Failed to load bill details.'
+        toast.error(error.value)
       } finally {
         loading.value = false
       }
     }
 
+    const openPaymentModal = () => {
+      paymentForm.value = {
+        amount: outstandingBalance.value,
+        payment_method: 'cash',
+        transaction_reference: ''
+      }
+      showPaymentModal.value = true
+    }
+
     const recordPayment = async () => {
-      if (!paymentForm.value.amount || paymentForm.value.amount <= 0) {
-        toast.warning('Please enter a valid payment amount.')
+      const amount = Number(paymentForm.value.amount)
+      if (!Number.isFinite(amount) || amount <= 0 || amount > outstandingBalance.value) {
+        toast.warning('Enter a positive amount within the outstanding balance.')
         return
       }
       recordingPayment.value = true
@@ -173,9 +193,11 @@ export default {
     }
 
     onMounted(loadBill)
+    watch(() => route.params.id, loadBill)
     return {
-      bill, loading, showPaymentModal, recordingPayment, paymentForm,
-      recordPayment, printBill, formatDate, formatDateTime, formatCurrency, getStatusColor
+      bill, loading, error, showPaymentModal, recordingPayment, paymentForm, outstandingBalance,
+      loadBill, openPaymentModal, recordPayment, printBill,
+      formatDate, formatDateTime, formatCurrency, getStatusColor
     }
   }
 }

@@ -3,6 +3,12 @@ import { useAuthStore } from '../store/auth'
 
 const routes = [
   {
+    path: '/portal',
+    name: 'PatientPortal',
+    component: () => import('../views/portal/PatientPortal.vue'),
+    meta: { portal: true, title: 'Patient portal' }
+  },
+  {
     path: '/login',
     name: 'Login',
     component: () => import('../views/auth/Login.vue'),
@@ -33,6 +39,12 @@ const routes = [
     ]
   },
   {
+    path: '/portal',
+    name: 'PatientPortal',
+    component: () => import('../views/portal/PatientPortal.vue'),
+    meta: { title: 'Patient Portal' }
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('../views/NotFound.vue'),
@@ -47,6 +59,7 @@ const router = createRouter({
 })
 
 router.beforeEach(to => {
+  if (to.meta.portal) return true
   const authStore = useAuthStore()
   if (to.matched.some(record => record.meta.requiresAuth) && !authStore.isAuthenticated) {
     return { name: 'Login', query: { redirect: to.fullPath } }

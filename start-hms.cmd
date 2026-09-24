@@ -15,20 +15,37 @@ if %NODE_MAJOR% LSS 22 (
   exit /b 1
 )
 
-rem A clean checkout has no ignored client/dist directory. Build it once so
-rem the production server can serve the Vue application.
-if not exist "%ROOT%client\dist\index.html" (
-  echo Client build not found. Building the production client...
-  pushd "%ROOT%client"
-  call npm.cmd run build
-  if errorlevel 1 (
-    popd
-    exit /b 1
-  )
-  popd
+if not exist "%ROOT%node_modules" (
+  echo Root dependencies are missing. Run npm run install:all first.
+  exit /b 1
+)
+if not exist "%ROOT%client\node_modules" (
+  echo Client dependencies are missing. Run npm run install:all first.
+  exit /b 1
+)
+if not exist "%ROOT%server\node_modules" (
+  echo Server dependencies are missing. Run npm run install:all first.
+  exit /b 1
 )
 
-rem Run from the repository location, regardless of where this file is invoked.
-cd /d "%ROOT%server" || exit /b 1
+rem Always rebuild so the production server cannot serve a stale client bundle.
+echo Building the production client...
+pushd "%ROOT%client"
+call npm.cmd run build
+if errorlevel 1 (
+  popd
+  exit /b 1
+)
+popd
+
+rem Apply idempotent schema migrations before accepting traffic.
+pushd "%ROOT%server"
+node config\setup.js
+if errorlevel 1 (
+  popd
+  exit /b 1
+)
 node index.js
-exit /b %ERRORLEVEL%
+set "EXIT_CODE=%ERRORLEVEL%"
+popd
+exit /b %EXIT_CODE%

@@ -1,121 +1,147 @@
 # Hospital Management System
 
-A modern Hospital Management System with a Vue 3 frontend and a Node.js/Express + SQLite backend.
+A full-stack Hospital Management System with a Vue 3 client and a Node.js/Express + SQLite API.
 
 ## Features
 
-- **Authentication & Roles** — JWT-based login with role-based access (admin, doctor, nurse, receptionist, pharmacist, lab technician)
-- **Patient Management** — full patient records, MRN numbers, insurance & medical history
-- **Doctor Management** — profiles, specialties, schedules, consultation fees
-- **Appointments** — scheduling with doctor availability slots
-- **Electronic Medical Records (EMR)** — chart notes, diagnoses, treatment plans
-- **Pharmacy** — medicine inventory, low-stock alerts, prescription dispensing
-- **Laboratory** — test catalog, lab orders, result entry
-- **Billing** — bills, payments, partial/paid tracking
-- **Reports** — dashboard analytics and financial reporting
-- **Notifications** — in-app alerts
-- **AI Assistant** — built-in chat assistant for clinical queries
+- JWT authentication and role-based access for administrators, doctors, nurses, receptionists, pharmacists, and lab technicians
+- Patient registration, access cards, portal PIN provisioning, demographics, and medical history
+- Doctor profiles, weekly schedules, appointment availability, and booking
+- Electronic medical records, prescriptions, medication safety checks, and lab orders/results
+- Pharmacy inventory, partial dispensing, expiry/low-stock alerts, and interaction screening
+- Billing, validated partial payments, summaries, and financial reports
+- Admission and bed management with occupancy protection
+- Notifications, operational dashboards, smart forecasts, and a rule-based assistant
+- Patient portal and kiosk APIs, including appointment, result, prescription, bill, and check-in access
 
-## Tech Stack
+## Technology
 
-| Layer    | Technology                          |
-| -------- | ----------------------------------- |
-| Frontend | Vue 3, Vue Router, Pinia, Vite, Chart.js |
-| Backend  | Node.js, Express                    |
-| Database | SQLite (via better-sqlite3)         |
-| Auth     | JSON Web Tokens, bcryptjs           |
+| Layer | Technology |
+| --- | --- |
+| Client | Vue 3, Vue Router, Pinia, Axios, Vite, Chart.js |
+| API | Node.js 22+, Express, JWT, bcryptjs |
+| Database | SQLite via `better-sqlite3` |
+| Tests | Node test runner and Supertest |
 
-## Getting Started
+## Setup
 
-### Prerequisites
-
-- Node.js 22+ (required by `better-sqlite3`)
-- npm
+Run all commands from the repository root.
 
 ### 1. Install dependencies
 
 ```bash
-npm install
-cd server && npm install
-cd ../client && npm install
+npm run install:all
 ```
 
-### 2. Configure environment
+For a reproducible CI-style installation, use `npm ci` in the root, `client`, and `server` directories.
+
+### 2. Configure the API
 
 ```bash
-cd server
-cp .env.example .env
+cp server/.env.example server/.env
 ```
 
-Adjust the values in `.env` as needed.
+Generate a unique JWT secret before starting the API. Do not use the placeholder in a deployed environment.
 
-### 3. Initialize and seed the database
+Important optional settings:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PORT` | `5000` | API port |
+| `JWT_SECRET` | none | Required random secret of at least 32 characters |
+| `JWT_EXPIRE` | `7d` | Staff-session lifetime |
+| `PORTAL_JWT_EXPIRE` | `24h` | Patient-portal session lifetime |
+| `CORS_ORIGINS` | local dev origins | Comma-separated production client origins |
+| `DB_PATH` | `server/hospital.db` | SQLite database path |
+| `ALLOW_SIMULATED_PAYMENTS` | `false` | Explicitly enables demo portal payments in production |
+
+To use a non-default API port during client development, create `client/.env.local`:
+
+```dotenv
+VITE_API_PROXY_TARGET=http://localhost:5001
+```
+
+### 3. Initialize the database
 
 ```bash
-npm run db:setup   # creates all tables
-npm run db:seed    # loads demo data
+npm run db:setup
+npm run db:seed
 ```
 
-### 4. Run the app
+`db:setup` is idempotent and applies schema migrations. `db:seed` is for isolated demo environments and refuses to run in production unless `ALLOW_DEMO_SEED=true` is explicitly set. It prints generated patient portal PINs once.
+
+### 4. Run in development
 
 ```bash
 npm run dev
 ```
 
-This starts:
-- **API server** on http://localhost:5000
-- **Client (Vite)** on http://localhost:3000
+- Client: <http://localhost:3000>
+- API: <http://localhost:5000>
+- Readiness: <http://localhost:5000/api/health>
 
-The Vite dev server proxies `/api` requests to the Express backend.
+## Demo staff accounts
 
-## Demo Accounts
+All generated demo staff accounts use password `password123`:
 
-All seeded users have the password `password123`:
+| Role | Email |
+| --- | --- |
+| Admin | `admin@hospital.com` |
+| Doctor | `doctor@hospital.com` |
+| Nurse | `nurse@hospital.com` |
+| Receptionist | `receptionist@hospital.com` |
+| Pharmacist | `pharmacist@hospital.com` |
+| Lab technician | `labtech@hospital.com` |
 
-| Role            | Email                       |
-| --------------- | --------------------------- |
-| Admin           | admin@hospital.com          |
-| Doctor          | doctor@hospital.com         |
-| Nurse           | nurse@hospital.com          |
-| Receptionist    | receptionist@hospital.com   |
-| Pharmacist      | pharmacist@hospital.com     |
-| Lab Technician  | labtech@hospital.com        |
+Never run demo seeding against a real patient database.
 
-## Scripts
+## Commands
 
-| Command               | Description                          |
-| --------------------- | ------------------------------------ |
-| `npm run dev`         | Run server + client concurrently     |
-| `npm run server`      | Run API server only                  |
-| `npm run client`      | Run Vite client only                 |
-| `npm run db:setup`    | Create database tables               |
-| `npm run db:seed`     | Seed demo data                       |
+| Command | Description |
+| --- | --- |
+| `npm run install:all` | Install root, API, and client dependencies |
+| `npm run dev` | Run API and Vite development servers |
+| `npm run server` | Run only the API |
+| `npm run client` | Run only the client |
+| `npm run db:setup` | Create/apply database schema and indexes |
+| `npm run db:seed` | Load demo fixtures |
+| `npm run build` | Build the production client |
+| `npm test` | Run API integration tests on an isolated database |
+| `npm run check` | Build the client and run API tests |
+| `npm run audit` | Audit production dependencies in all packages |
 
-## API Routes
+## API groups
 
-The API is served under `/api` (port 5000). Main groups:
+All endpoints are under `/api`:
 
-- `/api/auth` — login, register, profile, change password
-- `/api/users` — user management (admin)
-- `/api/patients` — patient records
-- `/api/doctors` — doctor profiles
-- `/api/appointments` — appointment scheduling
-- `/api/emr` — medical records & prescriptions
-- `/api/pharmacy` — medicines, dispensing, inventory
-- `/api/laboratory` — lab tests and orders
-- `/api/billing` — bills and payments
-- `/api/reports` — analytics and financial reports
-- `/api/notifications` — user notifications
-- `/api/ai` — AI assistant chat
+- `/auth`, `/users`
+- `/patients`, `/doctors`, `/appointments`
+- `/emr`, `/prescriptions`
+- `/pharmacy`, `/laboratory`
+- `/billing`, `/reports`
+- `/notifications`, `/admissions`
+- `/ai`, `/smart`
+- `/portal` for patient self-service and kiosk operations
+- `/portal` in the client for the patient portal SPA
 
-## Production Build
+The API returns JSON for successful requests, validation failures, unknown routes, malformed JSON, and unexpected server errors.
 
-Build the client and serve it statically from the Express server:
+## Production
+
+Build and start through the included Windows launcher:
+
+```bat
+set NODE_ENV=production
+start-hms.cmd
+```
+
+The launcher rebuilds the client every time, applies database setup, and then starts Express in production mode. It refuses to start when dependencies are missing or the runtime is older than Node.js 22.
+
+For non-Windows production starts:
 
 ```bash
-cd client && npm run build
-cd ..
+npm run build
 NODE_ENV=production npm run server
 ```
 
-On Windows, `start-hms.cmd` performs the same startup and automatically builds `client/dist` when it is missing. Set a unique `JWT_SECRET` in `server/.env` before production use.
+Use HTTPS, a strong `JWT_SECRET`, an explicit `CORS_ORIGINS` allowlist, encrypted database backups, and a process supervisor. SQLite database files and `.env` files are intentionally excluded from Git.

@@ -74,7 +74,7 @@
                   <label>Result Value</label>
                   <input
                     v-model="item.result_value"
-                    :disabled="order.status === 'completed'"
+                    :disabled="!canSubmitResults"
                     required
                     placeholder="Enter result..."
                   />
@@ -100,7 +100,7 @@
                 <label>Notes</label>
                 <textarea
                   v-model="item.notes"
-                  :disabled="order.status === 'completed'"
+                  :disabled="!canSubmitResults"
                   rows="2"
                   placeholder="Additional notes..."
                 ></textarea>
@@ -112,7 +112,7 @@
       </div>
     </div>
 
-    <div class="action-bar" v-if="order.status !== 'completed'">
+    <div class="action-bar" v-if="canSubmitResults">
       <button class="btn btn-primary" @click="submitResults" :disabled="saving || !resultsComplete">
         <span v-if="saving" class="btn-spinner"></span>
         {{ saving ? 'Submitting...' : 'Submit Results' }}
@@ -138,6 +138,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
+import { useAuthStore } from '../../store/auth'
 import { formatDate, getStatusColor } from '../../utils/helpers'
 
 export default {
@@ -146,6 +147,7 @@ export default {
     const route = useRoute()
     const router = useRouter()
     const toast = useToast()
+    const authStore = useAuthStore()
     const order = ref(null)
     const saving = ref(false)
     const loading = ref(true)
@@ -163,7 +165,7 @@ export default {
     }
 
     const isAbnormal = (item) => {
-      if (item.is_abnormal !== undefined && item.is_abnormal !== null && item.result_value) {
+      if (order.value?.status === 'completed' && item.result_date && item.is_abnormal !== undefined && item.is_abnormal !== null) {
         return Boolean(Number(item.is_abnormal))
       }
       const value = parseClientNumber(item.result_value)
@@ -183,6 +185,9 @@ export default {
       })
     }
 
+    const canSubmitResults = computed(() =>
+      authStore.can('lab_technician', 'admin') && order.value?.status !== 'completed' && order.value?.status !== 'cancelled'
+    )
     const resultsComplete = computed(() => Boolean(order.value?.items?.length) && order.value.items.every(item => String(item.result_value || '').trim()))
 
     const submitResults = async () => {
@@ -223,7 +228,7 @@ export default {
 
     return {
       order, saving, loading, error,
-      priorityClass, isAbnormal, resultsComplete,
+      priorityClass, isAbnormal, canSubmitResults, resultsComplete,
       formatDate, getStatusColor, submitResults
     }
   }

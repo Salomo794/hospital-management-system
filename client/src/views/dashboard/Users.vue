@@ -9,7 +9,7 @@
           <input type="text" v-model="search" placeholder="Search users..." @input="debouncedLoad" />
         </div>
         <div class="filter-group">
-          <select v-model="roleFilter" @change="loadUsers">
+          <select v-model="roleFilter" @change="page = 1; loadUsers()">
             <option value="">All Roles</option>
             <option value="admin">Admin</option>
             <option value="doctor">Doctor</option>
@@ -53,6 +53,11 @@
           </tr>
         </tbody>
       </table>
+      <div class="pagination" v-if="total > limit">
+        <button class="btn btn-sm" :disabled="page <= 1" @click="page--; loadUsers()">Previous</button>
+        <span>Page {{ page }} of {{ Math.ceil(total / limit) }}</span>
+        <button class="btn btn-sm" :disabled="page >= Math.ceil(total / limit)" @click="page++; loadUsers()">Next</button>
+      </div>
     </div>
 
     <!-- ──── ADD USER MODAL ──── -->
@@ -98,8 +103,8 @@
             </div>
             <div class="form-group">
               <label for="nu-password">Password *</label>
-              <input id="nu-password" type="password" v-model="form.password" required minlength="6" autocomplete="new-password" />
-              <span class="form-hint">At least 6 characters. The user can change it after signing in.</span>
+              <input id="nu-password" type="password" v-model="form.password" required minlength="8" autocomplete="new-password" />
+              <span class="form-hint">At least 8 characters. The user can change it after signing in.</span>
             </div>
           </div>
           <div class="modal-footer">
@@ -126,6 +131,8 @@ export default {
     const toast = useToast()
     const users = ref([])
     const total = ref(0)
+    const page = ref(1)
+    const limit = ref(20)
     const search = ref('')
     const roleFilter = ref('')
     const loading = ref(true)
@@ -170,23 +177,29 @@ export default {
       }
     }
 
+    let requestId = 0
     const loadUsers = async () => {
+      const currentRequest = ++requestId
       loading.value = true
       try {
-        const params = { page: 1, limit: 50 }
+        const params = { page: page.value, limit: limit.value }
         if (search.value) params.search = search.value
         if (roleFilter.value) params.role = roleFilter.value
         const { data } = await axios.get('/api/users', { params })
+        if (currentRequest !== requestId) return
         users.value = data.users
         total.value = data.total
       } catch (e) {
         toast.error('Failed to load users.')
       } finally {
-        loading.value = false
+        if (currentRequest === requestId) loading.value = false
       }
     }
 
-    const debouncedLoad = debounce(() => loadUsers(), 300)
+    const debouncedLoad = debounce(() => {
+      page.value = 1
+      loadUsers()
+    }, 300)
 
     const getRoleColor = (role) => {
       const map = { admin: 'danger', doctor: 'info', nurse: 'success', receptionist: 'warning', pharmacist: 'info', lab_technician: 'info' }
@@ -197,7 +210,7 @@ export default {
 
     onMounted(loadUsers)
     return {
-      users, total, search, roleFilter, loading, loadUsers, debouncedLoad,
+      users, total, page, limit, search, roleFilter, loading, loadUsers, debouncedLoad,
       getRoleColor, formatDateTime, formatStatusLabel,
       showCreate, creating, form, openCreate, createUser
     }

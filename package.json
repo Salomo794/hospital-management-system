@@ -1,16 +1,22 @@
 {
   "name": "hospital-management-system",
   "version": "1.0.0",
+  "private": true,
   "description": "Modern Hospital Management System",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
+    "install:all": "npm install && npm --prefix server install && npm --prefix client install",
     "server": "node server/index.js",
     "client": "cd client && npm run dev",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "db:setup": "node server/config/setup.js",
-    "db:seed": "node server/config/seed.js"
+    "db:seed": "node server/config/seed.js",
+    "build": "npm run build --prefix client",
+    "test": "npm test --prefix server",
+    "check": "npm run build && npm test",
+    "audit": "npm audit --omit=dev && npm audit --omit=dev --prefix server && npm audit --omit=dev --prefix client"
   },
   "dependencies": {
     "concurrently": "^8.2.0"
