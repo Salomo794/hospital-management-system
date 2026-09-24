@@ -376,7 +376,7 @@ export default {
       clearInteractionResults()
       try {
         const [medsRes, summaryRes] = await Promise.all([
-          axios.get('/api/pharmacy/medicines', { params: { limit: 200 } }),
+          axios.get('/api/pharmacy/medicines', { params: { limit: 100 } }),
           axios.get('/api/pharmacy/interactions/summary')
         ])
         medicines.value = medsRes.data.medicines || []
@@ -468,7 +468,7 @@ export default {
       savingMedicine.value = true
       try {
         await axios.post('/api/pharmacy/medicines', medForm.value)
-        showAddModal.value = false
+        closeAddModal()
         toast.success('Medicine added successfully')
         loadMedicines()
       } catch (e) {
@@ -510,7 +510,8 @@ export default {
 
     const selectPrescriptionItem = (item) => {
       selectedPrescriptionItem.value = item
-      dispenseForm.value = { prescription_item_id: item.id, quantity: 1, request_id: newRequestId() }
+      const remaining = Number(item.quantity_remaining ?? item.quantity_prescribed)
+      dispenseForm.value = { prescription_item_id: item.id, quantity: remaining, request_id: newRequestId() }
       safetyWarnings.value = []
     }
 
