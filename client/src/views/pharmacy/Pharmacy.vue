@@ -7,8 +7,8 @@
         <button :class="{ active: view === 'interactions' }" @click="view = 'interactions'; loadInteractionView()">Interactions</button>
       </div>
       <div class="header-actions">
-        <button class="btn btn-outline" @click="openDispenseModal" v-if="view === 'medicines'">Dispense</button>
-        <button class="btn btn-primary" @click="showAddModal = true" v-if="view === 'medicines'">+ Add Medicine</button>
+        <button v-if="view === 'medicines' && authStore.can('pharmacist')" class="btn btn-outline" @click="openDispenseModal">Dispense</button>
+        <button class="btn btn-primary" @click="openAddModal" v-if="view === 'medicines'">+ Add Medicine</button>
       </div>
     </div>
 

@@ -172,7 +172,7 @@ export default {
       try {
         const [recordsResponse, appointmentsResponse] = await Promise.all([
           axios.get(`/api/emr/patient/${p.id}`),
-          axios.get('/api/appointments', { params: { patient_id: p.id, status: 'scheduled', limit: 100 } })
+          axios.get('/api/appointments', { params: { patient_id: p.id, limit: 100 } })
         ])
         records.value = recordsResponse.data
         appointments.value = appointmentsResponse.data.appointments.filter(item => ['scheduled', 'in_progress'].includes(item.status))
@@ -199,7 +199,7 @@ export default {
       try {
         const payload = { ...recordForm.value, patient_id: selectedPatient.value.id, vital_signs: vitalSigns.value }
         const { data } = await axios.post('/api/emr', payload)
-        showNewModal.value = false
+        closeNewModal()
         toast.success('Medical record created successfully')
         router.push(`/emr/${data.id}`)
       } catch (e) {
@@ -208,6 +208,10 @@ export default {
         saving.value = false
       }
     }
+
+    onUnmounted(() => {
+      clearTimeout(timeout)
+    })
 
     onMounted(async () => {
       const patientId = route.query.patient_id
@@ -220,7 +224,12 @@ export default {
       }
     })
 
-    return { search, patientResults, selectedPatient, records, showNewModal, saving, loadingPatients, loadingRecords, vitalSigns, recordForm, searchPatients, selectPatient, createRecord, formatDate, getStatusColor }
+    return {
+      search, patientResults, selectedPatient, records, appointments, showNewModal,
+      saving, loadingPatients, loadingRecords, vitalSigns, recordForm, authStore,
+      searchPatients, selectPatient, openNewModal, closeNewModal, createRecord,
+      formatDate, getStatusColor
+    }
   }
 }
 </script>
