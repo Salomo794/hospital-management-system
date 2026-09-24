@@ -78,15 +78,15 @@
                 <div class="lr-stat-key">Prescriptions</div>
               </div>
               <div class="lr-stat">
-                <div class="lr-stat-val">{{ lookupResult.allergies ? '⚠' : '✓' }}</div>
-                <div class="lr-stat-key">{{ lookupResult.allergies ? 'Has Allergies' : 'No Allergies' }}</div>
+                <div class="lr-stat-val">{{ hasAllergy(lookupResult.allergies) ? '⚠' : '✓' }}</div>
+                <div class="lr-stat-key">{{ hasAllergy(lookupResult.allergies) ? 'Has Allergies' : 'No Allergies' }}</div>
               </div>
             </div>
 
-            <div class="lr-allergies" v-if="lookupResult.allergies">
+            <div class="lr-allergies" v-if="hasAllergy(lookupResult.allergies)">
               <span class="lr-allergy-label">⚠ Allergies:</span> {{ lookupResult.allergies }}
             </div>
-            <div class="lr-conditions" v-if="lookupResult.chronic_conditions">
+            <div class="lr-conditions" v-if="hasClinicalCondition(lookupResult.chronic_conditions)">
               <span class="lr-cond-label">🔄 Chronic:</span> {{ lookupResult.chronic_conditions }}
             </div>
 
@@ -94,7 +94,7 @@
               <router-link :to="`/patients/${lookupResult.id}`" class="btn btn-primary btn-sm">
                 Open Full Record
               </router-link>
-              <router-link :to="`/emr?patient_id=${lookupResult.id}`" class="btn btn-secondary btn-sm">
+              <router-link v-if="authStore.can('doctor', 'admin')" :to="`/emr?patient_id=${lookupResult.id}`" class="btn btn-secondary btn-sm">
                 New EMR Entry
               </router-link>
               <router-link :to="`/appointments?patient_id=${lookupResult.id}`" class="btn btn-secondary btn-sm">
@@ -187,7 +187,7 @@
                 <div class="table-actions">
                   <router-link :to="`/patients/${p.id}`" class="btn btn-sm btn-secondary">View</router-link>
                   <button class="btn btn-sm btn-secondary" @click="openEditModal(p)">Edit</button>
-                  <button class="btn btn-sm btn-danger" @click="deletePatient(p)">Delete</button>
+                  <button v-if="authStore.can('admin', 'receptionist')" class="btn btn-sm btn-danger" @click="deletePatient(p)">Delete</button>
                 </div>
               </td>
             </tr>
@@ -366,7 +366,7 @@
 <script>
 import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
-import { formatDate, debounce } from '../../utils/helpers'
+import { formatDate, debounce, hasAllergy } from '../../utils/helpers'
 import { useToast } from '../../store/toast'
 import { useConfirm } from '../../store/confirm'
 import { useAuthStore } from '../../store/auth'
@@ -408,7 +408,8 @@ export default {
     const lookupError   = ref('')
     const lookupResult  = ref(null)
 
-    const today = new Date().toISOString().split('T')[0]
+    const today = ref(new Date().toISOString().slice(0, 10))
+    const hasClinicalCondition = value => hasAllergy(value) && !/^none$/i.test(String(value).trim())
 
     const bloodTypes = ['A+','A-','B+','B-','AB+','AB-','O+','O-']
 
@@ -431,19 +432,22 @@ export default {
     })
 
     /* ── data loading ── */
+    let listRequestId = 0
     const loadPatients = async () => {
+      const requestId = ++listRequestId
       loading.value = true
       try {
         const params = { page: page.value, limit: limit.value }
         if (search.value)       params.search = search.value
         if (statusFilter.value) params.status = statusFilter.value
         const { data } = await axios.get('/api/patients', { params })
+        if (requestId !== listRequestId) return
         patients.value = data.patients
         total.value    = data.total
       } catch {
         toast.error('Failed to load patients.')
       } finally {
-        loading.value = false
+        if (requestId === listRequestId) loading.value = false
       }
     }
 
@@ -451,6 +455,7 @@ export default {
 
     /* ── modal helpers ── */
     const openCreateModal = () => {
+      today.value = new Date().toISOString().slice(0, 10)
       submitted.value      = false
       editingPatient.value = null
       form.value           = emptyForm()
@@ -458,6 +463,7 @@ export default {
     }
 
     const openEditModal = (patient) => {
+      today.value = new Date().toISOString().slice(0, 10)
       submitted.value      = false
       editingPatient.value = patient
       form.value = {
@@ -573,7 +579,7 @@ export default {
       showAccessCard, newPatientData, newPatientPin,
       lookupOpen, lookupCode, lookupLoading, lookupError, lookupResult,
       today, bloodTypes, totalPages, pageRange,
-      formatDate, debouncedSearch,
+      formatDate, debouncedSearch, hasAllergy, hasClinicalCondition, authStore,
       openCreateModal, openEditModal, closeModal, savePatient, deletePatient,
       lookupPatient, clearLookup,
     }

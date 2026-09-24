@@ -255,11 +255,13 @@
 
                 <div class="form-row">
                   <div class="form-group">
-                    <label>Quantity</label>
+                    <label>Quantity *</label>
                     <input
                       v-model.number="item.quantity"
                       type="number"
                       min="1"
+                      step="1"
+                      required
                       class="form-control"
                     />
                   </div>
@@ -451,21 +453,30 @@ export default {
     })
 
     const searchMedicineDebounced = debounce(async (idx, query) => {
+      const item = prescriptionForm.items[idx]
+      if (!item) return
       if (!query || query.length < 2) {
-        prescriptionForm.items[idx].medicineOptions = []
+        item.medicineOptions = []
         return
       }
       try {
         const { data } = await axios.get('/api/pharmacy/medicines', { params: { search: query } })
-        prescriptionForm.items[idx].medicineOptions = Array.isArray(data) ? data : (data.data || data.medicines || [])
+        if (prescriptionForm.items[idx] === item && item.medicineSearch === query) {
+          item.medicineOptions = Array.isArray(data) ? data : (data.data || data.medicines || [])
+        }
       } catch {
-        prescriptionForm.items[idx].medicineOptions = []
+        if (prescriptionForm.items[idx] === item) item.medicineOptions = []
       }
     }, 350)
+
+    function clearPrescriptionWarnings() {
+      safetyWarnings.value = []
+    }
 
     function searchMedicine(idx, value) {
       prescriptionForm.items[idx].medicineSearch = value
       prescriptionForm.items[idx].medicine_id = null
+      clearPrescriptionWarnings()
       searchMedicineDebounced(idx, value)
     }
 
@@ -474,14 +485,17 @@ export default {
       prescriptionForm.items[idx].medicineSearch = med.name
       prescriptionForm.items[idx].medicineOptions = []
       prescriptionForm.items[idx].showDropdown = false
+      clearPrescriptionWarnings()
     }
 
     function addPrescriptionItem() {
       prescriptionForm.items.push(createEmptyItem())
+      clearPrescriptionWarnings()
     }
 
     function removePrescriptionItem(idx) {
       prescriptionForm.items.splice(idx, 1)
+      clearPrescriptionWarnings()
     }
 
     function openPrescriptionModal() {
@@ -497,9 +511,12 @@ export default {
     }
 
     async function submitPrescription(acknowledge = false) {
-      const validItems = prescriptionForm.items.filter(i => i.medicine_id && i.frequency)
-      if (!validItems.length) {
-        toast.warning('Please add at least one item with a medicine and frequency.')
+      const invalidItem = prescriptionForm.items.find(item => {
+        const quantity = Number(item.quantity)
+        return !item.medicine_id || !String(item.dosage || '').trim() || !String(item.frequency || '').trim() || !Number.isInteger(quantity) || quantity <= 0
+      })
+      if (invalidItem) {
+        toast.warning('Complete every prescription item, including medicine, dosage, frequency, and a positive whole-number quantity.')
         return
       }
       submittingPrescription.value = true
@@ -508,12 +525,12 @@ export default {
         const { data } = await axios.post('/api/emr/prescriptions', {
           medical_record_id: record.value.id,
           patient_id: record.value.patient_id,
-          items: validItems.map(i => ({
+          items: prescriptionForm.items.map(i => ({
             medicine_id: i.medicine_id,
-            dosage: i.dosage,
+            dosage: String(i.dosage).trim(),
             frequency: i.frequency,
             duration: i.duration,
-            quantity: i.quantity,
+            quantity: Number(i.quantity),
             instructions: i.instructions
           })),
           notes: prescriptionForm.notes,

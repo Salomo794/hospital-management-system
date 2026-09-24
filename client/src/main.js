@@ -15,7 +15,9 @@ app.use(router)
 
 // Apply saved dark/light theme before first paint to avoid a flash of the wrong theme
 import { useUiStore } from './store/ui'
+import { useAuthStore } from './store/auth'
 useUiStore(pinia).applyTheme()
+useAuthStore(pinia).initAxios()
 
 app.component('BarChart', Bar)
 app.component('DoughnutChart', Doughnut)

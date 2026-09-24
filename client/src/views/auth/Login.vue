@@ -17,7 +17,7 @@
         </div>
         <div class="login-footnote">
           <span class="foot-dot"></span>
-          Role-based access &middot; Encrypted sessions
+          Role-based access &middot; Authenticated sessions
         </div>
       </div>
       <div class="login-right">
@@ -79,7 +79,7 @@
 
 <script>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../store/auth'
 import { useToast } from '../../store/toast'
 
@@ -94,6 +94,7 @@ export default {
   name: 'Login',
   setup() {
     const router = useRouter()
+    const route = useRoute()
     const authStore = useAuthStore()
     const toast = useToast()
     const email = ref('')
@@ -116,7 +117,10 @@ export default {
       try {
         await authStore.login(email.value, password.value)
         toast.success('Login successful!')
-        router.push('/dashboard')
+        const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
+          ? route.query.redirect
+          : '/dashboard'
+        router.push(redirect)
       } catch (e) {
         toast.error(e.response?.data?.message || 'Login failed. Please check your credentials.')
       } finally {

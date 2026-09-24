@@ -10,6 +10,7 @@ let resolvePromise = null
 
 export function useConfirm() {
   async function confirm(opts = {}) {
+    if (resolvePromise) resolvePromise(false)
     title.value = opts.title || 'Confirm'
     message.value = opts.message || 'Are you sure?'
     confirmText.value = opts.confirmText || 'Confirm'

@@ -71,16 +71,30 @@ async function checkInteractions(medicineIds) {
 }
 
 async function evaluateSafety(patientId, medicineIds) {
-  const ids = [...new Set((medicineIds || []).map(Number).filter(Boolean))];
+  const requestedIds = (medicineIds || [])
+    .map(value => Number(value))
+    .filter(value => Number.isInteger(value) && value > 0);
   let patient = null;
-  let medicines = [];
+  let existingMedicineIds = [];
   if (patientId) {
     const [p] = await pool.query(
       'SELECT id, first_name, last_name, allergies FROM patients WHERE id = ?',
       [patientId]
     );
     patient = p[0] || null;
+    // Include medications the patient is already taking. Checking only the
+    // newly submitted list can miss an interaction with an active prescription.
+    const [activePrescriptions] = await pool.query(
+      `SELECT DISTINCT pi.medicine_id
+       FROM prescription_items pi
+       JOIN prescriptions pr ON pr.id = pi.prescription_id
+       WHERE pr.patient_id = ? AND pr.status = 'active'`,
+      [patientId]
+    );
+    existingMedicineIds = activePrescriptions.map(row => Number(row.medicine_id)).filter(Number.isInteger);
   }
+  const ids = [...new Set([...existingMedicineIds, ...requestedIds])];
+  let medicines = [];
   if (ids.length) {
     const placeholders = ids.map(() => '?').join(',');
     const [m] = await pool.query(

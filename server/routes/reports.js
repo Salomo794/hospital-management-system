@@ -5,7 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { WARDS: WARD_CAPACITY, wardCapacityOrDefault } = require('../config/wards');
 
 // Dashboard stats
-router.get('/dashboard', authenticate, async (req, res) => {
+router.get('/dashboard', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
     const [totalPatients] = await pool.query("SELECT COUNT(*) as count FROM patients WHERE status = 'active'");
@@ -23,7 +23,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
       `SELECT a.*, p.first_name as patient_first_name, p.last_name as patient_last_name,
         u.first_name as doctor_first_name, u.last_name as doctor_last_name
         FROM appointments a JOIN patients p ON a.patient_id = p.id JOIN users u ON a.doctor_id = u.id
-        WHERE a.appointment_date >= ? ORDER BY a.appointment_date, a.appointment_time LIMIT 10`, [today]
+        WHERE a.appointment_date = ? ORDER BY a.appointment_time LIMIT 10`, [today]
     );
     const [recentPatients] = await pool.query(
       `SELECT id, mrn, first_name, last_name, phone, status, created_at
@@ -61,7 +61,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
 });
 
 // Smart insights - rule-based operational intelligence for the dashboard
-router.get('/insights', authenticate, async (req, res) => {
+router.get('/insights', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), async (req, res) => {
   try {
     const insights = [];
     const today = new Date().toISOString().split('T')[0];
@@ -225,6 +225,10 @@ router.get('/insights', authenticate, async (req, res) => {
 router.get('/financial', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { period = 'monthly', year = new Date().getFullYear() } = req.query;
+    const reportYear = Number(year);
+    if (!Number.isInteger(reportYear) || reportYear < 2000 || reportYear > 2100) {
+      return res.status(400).json({ message: 'year must be an integer between 2000 and 2100' });
+    }
     let groupBy, dateFormat;
     if (period === 'daily') {
       groupBy = 'DATE(payment_date)';
@@ -242,21 +246,28 @@ router.get('/financial', authenticate, authorize('admin'), async (req, res) => {
         COUNT(*) as transaction_count
         FROM payments WHERE CAST(strftime('%Y', payment_date) AS INTEGER) = ?
         GROUP BY ${groupBy}, payment_method ORDER BY period`,
-      [year]
+      [reportYear]
     );
     const [expenses] = await pool.query(
       `SELECT ${expenseGroupBy} as period, SUM(it.quantity * m.cost_price) as expenses, category
         FROM inventory_transactions it JOIN medicines m ON it.medicine_id = m.id
         WHERE it.transaction_type = 'purchase' AND CAST(strftime('%Y', it.created_at) AS INTEGER) = ?
         GROUP BY ${expenseGroupBy}, category ORDER BY period`,
-      [year]
+      [reportYear]
     );
     const [topServices] = await pool.query(
-      `SELECT category, SUM(total) as total_revenue, COUNT(*) as count
-        FROM bill_items bi JOIN bills b ON bi.bill_id = b.id
-        WHERE CAST(strftime('%Y', b.created_at) AS INTEGER) = ?
-        GROUP BY category ORDER BY total_revenue DESC`,
-      [year]
+      `SELECT bi.category,
+              ROUND(SUM(
+                bi.total * CASE
+                  WHEN b.net_amount <= 0 THEN 0
+                  ELSE MIN(1.0, MAX(0.0, b.paid_amount / b.net_amount))
+                END
+              ), 2) AS collected_revenue,
+              COUNT(*) AS count
+       FROM bill_items bi JOIN bills b ON bi.bill_id = b.id
+       WHERE CAST(strftime('%Y', b.created_at) AS INTEGER) = ?
+       GROUP BY bi.category ORDER BY collected_revenue DESC`,
+      [reportYear]
     );
     res.json({ revenue, expenses, topServices });
   } catch (error) {
@@ -266,7 +277,7 @@ router.get('/financial', authenticate, authorize('admin'), async (req, res) => {
 });
 
 // Patient statistics
-router.get('/patients', authenticate, async (req, res) => {
+router.get('/patients', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), async (req, res) => {
   try {
     const [byGender] = await pool.query('SELECT gender, COUNT(*) as count FROM patients GROUP BY gender');
     const [byAge] = await pool.query(

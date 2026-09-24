@@ -123,7 +123,7 @@
             <p class="interaction-hint">Select at least two medicines to screen for potential drug-drug interactions.</p>
             <div class="interaction-picker">
               <label class="picker-item" v-for="m in medicines" :key="m.id">
-                <input type="checkbox" :value="m.id" v-model="selectedIds" />
+                <input type="checkbox" :value="m.id" v-model="selectedIds" @change="clearInteractionResults" />
                 <span>{{ m.name }}</span>
                 <span class="picker-generic" v-if="m.generic_name">{{ m.generic_name }}</span>
               </label>
@@ -268,11 +268,13 @@
                   type="number"
                   v-model.number="dispenseForm.quantity"
                   min="1"
-                  :max="selectedPrescriptionItem?.quantity_prescribed || 9999"
+                  step="1"
+                  :max="selectedPrescriptionItem?.quantity_remaining || selectedPrescriptionItem?.quantity_prescribed || 1"
                   required
+                  @input="onDispenseQuantityChange"
                 />
                 <span class="field-hint" v-if="selectedPrescriptionItem">
-                  Prescribed: {{ selectedPrescriptionItem.quantity_prescribed }}
+                  Prescribed: {{ selectedPrescriptionItem.quantity_prescribed }} · Remaining: {{ selectedPrescriptionItem.quantity_remaining ?? selectedPrescriptionItem.quantity_prescribed }}
                 </span>
               </div>
               <div class="modal-footer">
@@ -281,13 +283,13 @@
                   v-if="safetyWarnings.length"
                   type="button"
                   class="btn btn-danger"
-                  :disabled="dispensing || !dispenseForm.quantity"
+                  :disabled="dispensing || !dispenseQuantityValid"
                   @click="dispenseMedicineAction(true)"
                 >
                   <span v-if="dispensing" class="spinner-sm"></span>
                   {{ dispensing ? 'Dispensing...' : 'Dispense Anyway' }}
                 </button>
-                <button v-else type="submit" class="btn btn-primary" :disabled="dispensing || !dispenseForm.quantity">
+                <button v-else type="submit" class="btn btn-primary" :disabled="dispensing || !dispenseQuantityValid">
                   <span v-if="dispensing" class="spinner-sm"></span>
                   {{ dispensing ? 'Dispensing...' : 'Dispense' }}
                 </button>
@@ -330,8 +332,18 @@ export default {
     const prescriptionItems = ref([])
     const filteredPrescriptionItems = ref([])
     const selectedPrescriptionItem = ref(null)
-    const dispenseForm = ref({ prescription_item_id: null, quantity: 1 })
+    const dispenseForm = ref({ prescription_item_id: null, quantity: 1, request_id: '' })
     const safetyWarnings = ref([])
+    const dispenseQuantityValid = computed(() => {
+      const quantity = Number(dispenseForm.value.quantity)
+      const remaining = Number(selectedPrescriptionItem.value?.quantity_remaining ?? selectedPrescriptionItem.value?.quantity_prescribed)
+      return Boolean(selectedPrescriptionItem.value) && Number.isInteger(quantity) && quantity > 0 && quantity <= remaining
+    })
+
+    const newRequestId = () => {
+      if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+      return `dispense-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    }
 
     const loadingInteractions = ref(false)
     const interactionSummary = ref({ summary: { mild: 0, moderate: 0, severe: 0, contraindicated: 0 }, total: 0 })
@@ -351,8 +363,7 @@ export default {
 
     const loadInteractionView = async () => {
       loadingInteractions.value = true
-      interactionResults.value = []
-      checkedIds.value = []
+      clearInteractionResults()
       try {
         const [medsRes, summaryRes] = await Promise.all([
           axios.get('/api/pharmacy/medicines', { params: { limit: 200 } }),
@@ -367,17 +378,28 @@ export default {
       }
     }
 
+    let interactionRequestId = 0
+    const clearInteractionResults = () => {
+      interactionRequestId += 1
+      interactionResults.value = []
+      checkedIds.value = []
+    }
+
     const checkInteractions = async () => {
+      const ids = [...selectedIds.value]
+      if (ids.length < 2) return
+      const requestId = ++interactionRequestId
       checkingInteractions.value = true
       interactionResults.value = []
       try {
-        const { data } = await axios.post('/api/pharmacy/interactions/check', { medicineIds: selectedIds.value })
+        const { data } = await axios.post('/api/pharmacy/interactions/check', { medicineIds: ids })
+        if (requestId !== interactionRequestId) return
         interactionResults.value = data.interactions
         checkedIds.value = data.checkedIds
       } catch (e) {
-        toast.error(e.response?.data?.message || 'Error checking interactions')
+        if (requestId === interactionRequestId) toast.error(e.response?.data?.message || 'Error checking interactions')
       } finally {
-        checkingInteractions.value = false
+        if (requestId === interactionRequestId) checkingInteractions.value = false
       }
     }
 
@@ -434,7 +456,7 @@ export default {
       prescriptionSearch.value = ''
       filteredPrescriptionItems.value = []
       selectedPrescriptionItem.value = null
-      dispenseForm.value = { prescription_item_id: null, quantity: 1 }
+      dispenseForm.value = { prescription_item_id: null, quantity: 1, request_id: newRequestId() }
       safetyWarnings.value = []
       loadingPrescriptions.value = true
       try {
@@ -461,7 +483,7 @@ export default {
 
     const selectPrescriptionItem = (item) => {
       selectedPrescriptionItem.value = item
-      dispenseForm.value = { prescription_item_id: item.id, quantity: 1 }
+      dispenseForm.value = { prescription_item_id: item.id, quantity: 1, request_id: newRequestId() }
       safetyWarnings.value = []
     }
 
@@ -472,13 +494,37 @@ export default {
       filteredPrescriptionItems.value = []
     }
 
+    const onDispenseQuantityChange = () => {
+      // A new quantity is a new operation and must not reuse an idempotency
+      // key belonging to a previous request.
+      dispenseForm.value.request_id = newRequestId()
+      safetyWarnings.value = []
+    }
+
     const dispenseMedicineAction = async (acknowledge = false) => {
+      const item = selectedPrescriptionItem.value
+      const quantity = Number(dispenseForm.value.quantity)
+      const remaining = Number(item?.quantity_remaining ?? item?.quantity_prescribed)
+      if (!dispenseForm.value.prescription_item_id || !item) {
+        toast.error('Please select a prescription item.')
+        return
+      }
+      if (!Number.isInteger(quantity) || quantity <= 0) {
+        toast.error('Quantity must be a positive whole number.')
+        return
+      }
+      if (!Number.isFinite(remaining) || quantity > remaining) {
+        toast.error(`Only ${Number.isFinite(remaining) ? remaining : 0} unit(s) remain to be dispensed.`)
+        return
+      }
+      if (!dispenseForm.value.request_id) dispenseForm.value.request_id = newRequestId()
       dispensing.value = true
       if (!acknowledge) safetyWarnings.value = []
       try {
         const { data } = await axios.post('/api/pharmacy/dispense', {
           prescription_item_id: dispenseForm.value.prescription_item_id,
-          quantity: dispenseForm.value.quantity,
+          quantity,
+          request_id: dispenseForm.value.request_id,
           acknowledge_warnings: acknowledge
         })
         if (data.warnings && data.warnings.length) {
@@ -508,12 +554,12 @@ export default {
       loadMedicines, loadAlerts, addMedicine, formatDate, formatCurrency,
       showDispenseModal, dispensing, loadingPrescriptions, prescriptionSearch,
       filteredPrescriptionItems, selectedPrescriptionItem, dispenseForm,
-      safetyWarnings, noAllergy,
+      safetyWarnings, noAllergy, dispenseQuantityValid,
       openDispenseModal, closeDispenseModal, filterPrescriptionItems, selectPrescriptionItem,
-      dispenseMedicineAction,
+      onDispenseQuantityChange, dispenseMedicineAction,
       loadingInteractions, interactionSummary, selectedIds, checkingInteractions, interactionResults,
       checkedIds, severityKeys, groupedResults, severityLabel, sevBadge,
-      loadInteractionView, checkInteractions
+      loadInteractionView, checkInteractions, clearInteractionResults
     }
   }
 }

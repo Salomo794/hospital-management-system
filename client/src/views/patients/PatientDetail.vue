@@ -5,6 +5,11 @@
       <p>Loading patient details...</p>
     </div>
 
+    <div v-else-if="error" class="loading-state">
+      <p>{{ error }}</p>
+      <button class="btn btn-primary" @click="loadPatient">Retry</button>
+    </div>
+
     <template v-else-if="patient">
       <div class="detail-header">
         <button class="btn btn-sm" @click="$router.back()">&larr; Back</button>
@@ -15,7 +20,7 @@
             <span class="text-muted">MRN: {{ patient.mrn }} | {{ patient.gender }} | DOB: {{ formatDate(patient.date_of_birth) }}</span>
           </div>
         </div>
-        <button class="btn btn-primary" @click="showEditModal = true">Edit Profile</button>
+        <button class="btn btn-primary" @click="openEditModal">Edit Profile</button>
       </div>
 
       <div class="detail-grid">
@@ -126,15 +131,52 @@
         </div>
       </div>
     </template>
+
+    <Teleport to="body">
+      <div v-if="showEditModal" class="modal-overlay" @click.self="closeEditModal">
+        <form class="modal" @submit.prevent="savePatient">
+          <div class="modal-header">
+            <h3>Edit Patient Profile</h3>
+            <button type="button" class="modal-close" @click="closeEditModal">&times;</button>
+          </div>
+          <div class="modal-body edit-grid">
+            <label>First name<input v-model.trim="editForm.first_name" required /></label>
+            <label>Last name<input v-model.trim="editForm.last_name" required /></label>
+            <label>Date of birth<input v-model="editForm.date_of_birth" type="date" :max="today" required /></label>
+            <label>Gender<select v-model="editForm.gender" required><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select></label>
+            <label>Blood type<select v-model="editForm.blood_type"><option value="">Unknown</option><option v-for="type in bloodTypes" :key="type">{{ type }}</option></select></label>
+            <label>Phone<input v-model.trim="editForm.phone" /></label>
+            <label class="full">Email<input v-model.trim="editForm.email" type="email" /></label>
+            <label class="full">Address<input v-model.trim="editForm.address" /></label>
+            <label>Emergency contact<input v-model.trim="editForm.emergency_contact_name" /></label>
+            <label>Emergency phone<input v-model.trim="editForm.emergency_contact_phone" /></label>
+            <label>Insurance provider<input v-model.trim="editForm.insurance_provider" /></label>
+            <label>Insurance number<input v-model.trim="editForm.insurance_number" /></label>
+            <label class="full">Allergies<textarea v-model="editForm.allergies" rows="2" /></label>
+            <label class="full">Chronic conditions<textarea v-model="editForm.chronic_conditions" rows="2" /></label>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="closeEditModal">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="saving">{{ saving ? 'Saving…' : 'Save Changes' }}</button>
+          </div>
+        </form>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { formatDate, formatTime, formatCurrency, getStatusColor } from '../../utils/helpers'
+
+const emptyEditForm = () => ({
+  first_name: '', last_name: '', date_of_birth: '', gender: 'other', blood_type: '',
+  phone: '', email: '', address: '', emergency_contact_name: '', emergency_contact_phone: '',
+  insurance_provider: '', insurance_number: '', allergies: '', chronic_conditions: ''
+})
 
 export default {
   name: 'PatientDetail',
@@ -146,24 +188,73 @@ export default {
     const tab = ref('records')
     const showEditModal = ref(false)
     const loading = ref(true)
+    const saving = ref(false)
+    const error = ref('')
+    const editForm = ref(emptyEditForm())
+    const today = new Date().toISOString().slice(0, 10)
+    const bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
 
-    onMounted(async () => {
+    const loadPatient = async () => {
       const id = route.params.id
+      loading.value = true
+      error.value = ''
+      patient.value = null
       try {
-        const [pRes, hRes] = await Promise.all([
-          axios.get(`/api/patients/${id}`),
-          axios.get(`/api/patients/${id}/history`)
-        ])
-        patient.value = pRes.data
-        history.value = hRes.data
-      } catch (e) {
-        toast.error('Failed to load patient details.')
+        const patientResponse = await axios.get(`/api/patients/${id}`)
+        patient.value = patientResponse.data
+        try {
+          const historyResponse = await axios.get(`/api/patients/${id}/history`)
+          history.value = historyResponse.data
+        } catch {
+          history.value = { appointments: [], medical_records: [], prescriptions: [], bills: [] }
+          toast.warning('Patient loaded, but medical history could not be retrieved.')
+        }
+      } catch (requestError) {
+        error.value = requestError.response?.data?.message || 'Failed to load patient details.'
       } finally {
         loading.value = false
       }
-    })
+    }
 
-    return { patient, history, tab, showEditModal, loading, formatDate, formatTime, formatCurrency, getStatusColor }
+    const openEditModal = () => {
+      if (!patient.value) return
+      editForm.value = {
+        first_name: patient.value.first_name || '', last_name: patient.value.last_name || '',
+        date_of_birth: patient.value.date_of_birth || '', gender: patient.value.gender || 'other',
+        blood_type: patient.value.blood_type || '', phone: patient.value.phone || '',
+        email: patient.value.email || '', address: patient.value.address || '',
+        emergency_contact_name: patient.value.emergency_contact_name || '',
+        emergency_contact_phone: patient.value.emergency_contact_phone || '',
+        insurance_provider: patient.value.insurance_provider || '',
+        insurance_number: patient.value.insurance_number || '',
+        allergies: patient.value.allergies || '', chronic_conditions: patient.value.chronic_conditions || ''
+      }
+      showEditModal.value = true
+    }
+
+    const closeEditModal = () => { showEditModal.value = false }
+    const savePatient = async () => {
+      saving.value = true
+      try {
+        const { data } = await axios.put(`/api/patients/${patient.value.id}`, editForm.value)
+        patient.value = data
+        showEditModal.value = false
+        toast.success('Patient updated successfully.')
+      } catch (requestError) {
+        toast.error(requestError.response?.data?.message || 'Failed to update patient.')
+      } finally {
+        saving.value = false
+      }
+    }
+
+    onMounted(loadPatient)
+    watch(() => route.params.id, loadPatient)
+
+    return {
+      patient, history, tab, showEditModal, loading, saving, error, editForm,
+      today, bloodTypes, formatDate, formatTime, formatCurrency, getStatusColor,
+      loadPatient, openEditModal, closeEditModal, savePatient
+    }
   }
 }
 </script>
@@ -202,8 +293,14 @@ export default {
 
 .text-muted { color: var(--gray-400); font-size: 12px; }
 .text-danger { color: #ef4444; }
+.edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.edit-grid label { display: grid; gap: 6px; color: var(--gray-600); font-size: 13px; font-weight: 600; }
+.edit-grid .full { grid-column: 1 / -1; }
+.edit-grid input, .edit-grid select, .edit-grid textarea { width: 100%; }
 @media (max-width: 768px) {
   .detail-grid { grid-template-columns: 1fr; }
+  .edit-grid { grid-template-columns: 1fr; }
+  .edit-grid .full { grid-column: auto; }
   .info-grid { grid-template-columns: 1fr; }
   .detail-header { flex-wrap: wrap; gap: 12px; }
   .tabs { overflow-x: auto; white-space: nowrap; }

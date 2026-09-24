@@ -149,7 +149,7 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { buildCheckinPayload, renderQR } from '../utils/qrcode'
 
 export default {
@@ -164,6 +164,7 @@ export default {
     const showPin  = ref(false)
     const copied   = ref(false)
     const qrCanvas = ref(null)
+    let copyTimer = null
 
     const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 
@@ -204,57 +205,67 @@ export default {
       }
     }
 
-    watch(() => [props.visible, props.patient?.access_code], async ([v]) => {
-      if (v) { await nextTick(); drawQr() }
+    watch(() => [props.visible, props.patient?.id, props.patient?.access_code], async ([visible]) => {
+      showPin.value = false
+      copied.value = false
+      if (copyTimer) clearTimeout(copyTimer)
+      if (visible) {
+        await nextTick()
+        drawQr()
+      }
     }, { immediate: true })
 
-    onMounted(() => { if (props.visible) drawQr() })
+    onUnmounted(() => {
+      if (copyTimer) clearTimeout(copyTimer)
+    })
 
     const copyCode = async () => {
       try {
         await navigator.clipboard.writeText(props.patient.access_code || '')
         copied.value = true
-        setTimeout(() => (copied.value = false), 2500)
+        if (copyTimer) clearTimeout(copyTimer)
+        copyTimer = setTimeout(() => (copied.value = false), 2500)
       } catch { /* silent */ }
     }
 
     const printCard = () => {
-      const el = document.getElementById('pac-print-root')
-      if (!el) return
-      const win = window.open('', '_blank', 'width=700,height=600')
-      if (!win) return
+      const source = document.getElementById('pac-print-root')
+      if (!source) return
+      const printWindow = window.open('', '_blank', 'width=700,height=600')
+      if (!printWindow) return
 
-      // Canvas contents are not included in outerHTML. Convert the generated QR
-      // to a data URL before opening the print window so the code remains
-      // scannable on paper.
-      const qrDataUrl = qrCanvas.value?.toDataURL('image/png')
-      const cardMarkup = qrDataUrl
-        ? el.outerHTML.replace(new RegExp('<canvas[^>]*></canvas>', 'i'), `<img class="pac-qr-canvas" width="90" height="90" alt="Patient check-in QR code" src="${qrDataUrl}" />`)
-        : el.outerHTML
+      const card = source.cloneNode(true)
+      const sourceCanvas = source.querySelector('canvas')
+      const printCanvas = card.querySelector('canvas')
+      if (sourceCanvas && printCanvas && qrCanvas.value) {
+        const image = printWindow.document.createElement('img')
+        image.className = 'pac-qr-canvas'
+        image.width = 90
+        image.height = 90
+        image.alt = 'Patient check-in QR code'
+        image.src = qrCanvas.value.toDataURL('image/png')
+        printCanvas.replaceWith(image)
+      }
 
-      win.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Patient Access Card — ${props.patient.first_name} ${props.patient.last_name}</title>
-          <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-            * { margin:0; padding:0; box-sizing:border-box; }
-            body { background:#0d1a2a; display:flex; align-items:center; justify-content:center; min-height:100vh; font-family:Inter,sans-serif; }
-          </style>
-        </head>
-        <body>
-          ${cardMarkup}
-          <script>
-            window.onload = function() {
-              window.print();
-              setTimeout(() => window.close(), 800);
-            }
-          <\/script>
-        </body>
-        </html>
-      `)
-      win.document.close()
+      const componentStyles = [...document.querySelectorAll('style')]
+        .map(style => style.textContent || '')
+        .filter(css => css.includes('.pac-'))
+        .join('\n')
+
+      printWindow.document.open()
+      printWindow.document.write(`<!DOCTYPE html><html><head><title>Patient Access Card</title></head><body><div id="print-root"></div></body></html>`)
+      printWindow.document.close()
+      printWindow.document.title = `Patient Access Card — ${props.patient.first_name || ''} ${props.patient.last_name || ''}`.trim()
+      const style = printWindow.document.createElement('style')
+      style.textContent = `${componentStyles}\n*{box-sizing:border-box}body{background:#0d1a2a;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;font-family:Inter,sans-serif}`
+      printWindow.document.head.appendChild(style)
+      printWindow.document.getElementById('print-root').replaceChildren(card)
+      printWindow.requestAnimationFrame(() => {
+        printWindow.requestAnimationFrame(() => {
+          printWindow.focus()
+          printWindow.print()
+        })
+      })
     }
 
     return { showPin, copied, qrCanvas, today, initials, codeChunks, pinDigits, formatDob, copyCode, printCard }

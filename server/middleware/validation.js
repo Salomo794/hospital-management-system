@@ -10,7 +10,7 @@ const handleValidation = (req, res, next) => {
 
 const validateRegistration = [
   body('email').isEmail().normalizeEmail(),
-  body('password').isLength({ min: 6 }),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
   body('first_name').trim().notEmpty(),
   body('last_name').trim().notEmpty(),
   body('role').isIn(['admin','doctor','nurse','receptionist','pharmacist','lab_technician']),
@@ -22,6 +22,14 @@ const validatePatient = [
   body('last_name').trim().notEmpty(),
   body('date_of_birth').isDate(),
   body('gender').isIn(['male','female','other']),
+  body('blood_type')
+    .optional({ values: 'falsy' })
+    .isIn(['A+','A-','B+','B-','AB+','AB-','O+','O-']),
+  body('email').optional({ values: 'falsy' }).isEmail(),
+  body('date_of_birth').custom(value => {
+    if (new Date(`${value}T00:00:00Z`) > new Date()) throw new Error('date_of_birth cannot be in the future');
+    return true;
+  }),
   // optional() only skips `undefined` by default — the client sends '' for
   // blank fields, which would fail isMobilePhone and block legitimate saves.
   // Use 'falsy' and keep the format check lenient (landlines / local formats).
@@ -37,7 +45,13 @@ const validatePatient = [
 const validateAppointment = [
   body('patient_id').isInt(),
   body('doctor_id').isInt(),
-  body('appointment_date').isDate(),
+  body('appointment_date')
+    .isDate()
+    .custom(value => {
+      if (value < new Date().toISOString().slice(0, 10)) throw new Error('appointment_date cannot be in the past');
+      return true;
+    }),
+  body('type').optional({ values: 'falsy' }).isIn(['consultation','follow_up','emergency','procedure','vaccination','other']),
   body('appointment_time')
     .matches(/^([01]\d|2[0-3]):[0-5]\d$/)
     .withMessage('appointment_time must be a valid 24-hour time (HH:MM)'),

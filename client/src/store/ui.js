@@ -1,22 +1,26 @@
 import { defineStore } from 'pinia'
+import { getStoredItem, setStoredItem } from '../utils/storage'
 
 export const useUiStore = defineStore('ui', {
   state: () => ({
-    dark: localStorage.getItem('theme-dark') === '1',
-    sidebarCollapsed: localStorage.getItem('sidebar-collapsed') === '1'
+    dark: getStoredItem('theme-dark') === '1',
+    sidebarCollapsed: getStoredItem('sidebar-collapsed') === '1'
   }),
   actions: {
     toggleDark() {
       this.dark = !this.dark
-      localStorage.setItem('theme-dark', this.dark ? '1' : '0')
+      setStoredItem('theme-dark', this.dark ? '1' : '0')
       this.applyTheme()
     },
     applyTheme() {
       document.documentElement.setAttribute('data-theme', this.dark ? 'dark' : 'light')
     },
-    setSidebarCollapsed(v) {
-      this.sidebarCollapsed = v
-      localStorage.setItem('sidebar-collapsed', v ? '1' : '0')
+    setSidebarCollapsed(value) {
+      this.sidebarCollapsed = Boolean(value)
+      setStoredItem('sidebar-collapsed', this.sidebarCollapsed ? '1' : '0')
+    },
+    toggleSidebar() {
+      this.setSidebarCollapsed(!this.sidebarCollapsed)
     }
   }
 })

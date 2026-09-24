@@ -11,8 +11,12 @@
           <option value="cancelled">Cancelled</option>
         </select>
         <input type="date" v-model="dateFilter" @change="page = 1; loadAppointments()" />
+        <select v-model="doctorFilter" @change="page = 1; loadAppointments()">
+          <option value="">All Doctors</option>
+          <option v-for="doctor in doctors" :key="doctor.id" :value="doctor.id">Dr. {{ doctor.first_name }} {{ doctor.last_name }}</option>
+        </select>
       </div>
-      <button class="btn btn-primary" @click="showModal = true">+ New Appointment</button>
+      <button class="btn btn-primary" @click="openCreateModal">+ New Appointment</button>
     </div>
 
     <div class="card">
@@ -51,16 +55,13 @@
               <td><span class="badge" :class="'badge-' + getStatusColor(a.status)">{{ a.status?.replace('_', ' ') }}</span></td>
               <td>
                 <div class="btn-group">
-                  <button v-if="a.status === 'scheduled'" class="btn btn-sm btn-success" @click="updateStatus(a.id, 'confirmed')">
-                    Confirm
-                  </button>
-                  <button v-if="a.status === 'confirmed'" class="btn btn-sm btn-primary" @click="updateStatus(a.id, 'in_progress')">
+                  <button v-if="a.status === 'scheduled'" class="btn btn-sm btn-primary" @click="updateStatus(a.id, 'in_progress')">
                     Start
                   </button>
                   <button v-if="a.status === 'in_progress'" class="btn btn-sm btn-success" @click="updateStatus(a.id, 'completed')">
                     Complete
                   </button>
-                  <button v-if="a.status !== 'cancelled' && a.status !== 'completed'" class="btn btn-sm btn-danger" @click="confirmCancel(a.id)">
+                  <button v-if="authStore.can('admin', 'receptionist', 'doctor') && a.status !== 'cancelled' && a.status !== 'completed'" class="btn btn-sm btn-danger" @click="confirmCancel(a.id)">
                     Cancel
                   </button>
                 </div>
@@ -88,11 +89,11 @@
     </div>
 
     <!-- New Appointment Modal -->
-    <div class="modal-overlay" v-if="showModal" @click.self="showModal = false">
+    <div class="modal-overlay" v-if="showModal" @click.self="closeModal">
       <div class="modal">
         <div class="modal-header">
           <h3>Book Appointment</h3>
-          <button class="modal-close" @click="showModal = false">&times;</button>
+          <button class="modal-close" @click="closeModal">&times;</button>
         </div>
         <div class="modal-body">
           <div class="alert alert-danger" v-if="formError">{{ formError }}</div>
@@ -149,7 +150,9 @@
                 <option value="consultation">Consultation</option>
                 <option value="follow_up">Follow-up</option>
                 <option value="emergency">Emergency</option>
-                <option value="telemedicine">Telemedicine</option>
+                <option value="procedure">Procedure</option>
+                <option value="vaccination">Vaccination</option>
+                <option value="other">Other</option>
               </select>
             </div>
             <div class="form-group">
@@ -157,7 +160,7 @@
               <textarea v-model="form.reason" rows="2" placeholder="Reason for visit..."></textarea>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" @click="showModal = false">Cancel</button>
+              <button type="button" class="btn btn-secondary" @click="closeModal">Cancel</button>
               <button type="submit" class="btn btn-primary" :disabled="saving">
                 <div v-if="saving" class="spinner-small"></div>
                 {{ saving ? 'Booking...' : 'Book Appointment' }}
@@ -176,6 +179,7 @@ import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { useConfirm } from '../../store/confirm'
+import { useAuthStore } from '../../store/auth'
 import { formatDate, formatTime, getStatusColor } from '../../utils/helpers'
 
 export default {

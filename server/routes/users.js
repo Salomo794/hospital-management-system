@@ -2,63 +2,84 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { ApiError, asyncHandler, getPagination, parseInteger } = require('../utils/http');
 
-// Get all users (admin only)
-router.get('/', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const { role, search, page = 1, limit = 20 } = req.query;
-    const offset = (page - 1) * limit;
-    let query = 'SELECT id, uuid, email, role, first_name, last_name, phone, is_active, last_login, created_at FROM users WHERE 1=1';
-    const params = [];
-    if (role) { query += ' AND role = ?'; params.push(role); }
-    if (search) { query += ' AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?)'; params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
-    const [countResult] = await pool.query(query.replace('SELECT id, uuid, email, role, first_name, last_name, phone, is_active, last_login, created_at', 'SELECT COUNT(*) as total'), params);
-    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), parseInt(offset));
-    const [rows] = await pool.query(query, params);
-    res.json({ users: rows, total: countResult[0].total, page: parseInt(page), limit: parseInt(limit) });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+const ROLES = ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab_technician'];
 
-// Get single user
-router.get('/:id', authenticate, async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      'SELECT id, uuid, email, role, first_name, last_name, phone, avatar, is_active, created_at FROM users WHERE id = ?',
-      [req.params.id]
-    );
-    if (rows.length === 0) return res.status(404).json({ message: 'User not found' });
-    res.json(rows[0]);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+router.get('/', authenticate, authorize('admin'), asyncHandler(async (req, res) => {
+  const { page, limit, offset } = getPagination(req.query);
+  const { role, search } = req.query;
+  if (role && !ROLES.includes(role)) throw new ApiError(400, 'Invalid role filter');
 
-// Update user
-router.put('/:id', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const { first_name, last_name, phone, role, is_active } = req.body;
-    await pool.query(
-      'UPDATE users SET first_name = COALESCE(?, first_name), last_name = COALESCE(?, last_name), phone = COALESCE(?, phone), role = COALESCE(?, role), is_active = COALESCE(?, is_active) WHERE id = ?',
-      [first_name, last_name, phone, role, is_active, req.params.id]
-    );
-    res.json({ message: 'User updated successfully' });
-  } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+  let where = 'WHERE 1=1';
+  const params = [];
+  if (role) {
+    where += ' AND role = ?';
+    params.push(role);
   }
-});
+  if (search) {
+    where += ' AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?)';
+    const term = `%${String(search).trim()}%`;
+    params.push(term, term, term);
+  }
 
-// Delete user
-router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    await pool.query('UPDATE users SET is_active = FALSE WHERE id = ?', [req.params.id]);
-    res.json({ message: 'User deactivated' });
-  } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+  const [countRows] = await pool.query(`SELECT COUNT(*) as total FROM users ${where}`, params);
+  const [rows] = await pool.query(
+    `SELECT id, uuid, email, role, first_name, last_name, phone, is_active, last_login, created_at, updated_at
+     FROM users ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    [...params, limit, offset]
+  );
+  res.json({ users: rows, total: countRows[0].total, page, limit });
+}));
+
+router.get('/:id', authenticate, asyncHandler(async (req, res) => {
+  const id = parseInteger(req.params.id, 'id', { min: 1 });
+  if (req.user.role !== 'admin' && req.user.id !== id) {
+    throw new ApiError(403, 'You may only view your own user profile.');
   }
-});
+  const [rows] = await pool.query(
+    'SELECT id, uuid, email, role, first_name, last_name, phone, avatar, is_active, created_at FROM users WHERE id = ?',
+    [id]
+  );
+  if (rows.length === 0) throw new ApiError(404, 'User not found');
+  res.json(rows[0]);
+}));
+
+router.put('/:id', authenticate, authorize('admin'), asyncHandler(async (req, res) => {
+  const id = parseInteger(req.params.id, 'id', { min: 1 });
+  const { first_name, last_name, phone, role, is_active } = req.body;
+  if (role !== undefined && !ROLES.includes(role)) throw new ApiError(400, 'Invalid role');
+  if (is_active !== undefined && typeof is_active !== 'boolean') {
+    throw new ApiError(400, 'is_active must be a boolean');
+  }
+  if (id === req.user.id && (is_active === false || (role && role !== 'admin'))) {
+    throw new ApiError(400, 'You cannot deactivate or demote your own account');
+  }
+  if ((first_name !== undefined && !String(first_name).trim()) || (last_name !== undefined && !String(last_name).trim())) {
+    throw new ApiError(400, 'first_name and last_name cannot be empty');
+  }
+
+  const updates = [];
+  const values = [];
+  for (const [field, value] of Object.entries({ first_name, last_name, phone, role, is_active })) {
+    if (value !== undefined) {
+      updates.push(`${field} = ?`);
+      values.push(typeof value === 'string' && value.trim() ? value.trim() : value);
+    }
+  }
+  if (updates.length === 0) throw new ApiError(400, 'No fields to update');
+  values.push(id);
+  const [result] = await pool.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, values);
+  if (result.affectedRows === 0) throw new ApiError(404, 'User not found');
+  res.json({ message: 'User updated successfully' });
+}));
+
+router.delete('/:id', authenticate, authorize('admin'), asyncHandler(async (req, res) => {
+  const id = parseInteger(req.params.id, 'id', { min: 1 });
+  if (id === req.user.id) throw new ApiError(400, 'You cannot deactivate your own account');
+  const [result] = await pool.query('UPDATE users SET is_active = FALSE WHERE id = ?', [id]);
+  if (result.affectedRows === 0) throw new ApiError(404, 'User not found');
+  res.json({ message: 'User deactivated' });
+}));
 
 module.exports = router;

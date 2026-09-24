@@ -138,7 +138,7 @@
       <div class="page-wrap">
         <router-view v-slot="{ Component }">
           <Transition name="page-slide" mode="out-in">
-            <component :is="Component" />
+            <component :is="Component" :key="route.fullPath" />
           </Transition>
         </router-view>
       </div>
@@ -161,19 +161,21 @@
           </div>
 
           <div class="notif-body">
-            <div
+            <button
               v-for="n in notifications"
               :key="n.id"
+              type="button"
               class="notif-item"
               :class="{ 'notif-item--unread': !n.is_read }"
+              @click="openNotification(n)"
             >
-              <div class="notif-type-dot" :class="typeColor(n.type)" />
-              <div class="notif-content">
-                <div class="notif-item-title">{{ n.title }}</div>
-                <div class="notif-item-msg">{{ n.message }}</div>
-                <div class="notif-item-time">{{ relativeTime(n.created_at) }}</div>
-              </div>
-            </div>
+              <span class="notif-type-dot" :class="typeColor(n.type)" />
+              <span class="notif-content">
+                <span class="notif-item-title">{{ n.title }}</span>
+                <span class="notif-item-msg">{{ n.message }}</span>
+                <span class="notif-item-time">{{ relativeTime(n.created_at) }}</span>
+              </span>
+            </button>
 
             <div class="notif-empty" v-if="notifications.length === 0">
               <span class="notif-empty-icon" v-html="icons.bellBig" />
@@ -251,7 +253,11 @@ export default {
     const authStore  = useAuthStore()
     const uiStore    = useUiStore()
 
-    const collapsed      = ref(false)
+    const collapsed = computed({
+      get: () => uiStore.sidebarCollapsed,
+      set: value => uiStore.setSidebarCollapsed(value)
+    })
+    const clockTick = ref(Date.now())
     const mobileOpen     = ref(false)
     const dropdownOpen   = ref(false)
     const panelOpen      = ref(false)
@@ -259,34 +265,37 @@ export default {
     const unreadCount    = ref(0)
     const isMobile       = ref(window.innerWidth < 768)
     let   notifTimer     = null
+    let   clockTimer     = null
 
     /* ── nav sections ── */
     const navSections = computed(() => {
-      const isAdmin = authStore.userRole === 'admin'
-      return [
+      const sections = [
         { title: 'Overview', items: [
           { to: '/dashboard', label: 'Dashboard', icon: icons.dashboard, exact: true }
         ]},
         { title: 'Clinical', items: [
-          { to: '/patients',     label: 'Patients',        icon: icons.patients },
-          { to: '/doctors',      label: 'Doctors',         icon: icons.doctors },
-          { to: '/appointments', label: 'Appointments',    icon: icons.appointments },
-          { to: '/emr',          label: 'Medical Records', icon: icons.records },
+          { to: '/patients', label: 'Patients', icon: icons.patients, roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+          { to: '/doctors', label: 'Doctors', icon: icons.doctors },
+          { to: '/appointments', label: 'Appointments', icon: icons.appointments, roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+          { to: '/emr', label: 'Medical Records', icon: icons.records, roles: ['admin', 'doctor', 'nurse'] }
         ]},
         { title: 'Departments', items: [
-          { to: '/pharmacy',   label: 'Pharmacy',    icon: icons.pharmacy },
-          { to: '/ward',       label: 'Wards & Beds',icon: icons.ward },
-          { to: '/laboratory', label: 'Laboratory',  icon: icons.laboratory },
-          { to: '/billing',    label: 'Billing',     icon: icons.billing },
+          { to: '/pharmacy', label: 'Pharmacy', icon: icons.pharmacy, roles: ['admin', 'pharmacist'] },
+          { to: '/ward', label: 'Wards & Beds', icon: icons.ward, roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+          { to: '/laboratory', label: 'Laboratory', icon: icons.laboratory, roles: ['admin', 'doctor', 'nurse', 'lab_technician'] },
+          { to: '/billing', label: 'Billing', icon: icons.billing, roles: ['admin', 'receptionist'] }
         ]},
         { title: 'Insights', items: [
-          { to: '/reports',      label: 'Reports',      icon: icons.reports },
-          { to: '/ai-assistant', label: 'AI Assistant', icon: icons.ai },
+          { to: '/reports', label: 'Reports', icon: icons.reports, roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+          { to: '/ai-assistant', label: 'AI Assistant', icon: icons.ai }
         ]},
-        ...(isAdmin ? [{ title: 'Admin', items: [
-          { to: '/users', label: 'Users', icon: icons.users, exact: true }
-        ]}] : [])
+        { title: 'Admin', items: [
+          { to: '/users', label: 'Users', icon: icons.users, exact: true, roles: ['admin'] }
+        ]}
       ]
+      return sections
+        .map(section => ({ ...section, items: section.items.filter(item => !item.roles || authStore.can(...item.roles)) }))
+        .filter(section => section.items.length > 0)
     })
 
     const currentMeta = computed(() =>
@@ -295,9 +304,10 @@ export default {
     )
     const pageTitle   = computed(() => currentMeta.value.label)
     const pageSection = computed(() => currentMeta.value.section)
-    const todayLabel  = computed(() =>
-      new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
-    )
+    const todayLabel  = computed(() => {
+      void clockTick.value
+      return new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    })
 
     const isActive = item => item.exact ? route.path === item.to : route.path.startsWith(item.to)
 
@@ -338,6 +348,22 @@ export default {
       } catch { /* silent */ }
     }
 
+    const openNotification = async notification => {
+      panelOpen.value = false
+      if (!notification.is_read) {
+        try {
+          await axios.put(`/api/notifications/${notification.id}/read`)
+          notification.is_read = 1
+          unreadCount.value = Math.max(unreadCount.value - 1, 0)
+        } catch {
+          return
+        }
+      }
+      if (typeof notification.link === 'string' && notification.link.startsWith('/')) {
+        router.push(notification.link)
+      }
+    }
+
     const logout = () => { authStore.logout(); router.push('/login') }
 
     const onResize = () => { isMobile.value = window.innerWidth < 768; if (window.innerWidth >= 768) mobileOpen.value = false }
@@ -350,11 +376,13 @@ export default {
     onMounted(() => {
       loadNotifications()
       notifTimer = setInterval(loadNotifications, 30000)
+      clockTimer = setInterval(() => { clockTick.value = Date.now() }, 60000)
       window.addEventListener('resize', onResize)
       document.addEventListener('click', onDocClick)
     })
     onUnmounted(() => {
       clearInterval(notifTimer)
+      clearInterval(clockTimer)
       window.removeEventListener('resize', onResize)
       document.removeEventListener('click', onDocClick)
     })
@@ -365,7 +393,7 @@ export default {
       navSections, pageTitle, pageSection, todayLabel,
       isActive, toggleSidebar, closeMobile,
       formatRole, typeColor, relativeTime,
-      loadNotifications, markAllRead, logout,
+      loadNotifications, markAllRead, openNotification, logout,
       icons,
     }
   }
@@ -727,8 +755,9 @@ export default {
 .notif-body { flex: 1; overflow-y: auto; }
 
 .notif-item {
-  display: flex; gap: 12px; padding: 13px 20px;
-  border-bottom: 1px solid var(--gray-100);
+  width: 100%; display: flex; gap: 12px; padding: 13px 20px;
+  border: 0; border-bottom: 1px solid var(--gray-100); background: transparent;
+  text-align: left; cursor: pointer;
   transition: background .15s;
 }
 .notif-item:hover { background: var(--gray-50); }
@@ -742,10 +771,10 @@ export default {
 .dot-orange { background: #ea580c; }
 .dot-gray   { background: var(--gray-400); }
 
-.notif-content { min-width: 0; }
-.notif-item-title { font-size: 13px; font-weight: 600; color: var(--gray-800); }
-.notif-item-msg   { font-size: 12.5px; color: var(--gray-600); margin-top: 2px; line-height: 1.5; }
-.notif-item-time  { font-size: 11px; color: var(--gray-400); margin-top: 5px; }
+.notif-content { min-width: 0; display: block; }
+.notif-item-title { display: block; font-size: 13px; font-weight: 600; color: var(--gray-800); }
+.notif-item-msg   { display: block; font-size: 12.5px; color: var(--gray-600); margin-top: 2px; line-height: 1.5; }
+.notif-item-time  { display: block; font-size: 11px; color: var(--gray-400); margin-top: 5px; }
 
 .notif-empty {
   padding: 60px 30px; text-align: center;

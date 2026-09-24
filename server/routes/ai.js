@@ -12,13 +12,18 @@ router.post('/chat', authenticate, async (req, res) => {
       return res.status(400).json({ response: 'Please enter a question.', data: null });
     }
     const lowerMsg = message.toLowerCase();
+    const hospitalOverviewRequested = lowerMsg.includes('overview') || lowerMsg.includes('command center') || lowerMsg.includes('live status') || lowerMsg.includes('hospital status');
+    const clinicalRoles = ['admin', 'doctor', 'nurse', 'receptionist', 'lab_technician'];
     let response = '';
     let data = null;
 
     // Patient search
     if (lowerMsg.includes('find patient') || lowerMsg.includes('search patient') || lowerMsg.includes('patient named')) {
-      const nameMatch = message.match(/(?:patient\s+named?\s+|find\s+patient\s+)?(.+)/i);
-      const searchName = nameMatch ? nameMatch[1].trim() : message.replace(/find|search|patient|named/gi, '').trim();
+      if (!clinicalRoles.includes(req.user.role)) {
+        return res.status(403).json({ response: 'You do not have permission to search patient records.', data: null });
+      }
+      const nameMatch = message.match(/(?:find|search)\s+patient(?:\s+named)?\s+(.+)|patient\s+named?\s+(.+)/i);
+      const searchName = (nameMatch?.[1] || nameMatch?.[2] || message.replace(/find|search|patient|named/gi, '')).trim();
       const [patients] = await pool.query(
         `SELECT id, mrn, first_name, last_name, date_of_birth, gender, phone, blood_type, status
          FROM patients WHERE first_name LIKE ? OR last_name LIKE ? OR first_name || ' ' || last_name LIKE ? OR mrn LIKE ? LIMIT 5`,
@@ -40,8 +45,8 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     // Doctor search
     else if (lowerMsg.includes('find doctor') || lowerMsg.includes('which doctor') || lowerMsg.includes('doctor named')) {
-      const nameMatch = message.match(/(?:doctor\s+named?\s+|find\s+doctor\s+)?(.+)/i);
-      const searchName = nameMatch ? nameMatch[1].trim() : message.replace(/find|search|doctor|named/gi, '').trim();
+      const nameMatch = message.match(/(?:find|search)\s+doctor(?:\s+named)?\s+(.+)|doctor\s+named?\s+(.+)/i);
+      const searchName = (nameMatch?.[1] || nameMatch?.[2] || message.replace(/find|search|doctor|named/gi, '')).trim();
       const [doctors] = await pool.query(
         `SELECT u.first_name, u.last_name, s.name as specialty, dp.license_number, dp.consultation_fee
          FROM users u LEFT JOIN doctor_profiles dp ON u.id = dp.user_id
@@ -91,11 +96,19 @@ router.post('/chat', authenticate, async (req, res) => {
       }
     }
     // Patient summary
-    else if (lowerMsg.includes('summary') || lowerMsg.includes('overview') || lowerMsg.includes('patient record')) {
+    else if (!hospitalOverviewRequested && (lowerMsg.includes('summary') || lowerMsg.includes('overview') || lowerMsg.includes('patient record'))) {
+      if (!clinicalRoles.includes(req.user.role)) {
+        return res.status(403).json({ response: 'You do not have permission to view patient summaries.', data: null });
+      }
       const idMatch = message.match(/\d+/);
       if (idMatch) {
         const patientId = parseInt(idMatch[0]);
-        const [patient] = await pool.query('SELECT * FROM patients WHERE id = ?', [patientId]);
+        const [patient] = await pool.query(
+          `SELECT id, mrn, first_name, last_name, date_of_birth, gender, blood_type, phone,
+                  allergies, chronic_conditions, insurance_provider
+           FROM patients WHERE id = ?`,
+          [patientId]
+        );
         if (patient.length > 0) {
           const p = patient[0];
           const [records] = await pool.query('SELECT COUNT(*) as count FROM medical_records WHERE patient_id = ?', [patientId]);
@@ -136,6 +149,9 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     // Revenue query
     else if (lowerMsg.includes('revenue') || lowerMsg.includes('income') || lowerMsg.includes('earnings')) {
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({ response: 'Only administrators can view revenue data.', data: null });
+      }
       const [today] = await pool.query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE DATE(payment_date) = date('now')");
       const [month] = await pool.query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE CAST(strftime('%m', payment_date) AS INTEGER) = CAST(strftime('%m', 'now') AS INTEGER) AND CAST(strftime('%Y', payment_date) AS INTEGER) = CAST(strftime('%Y', 'now') AS INTEGER)");
       response = 'Revenue summary:';
@@ -254,6 +270,9 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     // Patient allergies
     else if (lowerMsg.includes('allergy') || lowerMsg.includes('allergies')) {
+      if (!clinicalRoles.includes(req.user.role)) {
+        return res.status(403).json({ response: 'You do not have permission to view allergy profiles.', data: null });
+      }
       const nameMatch = message.match(/allerg(?:y|ies)\s*(?:of|for)?\s+(.+)/i);
       const searchName = nameMatch ? nameMatch[1].trim() : '';
       if (searchName) {
@@ -278,6 +297,9 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     // Abnormal / critical lab results
     else if (lowerMsg.includes('abnormal') || lowerMsg.includes('critical result') || lowerMsg.includes('critical lab')) {
+      if (!clinicalRoles.includes(req.user.role)) {
+        return res.status(403).json({ response: 'You do not have permission to view lab results.', data: null });
+      }
       const [rows] = await pool.query(
         `SELECT li.result_value, li.reference_range, li.notes, li.result_date,
            lt.name as test_name, p.first_name, p.last_name, p.mrn

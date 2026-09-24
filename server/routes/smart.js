@@ -5,9 +5,9 @@ const { authenticate } = require('../middleware/auth');
 const { WARDS: WARD_CAPACITY, wardCapacityOrDefault } = require('../config/wards');
 
 function isoDate(offsetDays = 0) {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().split('T')[0];
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+  return date.toISOString().slice(0, 10);
 }
 
 function weekDayName(dateStr) {
@@ -76,8 +76,8 @@ router.get('/forecast', authenticate, async (req, res) => {
       ['discharged', today]
     );
     const [admitted7] = await pool.query(
-      'SELECT COUNT(*) as count FROM admissions WHERE status = ?',
-      ['admitted']
+      "SELECT COUNT(*) as count FROM admissions WHERE date(admission_date) >= date(?, '-7 days')",
+      [today]
     );
     const bedForecast = {
       occupied: totalOccupied,
@@ -90,11 +90,16 @@ router.get('/forecast', authenticate, async (req, res) => {
     // 3) Stock forecasting — days of supply + reorder suggestions
     const [stock] = await pool.query(
       `SELECT m.id, m.name, m.generic_name, m.stock_quantity, m.min_stock_level, m.max_stock_level, m.unit, m.cost_price,
-         COALESCE(SUM(pi.quantity), 0) as dispensed_30d
+              COALESCE((
+                SELECT SUM(it.quantity)
+                FROM inventory_transactions it
+                WHERE it.medicine_id = m.id
+                  AND it.transaction_type = 'dispense'
+                  AND date(it.created_at) >= date('now', '-30 days')
+              ), 0) AS dispensed_30d
        FROM medicines m
-       LEFT JOIN prescription_items pi ON pi.medicine_id = m.id AND pi.dispensed = 1 AND pi.dispensed_date >= date('now', '-30 days')
-       WHERE m.is_active = TRUE
-       GROUP BY m.id ORDER BY m.stock_quantity ASC LIMIT 12`
+       WHERE m.is_active = 1
+       ORDER BY m.stock_quantity ASC LIMIT 12`
     );
     const stockForecast = stock.map(s => {
       const dailyConsumption = s.dispensed_30d / 30;
@@ -208,6 +213,9 @@ router.get('/command-center', authenticate, async (req, res) => {
     const [lowStock] = await pool.query(
       "SELECT name, stock_quantity, min_stock_level FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1 ORDER BY stock_quantity ASC LIMIT 8"
     );
+    const [lowStockCountRows] = await pool.query(
+      "SELECT COUNT(*) AS count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1"
+    );
     const [abnormalLabs] = await pool.query(
       `SELECT li.result_value, lt.name as test_name, p.first_name, p.last_name, p.mrn
        FROM lab_order_items li
@@ -216,12 +224,20 @@ router.get('/command-center', authenticate, async (req, res) => {
        JOIN patients p ON lo.patient_id = p.id
        WHERE li.is_abnormal = 1 ORDER BY li.id DESC LIMIT 8`
     );
+    const [abnormalLabCountRows] = await pool.query(
+      `SELECT COUNT(*) AS count FROM lab_order_items li
+       JOIN lab_orders lo ON li.lab_order_id = lo.id
+       WHERE li.is_abnormal = 1 AND lo.status = 'completed'`
+    );
     const [overdueBills] = await pool.query(
       `SELECT b.id, b.bill_number, b.net_amount, b.paid_amount, b.due_date,
          p.first_name, p.last_name
        FROM bills b JOIN patients p ON b.patient_id = p.id
        WHERE b.payment_status IN ('pending','partial')
        ORDER BY b.due_date ASC LIMIT 8`
+    );
+    const [overdueBillCountRows] = await pool.query(
+      "SELECT COUNT(*) AS count FROM bills WHERE payment_status IN ('pending','partial')"
     );
 
     const alerts = [
@@ -249,9 +265,9 @@ router.get('/command-center', authenticate, async (req, res) => {
       bedTotal: beds.reduce((s, b) => s + b.total, 0),
       bedOccupied: beds.reduce((s, b) => s + b.occupied, 0),
       alerts,
-      lowStockCount: lowStock.length,
-      abnormalLabCount: abnormalLabs.length,
-      overdueBillCount: overdueBills.length,
+      lowStockCount: lowStockCountRows[0].count,
+      abnormalLabCount: abnormalLabCountRows[0].count,
+      overdueBillCount: overdueBillCountRows[0].count,
       staff
     });
   } catch (error) {
