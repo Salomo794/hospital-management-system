@@ -54,7 +54,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
       },
       recentAppointments: canViewClinical ? recentAppointments : [],
       recentPatients: canViewClinical ? recentPatients : [],
-      weeklyStats
+      weeklyStats: canViewClinical ? weeklyStats : []
     });
   } catch (error) {
     console.error(error);

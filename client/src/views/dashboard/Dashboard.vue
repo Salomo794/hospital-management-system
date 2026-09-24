@@ -200,7 +200,7 @@
 </template>
 
 <script>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { useAuthStore } from '../../store/auth'
@@ -219,14 +219,18 @@ export default {
     const recentPatients     = ref([])
     const weeklyStats        = ref([])
     const loading            = ref(true)
+    const clockTick = ref(Date.now())
+    let clockTimer = null
 
     const greeting = computed(() => {
+      void clockTick.value
       const h = new Date().getHours()
       return h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening'
     })
     const firstName = computed(() => authStore.user?.first_name || 'Doctor')
 
     onMounted(async () => {
+      clockTimer = setInterval(() => { clockTick.value = Date.now() }, 60000)
       try {
         const [{ data }, insRes] = await Promise.all([
           axios.get('/api/reports/dashboard'),
@@ -242,6 +246,10 @@ export default {
       } finally {
         loading.value = false
       }
+    })
+
+    onUnmounted(() => {
+      if (clockTimer) clearInterval(clockTimer)
     })
 
     const statCards = computed(() => [
