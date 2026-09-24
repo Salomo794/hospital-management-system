@@ -223,6 +223,7 @@ export default {
     const form = ref(defaultForm())
 
     const openCreateModal = (patient = null) => {
+      slotRequestId += 1
       today.value = new Date().toISOString().slice(0, 10)
       form.value = defaultForm()
       if (authStore.userRole === 'doctor') form.value.doctor_id = authStore.user?.id || ''
@@ -305,20 +306,23 @@ export default {
     }
 
     const loadSlots = async () => {
-      if (!form.value.doctor_id || !form.value.appointment_date) {
-        availableSlots.value = []
-        form.value.appointment_time = ''
+      const requestId = ++slotRequestId
+      const doctorId = form.value.doctor_id
+      const appointmentDate = form.value.appointment_date
+      availableSlots.value = []
+      form.value.appointment_time = ''
+      if (!doctorId || !appointmentDate) {
+        loadingSlots.value = false
         return
       }
       loadingSlots.value = true
-      form.value.appointment_time = ''
       try {
-        const { data } = await axios.get(`/api/appointments/slots/${form.value.doctor_id}`, { params: { date: form.value.appointment_date } })
-        availableSlots.value = data.slots
+        const { data } = await axios.get(`/api/appointments/slots/${doctorId}`, { params: { date: appointmentDate } })
+        if (requestId === slotRequestId) availableSlots.value = data.slots
       } catch (e) {
-        toast.error('Failed to load available slots')
+        if (requestId === slotRequestId) toast.error('Failed to load available slots')
       } finally {
-        loadingSlots.value = false
+        if (requestId === slotRequestId) loadingSlots.value = false
       }
     }
 

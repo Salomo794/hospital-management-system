@@ -15,13 +15,13 @@
     <div v-if="view === 'medicines'">
       <div class="search-filters">
         <input type="text" v-model="search" placeholder="Search medicines..." @input="debouncedSearch" />
-        <select v-model="categoryFilter" @change="loadMedicines">
+        <select v-model="categoryFilter" @change="page = 1; loadMedicines()">
           <option value="">All Categories</option>
           <option>Analgesic</option><option>Antibiotic</option><option>Antihistamine</option>
           <option>Cardiovascular</option><option>Diabetes</option><option>Gastrointestinal</option>
           <option>Respiratory</option><option>Vitamins</option><option>Other</option>
         </select>
-        <label class="checkbox-label"><input type="checkbox" v-model="lowStockOnly" @change="loadMedicines" /> Low Stock Only</label>
+        <label class="checkbox-label"><input type="checkbox" v-model="lowStockOnly" @change="page = 1; loadMedicines()" /> Low Stock Only</label>
       </div>
       <div class="card">
         <div v-if="loadingMedicines" class="loading-container">
@@ -413,26 +413,43 @@ export default {
       }
     }
 
-    const noAllergy = (text) => {
-      if (!text) return true
-      return ['none', 'n/a', 'na', 'nil', 'nkda'].includes(String(text).trim().toLowerCase())
-    }
+    const noAllergy = text => !hasAllergy(text)
 
+    let medicinesRequestId = 0
     const loadMedicines = async () => {
+      const requestId = ++medicinesRequestId
       loadingMedicines.value = true
       try {
-        const params = {}
+        const params = { page: page.value, limit: limit.value }
         if (search.value) params.search = search.value
         if (categoryFilter.value) params.category = categoryFilter.value
         if (lowStockOnly.value) params.low_stock = 'true'
         const { data } = await axios.get('/api/pharmacy/medicines', { params })
+        if (requestId !== medicinesRequestId) return
         medicines.value = data.medicines
+        total.value = data.total
       } catch (e) {
         toast.error('Failed to load medicines')
       } finally {
-        loadingMedicines.value = false
+        if (requestId === medicinesRequestId) loadingMedicines.value = false
       }
     }
+
+    const debouncedSearch = debounce(() => {
+      page.value = 1
+      loadMedicines()
+    })
+
+    const openAddModal = () => {
+      medForm.value = {
+        name: '', generic_name: '', category: 'Analgesic', manufacturer: '',
+        unit_price: 0, cost_price: 0, stock_quantity: 0, unit: 'tablet',
+        min_stock_level: 10, expiry_date: ''
+      }
+      showAddModal.value = true
+    }
+
+    const closeAddModal = () => { showAddModal.value = false }
 
     const loadAlerts = async () => {
       loadingAlerts.value = true
