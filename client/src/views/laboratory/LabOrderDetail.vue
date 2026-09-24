@@ -75,14 +75,15 @@
                   <input
                     v-model="item.result_value"
                     :disabled="order.status === 'completed'"
-                    placeholder="Enter result..."
+                    required
+                     placeholder="Enter result..."
                   />
                 </div>
                 <div class="form-group">
                   <label>Unit</label>
                   <input
                     v-model="item.result_unit"
-                    :disabled="order.status === 'completed'"
+                    :disabled="true"
                     placeholder="e.g. mg/dL"
                   />
                 </div>
@@ -90,7 +91,7 @@
                   <label>Reference Range</label>
                   <input
                     v-model="item.reference_range"
-                    :disabled="order.status === 'completed'"
+                    :disabled="true"
                     placeholder="e.g. 70-100"
                   />
                 </div>
@@ -112,7 +113,7 @@
     </div>
 
     <div class="action-bar" v-if="order.status !== 'completed'">
-      <button class="btn btn-primary" @click="submitResults" :disabled="saving">
+      <button class="btn btn-primary" @click="submitResults" :disabled="saving || !resultsComplete">
         <span v-if="saving" class="btn-spinner"></span>
         {{ saving ? 'Submitting...' : 'Submit Results' }}
       </button>
@@ -133,7 +134,7 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
@@ -147,7 +148,7 @@ export default {
     const toast = useToast()
     const order = ref(null)
     const saving = ref(false)
-    const loading = ref(false)
+    const loading = ref(true)
     const error = ref('')
 
     const priorityClass = (priority) => {
@@ -156,22 +157,47 @@ export default {
       return 'badge-info'
     }
 
-    const isAbnormal = (item) => {
-      if (!item.result_value || !item.reference_range) return false
-      const val = parseFloat(item.result_value)
-      if (isNaN(val)) return false
-      const match = item.reference_range.match(/([\d.]+)\s*[-–]\s*([\d.]+)/)
-      if (!match) return false
-      const low = parseFloat(match[1])
-      const high = parseFloat(match[2])
-      return val < low || val > high
+    const parseClientNumber = (value) => {
+      const match = String(value || '').trim().replace(/,/g, '').match(/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)/)
+      return match ? Number(match[0]) : null
     }
 
+    const isAbnormal = (item) => {
+      if (item.is_abnormal !== undefined && item.is_abnormal !== null && item.result_value) {
+        return Boolean(Number(item.is_abnormal))
+      }
+      const value = parseClientNumber(item.result_value)
+      const range = String(item.reference_range || '').replace(/[–—]/g, '-')
+      if (value === null || !range) return false
+      return range.split(/[,;\n]+/).some(component => {
+        const part = component.trim()
+        const pair = part.match(/(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)/)
+        if (pair) return value < Math.min(Number(pair[1]), Number(pair[2])) || value > Math.max(Number(pair[1]), Number(pair[2]))
+        const inequality = part.match(/(<=|>=|<|>)\s*(-?\d+(?:\.\d+)?)/)
+        if (!inequality) return false
+        const threshold = Number(inequality[2])
+        if (inequality[1] === '<') return value >= threshold
+        if (inequality[1] === '<=') return value > threshold
+        if (inequality[1] === '>') return value <= threshold
+        return value < threshold
+      })
+    }
+
+    const resultsComplete = computed(() => Boolean(order.value?.items?.length) && order.value.items.every(item => String(item.result_value || '').trim()))
+
     const submitResults = async () => {
+      if (!order.value?.items?.length || !resultsComplete.value) {
+        toast.error('Enter a result for every test before submitting.')
+        return
+      }
       saving.value = true
       try {
         await axios.put(`/api/laboratory/orders/${route.params.id}/results`, {
-          items: order.value.items
+          items: order.value.items.map(item => ({
+            id: item.id,
+            result_value: String(item.result_value).trim(),
+            notes: item.notes || null
+          }))
         })
         toast.success('Lab results submitted successfully')
         router.push('/laboratory')
@@ -197,7 +223,7 @@ export default {
 
     return {
       order, saving, loading, error,
-      priorityClass, isAbnormal,
+      priorityClass, isAbnormal, resultsComplete,
       formatDate, getStatusColor, submitResults
     }
   }

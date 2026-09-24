@@ -328,7 +328,7 @@ export default {
       formError.value = ''
       try {
         await axios.post('/api/appointments', form.value)
-        showModal.value = false
+        closeModal()
         toast.success('Appointment booked successfully')
         form.value = defaultForm()
         patientSearch.value = ''
@@ -364,20 +364,31 @@ export default {
     const clearFilters = () => {
       statusFilter.value = ''
       dateFilter.value = ''
+      doctorFilter.value = ''
       page.value = 1
       loadAppointments()
     }
 
     onMounted(async () => {
+      doctorFilter.value = route.query.doctor_id ? String(route.query.doctor_id) : ''
       await Promise.all([loadAppointments(), loadDoctors()])
+
+      const appointmentId = route.query.appointment_id
+      if (appointmentId) {
+        try {
+          const { data } = await axios.get(`/api/appointments/${encodeURIComponent(appointmentId)}`)
+          appointments.value = [data]
+          total.value = 1
+        } catch {
+          toast.error('Unable to load the selected appointment')
+        }
+      }
 
       const patientId = route.query.patient_id
       if (!patientId) return
       try {
         const { data } = await axios.get(`/api/patients/${encodeURIComponent(patientId)}`)
-        form.value.patient_id = data.id
-        form.value.patientName = `${data.first_name} ${data.last_name}`
-        showModal.value = true
+        openCreateModal(data)
       } catch (e) {
         toast.error('Unable to load the selected patient')
       }
@@ -385,11 +396,11 @@ export default {
 
     return {
       appointments, doctors, total, page, limit,
-      statusFilter, dateFilter, showModal, saving, formError,
+      statusFilter, dateFilter, doctorFilter, showModal, saving, formError, authStore,
       patientSearch, patientResults, availableSlots, today, form,
       loadingAppointments, loadingSlots, searchingPatients,
       loadAppointments, searchPatients, selectPatient, clearPatient,
-      loadSlots, createAppointment, updateStatus, confirmCancel, clearFilters,
+      loadSlots, openCreateModal, closeModal, createAppointment, updateStatus, confirmCancel, clearFilters,
       formatDate, formatTime, getStatusColor
     }
   }
