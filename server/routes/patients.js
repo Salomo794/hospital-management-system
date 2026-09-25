@@ -13,7 +13,7 @@ const BLOOD_TYPES = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 const PATIENT_STATUSES = ['active', 'inactive', 'deceased'];
 
 function withoutPortalPin(patient) {
-  const { portal_pin, ...safePatient } = patient;
+  const { portal_pin, portal_session_version, ...safePatient } = patient;
   return {
     ...safePatient,
     portal_pin_provisioned: !!portal_pin,
@@ -140,7 +140,12 @@ router.post('/:id/portal-pin', authenticate, authorize('admin', 'receptionist'),
   if (patient.length === 0) throw new ApiError(404, 'Active patient not found');
   const plainPin = generatePortalPin();
   const hashedPin = await bcrypt.hash(plainPin, 12);
-  await pool.query('UPDATE patients SET portal_pin = ? WHERE id = ?', [hashedPin, id]);
+  await pool.query(
+    `UPDATE patients
+     SET portal_pin = ?, portal_session_version = portal_session_version + 1
+     WHERE id = ?`,
+    [hashedPin, id]
+  );
   res.json({ message: 'Portal PIN reset successfully', plain_pin: plainPin });
 }));
 

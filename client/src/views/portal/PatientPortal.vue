@@ -15,7 +15,7 @@
         <form @submit.prevent="login">
           <label>MRN or access code<input v-model.trim="loginForm.identifier" autocomplete="username" required /></label>
           <label>Portal PIN<input v-model="loginForm.portal_pin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="current-password" required /></label>
-          <div v-if="error" class="error-message">{{ error }}</div>
+          <div v-if="error" class="error-message" role="alert">{{ error }}</div>
           <button class="btn btn-primary btn-block" :disabled="loggingIn">{{ loggingIn ? 'Signing in…' : 'Sign in' }}</button>
         </form>
       </section>
@@ -40,9 +40,9 @@
 
         <div v-if="loading" class="loading-state"><div class="spinner" /> Loading your health information…</div>
 
-        <section v-else-if="error" class="portal-card load-error-card">
+        <section v-else-if="error" class="portal-card load-error-card" role="alert">
           <h2>Unable to load your information</h2>
-          <p>{{ error }}</p>
+          <p aria-live="assertive">{{ error }}</p>
           <button class="btn btn-primary" :disabled="loading" @click="loadPortalData">Retry</button>
         </section>
 
@@ -94,11 +94,13 @@
                 </button>
               </div>
               <span v-else-if="isBillCancelled(bill)" class="badge badge-gray">Cancelled</span>
-              <span v-else-if="!paymentsEnabled" class="badge badge-gray">Payment unavailable</span>
+              <span v-else-if="!paymentsEnabled && outstanding(bill) > 0" class="badge badge-gray">Payment unavailable</span>
               <span v-else class="badge badge-success">Paid</span>
               <div
                 v-if="paymentMessages[bill.id]"
                 :class="paymentMessageTypes[bill.id] === 'error' ? 'error-message' : 'success-message'"
+                :role="paymentMessageTypes[bill.id] === 'error' ? 'alert' : 'status'"
+                :aria-live="paymentMessageTypes[bill.id] === 'error' ? 'assertive' : 'polite'"
               >
                 {{ paymentMessages[bill.id] }}
               </div>
@@ -117,7 +119,7 @@
           <label>Visit purpose<input v-model.trim="checkinForm.purpose" placeholder="Optional" /></label>
           <button class="btn btn-secondary" :disabled="checkingIn">{{ checkingIn ? 'Checking in…' : 'Check in' }}</button>
         </form>
-        <div v-if="checkinResult" class="checkin-result">
+        <div v-if="checkinResult" class="checkin-result" role="status" aria-live="polite">
           <strong>{{ checkinResult.message }}</strong>
           <span v-if="checkinResult.queue_position">Queue position: {{ checkinResult.queue_position }}</span>
         </div>
@@ -158,6 +160,7 @@ export default {
     const paymentMessages = reactive({})
     const paymentMessageTypes = reactive({})
     const paymentRequestIds = new Map()
+    const paymentRefreshState = new Map()
     const paymentControllers = new Map()
     const tabs = [
       { id: 'appointments', label: 'Appointments' },
@@ -191,6 +194,7 @@ export default {
       clearObject(paymentMessages)
       clearObject(paymentMessageTypes)
       paymentRequestIds.clear()
+      paymentRefreshState.clear()
       paymentsEnabled.value = true
       error.value = ''
     }
@@ -210,6 +214,7 @@ export default {
         checkinController.abort()
         checkinController = null
       }
+      checkingIn.value = false
       paymentControllers.forEach(controller => controller.abort())
       paymentControllers.clear()
       if (loginController) {
@@ -224,6 +229,17 @@ export default {
     }
 
     const outstanding = bill => Math.max(Number(bill.net_amount || 0) - Number(bill.paid_amount || 0), 0)
+    const clearConfirmedPaymentKey = billId => {
+      const refreshState = paymentRefreshState.get(billId)
+      if (!refreshState) return
+      const refreshedBill = bills.value.find(candidate => String(candidate.id) === String(billId))
+      if (!refreshedBill) return
+      const expectedBalance = Math.max(refreshState.previousOutstanding - refreshState.amount, 0)
+      if (outstanding(refreshedBill) <= expectedBalance + 0.005) {
+        paymentRequestIds.delete(billId)
+        paymentRefreshState.delete(billId)
+      }
+    }
     const isBillCancelled = bill => String(bill.payment_status || '').toLowerCase() === 'cancelled'
     const canPayBill = bill => paymentsEnabled.value && !isBillCancelled(bill) && outstanding(bill) > 0
     const isPayingBill = billId => !!paymentPending[billId]
@@ -252,7 +268,7 @@ export default {
 
     const loadPortalData = async () => {
       const requestToken = token.value
-      if (!requestToken || componentUnmounted) return
+      if (!requestToken || componentUnmounted) return false
 
       abortPortalData()
       const requestSession = sessionGeneration
@@ -295,7 +311,9 @@ export default {
         }
         clearObject(paymentAmounts)
         bills.value.forEach(bill => { paymentAmounts[bill.id] = outstanding(bill) })
+        paymentRefreshState.forEach((_refreshState, billId) => clearConfirmedPaymentKey(billId))
         setStoredJson('portal-patient', patient.value)
+        return true
       } catch (requestError) {
         if (
           componentUnmounted ||
@@ -306,6 +324,7 @@ export default {
         ) return
         if (requestError.response?.status === 401) logout()
         else error.value = requestError.response?.data?.message || 'Unable to load your portal information.'
+        return false
       } finally {
         if (
           !componentUnmounted &&
@@ -395,7 +414,8 @@ export default {
       if (!requestToken || paymentPending[billId] || !canPayBill(bill)) return
 
       const amount = Number(paymentAmounts[billId])
-      if (!Number.isFinite(amount) || amount <= 0 || amount > outstanding(bill)) {
+      const previousOutstanding = outstanding(bill)
+      if (!Number.isFinite(amount) || amount <= 0 || amount > previousOutstanding) {
         setPaymentMessage(billId, 'Enter a positive amount within the outstanding balance.', 'error')
         return
       }
@@ -419,7 +439,7 @@ export default {
           requestToken !== token.value
         ) return
         setPaymentMessage(billId, data.message || 'Payment recorded successfully.', 'success')
-        paymentRequestIds.delete(billId)
+        paymentRefreshState.set(billId, { previousOutstanding, amount })
         await loadPortalData()
       } catch (requestError) {
         if (
@@ -429,6 +449,10 @@ export default {
           requestToken !== token.value ||
           axios.isCancel(requestError)
         ) return
+        if (requestError.response?.status === 409) {
+          paymentRequestIds.delete(billId)
+          paymentRefreshState.delete(billId)
+        }
         setPaymentMessage(billId, requestError.response?.data?.message || 'Payment could not be recorded.', 'error')
       } finally {
         if (paymentControllers.get(billId) === controller) paymentControllers.delete(billId)

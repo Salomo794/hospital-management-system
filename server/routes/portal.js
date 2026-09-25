@@ -8,9 +8,10 @@ const {
   ApiError, asyncHandler, parseFiniteNumber, parseInteger, withTransaction,
 } = require('../utils/http');
 const { randomUUID, generateRecordNumber } = require('../utils/ids');
+const { getRequestId } = require('../utils/requestId');
 const { FixedWindowRateLimiter } = require('../utils/rateLimiter');
+const { isPaymentMethod } = require('../config/paymentMethods');
 
-const PAYMENT_METHODS = ['cash', 'card', 'insurance', 'online', 'bank_transfer', 'other'];
 const CHECKIN_TRANSITIONS = {
   waiting: new Set(['in_consultation', 'completed', 'no_show', 'cancelled']),
   in_consultation: new Set(['completed', 'no_show', 'cancelled']),
@@ -22,7 +23,10 @@ const portalLoginLimiter = new FixedWindowRateLimiter({ windowMs: 15 * 60 * 1000
 const checkinLimiter = new FixedWindowRateLimiter({ windowMs: 5 * 60 * 1000, max: 20 });
 
 function paymentsEnabled() {
-  return process.env.NODE_ENV !== 'production' || process.env.ALLOW_SIMULATED_PAYMENTS === 'true';
+  return (
+    (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test')
+    && process.env.ALLOW_SIMULATED_PAYMENTS === 'true'
+  );
 }
 
 async function findPatientByIdentifier(identifier) {
@@ -64,7 +68,7 @@ router.post('/login', asyncHandler(async (req, res) => {
 
   portalLoginLimiter.reset(limitKey);
   const token = jwt.sign(
-    { pid: patient.id, portal: true },
+    { pid: patient.id, portal: true, psv: patient.portal_session_version },
     process.env.JWT_SECRET,
     { expiresIn: process.env.PORTAL_JWT_EXPIRE || '24h' }
   );
@@ -187,12 +191,23 @@ router.put('/checkins/:id/status', authenticate, authorize('admin', 'doctor', 'n
   if (!['waiting', 'in_consultation', 'completed', 'no_show', 'cancelled'].includes(status)) {
     throw new ApiError(400, 'Invalid check-in status');
   }
-  const [rows] = await pool.query('SELECT * FROM checkins WHERE id = ?', [id]);
-  if (rows.length === 0) throw new ApiError(404, 'Check-in not found');
-  if (status !== rows[0].status && !CHECKIN_TRANSITIONS[rows[0].status].has(status)) {
-    throw new ApiError(409, `Cannot transition check-in from ${rows[0].status} to ${status}`);
-  }
-  await pool.query('UPDATE checkins SET status = ? WHERE id = ?', [status, id]);
+  await withTransaction(pool, async connection => {
+    const [rows] = await connection.query('SELECT status FROM checkins WHERE id = ?', [id]);
+    if (rows.length === 0) throw new ApiError(404, 'Check-in not found');
+
+    const currentStatus = rows[0].status;
+    if (status !== currentStatus && !CHECKIN_TRANSITIONS[currentStatus]?.has(status)) {
+      throw new ApiError(409, `Cannot transition check-in from ${currentStatus} to ${status}`);
+    }
+
+    const [updateResult] = await connection.query(
+      'UPDATE checkins SET status = ? WHERE id = ? AND status = ?',
+      [status, id, currentStatus]
+    );
+    if (updateResult.affectedRows === 0) {
+      throw new ApiError(409, 'Check-in status changed while applying the transition. Please retry.');
+    }
+  });
   res.json({ message: 'Check-in status updated', id, status });
 }));
 
@@ -282,35 +297,33 @@ router.post('/bills/:id/pay', authenticatePortal, asyncHandler(async (req, res) 
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const amount = Math.round((parseFiniteNumber(req.body?.amount, 'amount', { min: 0.01 }) + Number.EPSILON) * 100) / 100;
   const paymentMethod = req.body?.payment_method || 'card';
-  if (!PAYMENT_METHODS.includes(paymentMethod)) throw new ApiError(400, 'Invalid payment method');
-  const suppliedRequestId = req.body?.request_id;
-  let requestId;
-  if (suppliedRequestId !== undefined) {
-    if (typeof suppliedRequestId !== 'string') throw new ApiError(400, 'request_id must be a string');
-    requestId = suppliedRequestId.trim();
-    if (!requestId) throw new ApiError(400, 'request_id cannot be blank');
-  } else {
-    requestId = (req.get('X-Request-ID') || '').trim() || randomUUID();
-  }
-  if (requestId.length > 100) throw new ApiError(400, 'request_id is too long');
+  if (!isPaymentMethod(paymentMethod)) throw new ApiError(400, 'Invalid payment method');
+  const requestId = getRequestId(req, 'request_id', { required: true });
   const referenceNumber = `portal:${requestId}`;
 
   const payment = await withTransaction(pool, async connection => {
     const [existingPayment] = await connection.query(
-      `SELECT p.amount, b.net_amount, b.paid_amount
+      `SELECT p.bill_id, p.patient_id, p.amount, p.payment_method,
+              b.net_amount, b.paid_amount
        FROM payments p JOIN bills b ON b.id = p.bill_id
-       WHERE p.transaction_reference = ? AND p.bill_id = ? AND p.patient_id = ?`,
-      [referenceNumber, id, req.patient.id]
+       WHERE p.transaction_reference = ?`,
+      [referenceNumber]
     );
     if (existingPayment.length > 0) {
-      if (Number(existingPayment[0].amount) !== amount) {
+      const existing = existingPayment[0];
+      if (
+        Number(existing.bill_id) !== id
+        || Number(existing.patient_id) !== Number(req.patient.id)
+        || Number(existing.amount) !== amount
+        || existing.payment_method !== paymentMethod
+      ) {
         throw new ApiError(409, 'request_id has already been used for a different payment');
       }
       return {
         success: true,
         replay: true,
-        amount: Number(existingPayment[0].amount),
-        balance_remaining: Math.max(Number(existingPayment[0].net_amount) - Number(existingPayment[0].paid_amount), 0),
+        amount: Number(existing.amount),
+        balance_remaining: Math.max(Number(existing.net_amount) - Number(existing.paid_amount), 0),
       };
     }
 

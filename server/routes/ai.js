@@ -13,8 +13,9 @@ const MEDICATION_ROLES = ['admin', 'doctor', 'nurse', 'pharmacist'];
 const LAB_ROLES = ['admin', 'doctor', 'nurse', 'lab_technician'];
 const BILLING_ROLES = ['admin', 'receptionist'];
 
+// Authenticated users get an independent bucket so a shared proxy/NAT cannot
+// make the assistant unavailable to an entire hospital at once.
 const chatByUser = new FixedWindowRateLimiter({ windowMs: 60 * 1000, max: 20 });
-const chatByIp = new FixedWindowRateLimiter({ windowMs: 60 * 1000, max: 60 });
 
 function cleanSearchTerm(value) {
   return String(value || '').trim().replace(/[?!.,;]+\s*$/g, '').trim();
@@ -89,9 +90,8 @@ router.post('/chat', authenticate, async (req, res) => {
     }
 
     const userLimit = chatByUser.consume(`user:${req.user.id}`);
-    const ipLimit = chatByIp.consume(`ip:${req.ip}`);
-    if (!userLimit.allowed || !ipLimit.allowed) {
-      res.setHeader('Retry-After', Math.max(userLimit.retryAfterSeconds, ipLimit.retryAfterSeconds));
+    if (!userLimit.allowed) {
+      res.setHeader('Retry-After', userLimit.retryAfterSeconds);
       return res.status(429).json({ response: 'Too many AI requests. Please try again later.', data: null });
     }
 
@@ -203,12 +203,29 @@ router.post('/chat', authenticate, async (req, res) => {
       const idMatch = message.match(/\d+/);
       if (idMatch) {
         const patientId = parseInt(idMatch[0]);
-        const [patient] = await pool.query(
+        let patientQuery =
           `SELECT id, mrn, first_name, last_name, date_of_birth, gender, blood_type, phone,
                   allergies, chronic_conditions, insurance_provider
-           FROM patients WHERE id = ?`,
-          [patientId]
-        );
+           FROM patients WHERE id = ?`;
+        const patientParams = [patientId];
+        if (req.user.role === 'doctor') {
+          patientQuery += `
+             AND (
+               EXISTS (
+                 SELECT 1 FROM appointments a
+                 WHERE a.patient_id = patients.id AND a.doctor_id = ?
+               )
+               OR EXISTS (
+                 SELECT 1 FROM medical_records mr
+                 WHERE mr.patient_id = patients.id AND mr.doctor_id = ?
+               )
+             )`;
+          patientParams.push(req.user.id, req.user.id);
+        }
+        const [patient] = await pool.query(patientQuery, patientParams);
+        if (patient.length === 0 && req.user.role === 'doctor') {
+          return res.status(403).json({ response: 'You are not assigned to this patient.', data: null });
+        }
         if (patient.length > 0) {
           const p = patient[0];
           const [records] = await pool.query('SELECT COUNT(*) as count FROM medical_records WHERE patient_id = ?', [patientId]);
@@ -496,7 +513,7 @@ router.post('/chat', authenticate, async (req, res) => {
         appointmentsTodayParams.push(req.user.id);
       }
       const [apptsToday] = await pool.query(appointmentsTodayQuery, appointmentsTodayParams);
-      const [waiting] = await pool.query("SELECT COUNT(*) as count FROM checkins WHERE date(checkin_time) = date('now') AND status IN ('waiting','in_consultation')");
+      const [waiting] = await pool.query("SELECT COUNT(*) as count FROM checkins WHERE checkin_date = date('now') AND status IN ('waiting','in_consultation')");
       const [admissions] = await pool.query("SELECT COUNT(*) as count FROM admissions WHERE status = 'admitted'");
       const overview = {
         appointments_today: apptsToday[0].count,

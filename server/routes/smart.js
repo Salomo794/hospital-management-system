@@ -16,6 +16,8 @@ function weekDayName(dateStr) {
 }
 
 const OPERATIONS_ROLES = ['admin', 'receptionist', 'doctor', 'nurse'];
+const CLINICAL_ROLES = ['admin', 'doctor', 'nurse'];
+const BILLING_ROLES = ['admin', 'receptionist'];
 
 // ---- Predictive / Smart Hospital intelligence ----
 router.get('/forecast', authenticate, authorize(...OPERATIONS_ROLES), async (req, res) => {
@@ -89,37 +91,41 @@ router.get('/forecast', authenticate, authorize(...OPERATIONS_ROLES), async (req
       byWard: wardRows
     };
 
-    // 3) Stock forecasting — days of supply + reorder suggestions
-    const [stock] = await pool.query(
-      `SELECT m.id, m.name, m.generic_name, m.stock_quantity, m.min_stock_level, m.max_stock_level, m.unit, m.cost_price,
-              COALESCE((
-                SELECT SUM(it.quantity)
-                FROM inventory_transactions it
-                WHERE it.medicine_id = m.id
-                  AND it.transaction_type = 'dispense'
-                  AND date(it.created_at) >= date('now', '-30 days')
-              ), 0) AS dispensed_30d
-       FROM medicines m
-       WHERE m.is_active = 1
-       ORDER BY m.stock_quantity ASC LIMIT 12`
-    );
-    const stockForecast = stock.map(s => {
-      const dailyConsumption = s.dispensed_30d / 30;
-      const daysLeft = dailyConsumption > 0 ? Math.floor(s.stock_quantity / dailyConsumption) : 999;
-      const low = s.stock_quantity <= s.min_stock_level;
-      return {
-        id: s.id,
-        name: s.name,
-        unit: s.unit,
-        stock: s.stock_quantity,
-        minimum: s.min_stock_level,
-        dispensed30d: s.dispensed_30d,
-        daysLeft,
-        low,
-        suggestedReorder: low ? Math.max(s.max_stock_level - s.stock_quantity, s.min_stock_level) : 0,
-        estimatedCost: low ? Math.round((Math.max(s.max_stock_level - s.stock_quantity, s.min_stock_level)) * s.cost_price * 100) / 100 : 0
-      };
-    });
+    // 3) Stock forecasting — restricted to administrators because it includes
+    // inventory levels, consumption, and cost data.
+    let stockForecast;
+    if (req.user.role === 'admin') {
+      const [stock] = await pool.query(
+        `SELECT m.id, m.name, m.generic_name, m.stock_quantity, m.min_stock_level, m.max_stock_level, m.unit, m.cost_price,
+                COALESCE((
+                  SELECT SUM(it.quantity)
+                  FROM inventory_transactions it
+                  WHERE it.medicine_id = m.id
+                    AND it.transaction_type = 'dispense'
+                    AND date(it.created_at) >= date('now', '-30 days')
+                ), 0) AS dispensed_30d
+         FROM medicines m
+         WHERE m.is_active = 1
+         ORDER BY m.stock_quantity ASC LIMIT 12`
+      );
+      stockForecast = stock.map(s => {
+        const dailyConsumption = s.dispensed_30d / 30;
+        const daysLeft = dailyConsumption > 0 ? Math.floor(s.stock_quantity / dailyConsumption) : 999;
+        const low = s.stock_quantity <= s.min_stock_level;
+        return {
+          id: s.id,
+          name: s.name,
+          unit: s.unit,
+          stock: s.stock_quantity,
+          minimum: s.min_stock_level,
+          dispensed30d: s.dispensed_30d,
+          daysLeft,
+          low,
+          suggestedReorder: low ? Math.max(s.max_stock_level - s.stock_quantity, s.min_stock_level) : 0,
+          estimatedCost: low ? Math.round((Math.max(s.max_stock_level - s.stock_quantity, s.min_stock_level)) * s.cost_price * 100) / 100 : 0
+        };
+      });
+    }
 
     // 4) Staffing suggestion based on peak load
     const [doctors] = await pool.query(
@@ -142,17 +148,21 @@ router.get('/forecast', authenticate, authorize(...OPERATIONS_ROLES), async (req
 
     const summary = `Peak day will likely be ${peak.day}, ${peak.date} (≈${peak.predicted} visits). ${slack.day} looks lightest (≈${slack.predicted}).`;
 
-    res.json({
+    const forecastData = {
       generated_at: new Date().toISOString(),
       days,
       peak,
       slack,
       summary,
       bedForecast,
-      stockForecast,
-      lowStockCount: stockForecast.filter(s => s.low).length,
       staffing
-    });
+    };
+    if (req.user.role === 'admin') {
+      forecastData.stockForecast = stockForecast;
+      forecastData.lowStockCount = stockForecast.filter(s => s.low).length;
+    }
+
+    res.json(forecastData);
   } catch (error) {
     console.error('Forecast error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -168,7 +178,7 @@ router.get('/command-center', authenticate, authorize(...OPERATIONS_ROLES), asyn
     // Waiting queue from kiosk check-ins
     const [queues] = await pool.query(
       `SELECT c.status, COUNT(*) as count FROM checkins c
-       WHERE date(c.checkin_time) = ?
+       WHERE c.checkin_date = ?
        GROUP BY c.status`,
       [today]
     );
@@ -180,7 +190,7 @@ router.get('/command-center', authenticate, authorize(...OPERATIONS_ROLES), asyn
       `SELECT c.id, c.checkin_time, c.status, c.purpose,
          p.first_name, p.last_name, p.mrn, p.uuid as patient_uuid, p.id as patient_id
        FROM checkins c JOIN patients p ON c.patient_id = p.id
-       WHERE c.status IN ('waiting','in_consultation') AND date(c.checkin_time) = ?
+       WHERE c.status IN ('waiting','in_consultation') AND c.checkin_date = ?
        ORDER BY c.checkin_time ASC LIMIT 30`,
       [today]
     );
@@ -211,41 +221,84 @@ router.get('/command-center', authenticate, authorize(...OPERATIONS_ROLES), asyn
       return { ward, occupied: Math.min(occupied, total), total, available: Math.max(total - occupied, 0), pct: Math.round((Math.min(occupied, total) / total) * 100) };
     });
 
-    // Live alerts
-    const [lowStock] = await pool.query(
-      "SELECT name, stock_quantity, min_stock_level FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1 ORDER BY stock_quantity ASC LIMIT 8"
-    );
-    const [lowStockCountRows] = await pool.query(
-      "SELECT COUNT(*) AS count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1"
-    );
-    const [abnormalLabs] = await pool.query(
-      `SELECT li.result_value, lt.name as test_name, p.first_name, p.last_name, p.mrn
-       FROM lab_order_items li
-       JOIN lab_tests lt ON li.lab_test_id = lt.id
-       JOIN lab_orders lo ON li.lab_order_id = lo.id
-       JOIN patients p ON lo.patient_id = p.id
-       WHERE li.is_abnormal = 1 ORDER BY li.id DESC LIMIT 8`
-    );
-    const [abnormalLabCountRows] = await pool.query(
-      `SELECT COUNT(*) AS count FROM lab_order_items li
-       JOIN lab_orders lo ON li.lab_order_id = lo.id
-       WHERE li.is_abnormal = 1 AND lo.status = 'completed'`
-    );
-    const [overdueBills] = await pool.query(
-      `SELECT b.id, b.bill_number, b.net_amount, b.paid_amount, b.due_date,
-         p.first_name, p.last_name
-       FROM bills b JOIN patients p ON b.patient_id = p.id
-       WHERE b.payment_status IN ('pending','partial')
-       ORDER BY b.due_date ASC LIMIT 8`
-    );
-    const [overdueBillCountRows] = await pool.query(
-      "SELECT COUNT(*) AS count FROM bills WHERE payment_status IN ('pending','partial')"
-    );
+    // Live alerts: query and return each sensitive category only to roles
+    // authorized to see it. Empty local arrays keep alert construction simple.
+    const canViewPharmacy = req.user.role === 'admin';
+    const canViewLabs = CLINICAL_ROLES.includes(req.user.role);
+    const canViewBilling = BILLING_ROLES.includes(req.user.role);
+
+    let lowStock = [];
+    let lowStockCount;
+    if (canViewPharmacy) {
+      [lowStock] = await pool.query(
+        "SELECT name, stock_quantity, min_stock_level FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1 ORDER BY stock_quantity ASC LIMIT 8"
+      );
+      const [lowStockCountRows] = await pool.query(
+        "SELECT COUNT(*) AS count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1"
+      );
+      lowStockCount = lowStockCountRows[0].count;
+    }
+
+    let abnormalLabs = [];
+    let abnormalLabCount;
+    if (canViewLabs) {
+      let abnormalLabWhere = 'WHERE li.is_abnormal = 1';
+      const abnormalLabParams = [];
+      if (req.user.role === 'doctor') {
+        abnormalLabWhere += ' AND lo.doctor_id = ?';
+        abnormalLabParams.push(req.user.id);
+      }
+      [abnormalLabs] = await pool.query(
+        `SELECT li.result_value, lt.name as test_name, p.first_name, p.last_name, p.mrn
+         FROM lab_order_items li
+         JOIN lab_tests lt ON li.lab_test_id = lt.id
+         JOIN lab_orders lo ON li.lab_order_id = lo.id
+         JOIN patients p ON lo.patient_id = p.id
+         ${abnormalLabWhere}
+         ORDER BY li.id DESC LIMIT 8`,
+        abnormalLabParams
+      );
+
+      let abnormalLabCountWhere = "WHERE li.is_abnormal = 1 AND lo.status = 'completed'";
+      const abnormalLabCountParams = [];
+      if (req.user.role === 'doctor') {
+        abnormalLabCountWhere += ' AND lo.doctor_id = ?';
+        abnormalLabCountParams.push(req.user.id);
+      }
+      const [abnormalLabCountRows] = await pool.query(
+        `SELECT COUNT(*) AS count FROM lab_order_items li
+         JOIN lab_orders lo ON li.lab_order_id = lo.id
+         ${abnormalLabCountWhere}`,
+        abnormalLabCountParams
+      );
+      abnormalLabCount = abnormalLabCountRows[0].count;
+    }
+
+    let overdueBills = [];
+    let overdueBillCount;
+    if (canViewBilling) {
+      [overdueBills] = await pool.query(
+        `SELECT b.id, b.bill_number, b.net_amount, b.paid_amount, b.due_date,
+           p.first_name, p.last_name
+         FROM bills b JOIN patients p ON b.patient_id = p.id
+         WHERE b.payment_status IN ('pending','partial')
+           AND b.due_date IS NOT NULL AND b.due_date < ?
+         ORDER BY b.due_date ASC LIMIT 8`,
+        [today]
+      );
+      const [overdueBillCountRows] = await pool.query(
+        `SELECT COUNT(*) AS count FROM bills
+         WHERE payment_status IN ('pending','partial')
+           AND due_date IS NOT NULL AND due_date < ?`,
+        [today]
+      );
+      overdueBillCount = overdueBillCountRows[0].count;
+    }
 
     const alerts = [
       ...lowStock.map(m => ({ type: 'warning', icon: 'stock', title: 'Low stock', message: `${m.name} — ${m.stock_quantity} left (min ${m.min_stock_level})` })),
       ...abnormalLabs.map(l => ({ type: 'danger', icon: 'lab', title: 'Abnormal lab', message: `${l.first_name} ${l.last_name}: ${l.test_name} = ${l.result_value || 'n/a'}` })),
-      ...overdueBills.map(b => ({ type: 'danger', icon: 'billing', title: 'Unpaid bill', message: `${b.first_name} ${b.last_name} owes $${((b.net_amount - b.paid_amount)).toFixed(2)}` }))
+      ...overdueBills.map(b => ({ type: 'danger', icon: 'billing', title: 'Overdue bill', message: `${b.first_name} ${b.last_name} owes $${((b.net_amount - b.paid_amount)).toFixed(2)}` }))
     ].slice(0, 12);
 
     // Staff on duty today (from scheduling window approximation)
@@ -256,22 +309,24 @@ router.get('/command-center', authenticate, authorize(...OPERATIONS_ROLES), asyn
     const statusCounts = {};
     timeline.forEach(t => { statusCounts[t.status] = (statusCounts[t.status] || 0) + 1; });
 
-    res.json({
+    const commandCenterData = {
       server_time: now,
       date: today,
-      waiting: waiting,
+      waiting,
       queueSummary: { waiting: queueCounts['waiting'] || 0, in_consultation: queueCounts['in_consultation'] || 0, completed: queueCounts['completed'] || 0 },
       timeline,
       appointmentStats: statusCounts,
       beds,
       bedTotal: beds.reduce((s, b) => s + b.total, 0),
       bedOccupied: beds.reduce((s, b) => s + b.occupied, 0),
-      alerts,
-      lowStockCount: lowStockCountRows[0].count,
-      abnormalLabCount: abnormalLabCountRows[0].count,
-      overdueBillCount: overdueBillCountRows[0].count,
-      staff
-    });
+      alerts
+    };
+    if (canViewPharmacy) commandCenterData.lowStockCount = lowStockCount;
+    if (canViewLabs) commandCenterData.abnormalLabCount = abnormalLabCount;
+    if (canViewBilling) commandCenterData.overdueBillCount = overdueBillCount;
+    commandCenterData.staff = staff;
+
+    res.json(commandCenterData);
   } catch (error) {
     console.error('Command-center error:', error);
     res.status(500).json({ message: 'Server error' });

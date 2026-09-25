@@ -6,10 +6,10 @@ const {
   ApiError, asyncHandler, getPagination, isDateOnly, parseFiniteNumber, parseInteger, withTransaction,
 } = require('../utils/http');
 const { randomUUID, generateRecordNumber } = require('../utils/ids');
+const { PAYMENT_METHODS, isPaymentMethod } = require('../config/paymentMethods');
 
 const BILLING_ROLES = ['admin', 'receptionist'];
 const BILL_STATUSES = ['pending', 'partial', 'paid', 'cancelled'];
-const PAYMENT_METHODS = ['cash', 'card', 'insurance', 'online', 'bank_transfer', 'other'];
 
 function money(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
@@ -63,6 +63,11 @@ router.get('/summary', authenticate, authorize(...BILLING_ROLES), asyncHandler(a
   });
 }));
 
+// Declared before '/:id' so the literal path is not swallowed by the bill lookup.
+router.get('/payment-methods', authenticate, authorize(...BILLING_ROLES), asyncHandler(async (req, res) => {
+  res.json({ payment_methods: PAYMENT_METHODS });
+}));
+
 router.get('/:id', authenticate, authorize(...BILLING_ROLES), asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const [bill] = await pool.query(
@@ -86,7 +91,7 @@ router.post('/', authenticate, authorize(...BILLING_ROLES), asyncHandler(async (
   const { patient_id, appointment_id, items, discount, tax, payment_method, due_date, notes } = req.body;
   const patientId = parseInteger(patient_id, 'patient_id', { min: 1 });
   if (!Array.isArray(items) || items.length === 0) throw new ApiError(400, 'At least one bill item is required');
-  if (payment_method && !PAYMENT_METHODS.includes(payment_method)) throw new ApiError(400, 'Invalid payment method');
+  if (payment_method && !isPaymentMethod(payment_method)) throw new ApiError(400, 'Invalid payment method');
   if (due_date && !isDateOnly(due_date)) throw new ApiError(400, 'due_date must use YYYY-MM-DD');
 
   const normalizedItems = items.map((item, index) => {
@@ -159,7 +164,7 @@ router.post('/:id/payments', authenticate, authorize(...BILLING_ROLES), asyncHan
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const amount = money(parseFiniteNumber(req.body?.amount, 'amount', { min: 0.01 }));
   const paymentMethod = req.body?.payment_method;
-  if (!PAYMENT_METHODS.includes(paymentMethod)) throw new ApiError(400, 'Invalid payment method');
+  if (!isPaymentMethod(paymentMethod)) throw new ApiError(400, 'Invalid payment method');
   const transactionReference = req.body?.transaction_reference ? String(req.body.transaction_reference).trim() : null;
   if (transactionReference && transactionReference.length > 150) throw new ApiError(400, 'transaction_reference is too long');
 

@@ -96,7 +96,8 @@ async function evaluateSafety(patientId, medicineIds, queryExecutor = pool) {
       `SELECT DISTINCT pi.medicine_id
        FROM prescription_items pi
        JOIN prescriptions pr ON pr.id = pi.prescription_id
-       WHERE pr.patient_id = ? AND pr.status = 'active'`,
+       WHERE pr.patient_id = ? AND pr.status = 'active'
+         AND pi.dispensed_quantity < pi.quantity`,
       [patientId]
     );
     existingMedicineIds = activePrescriptions.map(row => Number(row.medicine_id)).filter(Number.isInteger);

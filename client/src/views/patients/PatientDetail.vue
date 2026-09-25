@@ -184,7 +184,7 @@
 </template>
 
 <script>
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
@@ -213,30 +213,72 @@ export default {
     const editForm = ref(emptyEditForm())
     const resettingPortalPin = ref(false)
     const newPortalPin = ref('')
-    const canResetPortalPin = computed(() => ['admin', 'receptionist'].includes(auth.userRole))
+    const canResetPortalPin = computed(() => (
+      ['admin', 'receptionist'].includes(auth.userRole) && patient.value?.status === 'active'
+    ))
     const today = new Date().toISOString().slice(0, 10)
     const bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+    let patientRequestGeneration = 0
+    let patientSaveGeneration = 0
+    let portalPinRequestGeneration = 0
+    let patientController = null
+    let componentUnmounted = false
 
     const loadPatient = async () => {
       const id = route.params.id
+      const requestGeneration = ++patientRequestGeneration
+      patientController?.abort()
+      const controller = new AbortController()
+      patientController = controller
       loading.value = true
       error.value = ''
       patient.value = null
+      history.value = { appointments: [], medical_records: [], prescriptions: [], bills: [] }
       newPortalPin.value = ''
       try {
-        const patientResponse = await axios.get(`/api/patients/${id}`)
+        const patientResponse = await axios.get(`/api/patients/${id}`, { signal: controller.signal })
+        if (
+          componentUnmounted ||
+          controller.signal.aborted ||
+          requestGeneration !== patientRequestGeneration ||
+          String(route.params.id) !== String(id)
+        ) return
         patient.value = patientResponse.data
         try {
-          const historyResponse = await axios.get(`/api/patients/${id}/history`)
+          const historyResponse = await axios.get(`/api/patients/${id}/history`, { signal: controller.signal })
+          if (
+            componentUnmounted ||
+            controller.signal.aborted ||
+            requestGeneration !== patientRequestGeneration ||
+            String(route.params.id) !== String(id)
+          ) return
           history.value = historyResponse.data
-        } catch {
-          history.value = { appointments: [], medical_records: [], prescriptions: [], bills: [] }
+        } catch (requestError) {
+          if (
+            componentUnmounted ||
+            controller.signal.aborted ||
+            requestGeneration !== patientRequestGeneration ||
+            axios.isCancel(requestError)
+          ) return
           toast.warning('Patient loaded, but medical history could not be retrieved.')
         }
       } catch (requestError) {
+        if (
+          componentUnmounted ||
+          controller.signal.aborted ||
+          requestGeneration !== patientRequestGeneration ||
+          axios.isCancel(requestError)
+        ) return
         error.value = requestError.response?.data?.message || 'Failed to load patient details.'
       } finally {
-        loading.value = false
+        if (
+          !componentUnmounted &&
+          requestGeneration === patientRequestGeneration &&
+          patientController === controller
+        ) {
+          loading.value = false
+          patientController = null
+        }
       }
     }
 
@@ -258,38 +300,80 @@ export default {
 
     const closeEditModal = () => { showEditModal.value = false }
     const savePatient = async () => {
+      if (!patient.value || saving.value) return
+      const patientId = patient.value.id
+      const requestGeneration = ++patientSaveGeneration
+      const isCurrentRequest = () => (
+        !componentUnmounted &&
+        requestGeneration === patientSaveGeneration &&
+        String(route.params.id) === String(patientId) &&
+        Number(patient.value?.id) === Number(patientId)
+      )
       saving.value = true
       try {
-        const { data } = await axios.put(`/api/patients/${patient.value.id}`, editForm.value)
+        const { data } = await axios.put(`/api/patients/${patientId}`, editForm.value)
+        if (!isCurrentRequest()) return
         patient.value = data
         showEditModal.value = false
         toast.success('Patient updated successfully.')
       } catch (requestError) {
-        toast.error(requestError.response?.data?.message || 'Failed to update patient.')
+        if (isCurrentRequest()) {
+          toast.error(requestError.response?.data?.message || 'Failed to update patient.')
+        }
       } finally {
-        saving.value = false
+        if (isCurrentRequest()) saving.value = false
       }
     }
 
     const resetPortalPin = async () => {
-      if (!patient.value || resettingPortalPin.value) return
-      const confirmed = window.confirm(`Reset the portal PIN for ${patient.value.first_name} ${patient.value.last_name}? The current PIN will stop working immediately.`)
+      if (!patient.value || patient.value.status !== 'active' || resettingPortalPin.value) return
+      const patientId = patient.value.id
+      const confirmed = window.confirm(`Reset the portal PIN for ${patient.value.first_name} ${patient.value.last_name}? The current PIN and all active portal sessions will stop working immediately.`)
       if (!confirmed) return
+
+      const requestGeneration = ++portalPinRequestGeneration
+      const isCurrentRequest = () => (
+        !componentUnmounted &&
+        requestGeneration === portalPinRequestGeneration &&
+        String(route.params.id) === String(patientId) &&
+        Number(patient.value?.id) === Number(patientId)
+      )
       resettingPortalPin.value = true
+      newPortalPin.value = ''
       try {
-        const { data } = await axios.post(`/api/patients/${patient.value.id}/portal-pin`)
+        const { data } = await axios.post(`/api/patients/${patientId}/portal-pin`)
+        if (!isCurrentRequest()) return
         newPortalPin.value = data.plain_pin
         patient.value.portal_pin_provisioned = true
         toast.success('Portal PIN reset successfully.')
       } catch (requestError) {
-        toast.error(requestError.response?.data?.message || 'Failed to reset portal PIN.')
+        if (isCurrentRequest()) {
+          toast.error(requestError.response?.data?.message || 'Failed to reset portal PIN.')
+        }
       } finally {
-        resettingPortalPin.value = false
+        if (isCurrentRequest()) resettingPortalPin.value = false
       }
     }
 
     onMounted(loadPatient)
-    watch(() => route.params.id, loadPatient)
+    watch(() => route.params.id, () => {
+      patientSaveGeneration += 1
+      saving.value = false
+      portalPinRequestGeneration += 1
+      resettingPortalPin.value = false
+      showEditModal.value = false
+      patientController?.abort()
+      patientController = null
+      loadPatient()
+    })
+    onBeforeUnmount(() => {
+      componentUnmounted = true
+      patientRequestGeneration += 1
+      patientSaveGeneration += 1
+      portalPinRequestGeneration += 1
+      patientController?.abort()
+      patientController = null
+    })
 
     return {
       patient, history, tab, showEditModal, loading, saving, error, editForm,

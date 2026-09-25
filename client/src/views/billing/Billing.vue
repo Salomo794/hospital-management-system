@@ -170,11 +170,9 @@
             <div class="form-group">
               <label>Payment Method</label>
               <select v-model="billForm.payment_method">
-                <option value="cash">Cash</option>
-                <option value="card">Card</option>
-                <option value="insurance">Insurance</option>
-                <option value="online">Online</option>
-                <option value="bank_transfer">Bank Transfer</option>
+                <option v-for="method in paymentMethods" :key="method.value" :value="method.value">
+                  {{ method.label }}
+                </option>
               </select>
             </div>
             <div class="form-group">
@@ -204,6 +202,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { formatDate, formatCurrency, getStatusColor } from '../../utils/helpers'
+import { fetchPaymentMethods } from '../../utils/paymentMethods'
 import { useToast } from '../../store/toast'
 
 export default {
@@ -224,6 +223,11 @@ export default {
     const showBillModal = ref(false)
     const submitting = ref(false)
     const patientResults = ref([])
+    const paymentMethods = ref([])
+
+    const loadPaymentMethods = async () => {
+      paymentMethods.value = await fetchPaymentMethods()
+    }
 
     const billForm = reactive({
       patient_id: null,
@@ -389,7 +393,10 @@ export default {
       }
     }
 
-    onMounted(loadBills)
+    onMounted(() => {
+      loadBills()
+      loadPaymentMethods()
+    })
 
     return {
       bills,
@@ -407,6 +414,7 @@ export default {
       submitting,
       billForm,
       patientResults,
+      paymentMethods,
       subtotal,
       taxAmount,
       netAmount,

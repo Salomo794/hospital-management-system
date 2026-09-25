@@ -1,18 +1,94 @@
-const bcrypt = require('bcryptjs');
-const pool = require('./database');
-const { randomUUID, generateAccessCode, generatePortalPin } = require('../utils/ids');
+const { loadEnvironment } = require('./environment');
+loadEnvironment();
 
-async function seed() {
+const DEMO_FIXTURE_TABLES = [
+  'users',
+  'patients',
+  'specialties',
+  'doctor_profiles',
+  'appointments',
+  'medical_records',
+  'medicines',
+  'prescriptions',
+  'prescription_items',
+  'lab_tests',
+  'lab_orders',
+  'lab_order_items',
+  'bills',
+  'bill_items',
+  'payments',
+  'notifications',
+  'audit_log',
+  'inventory_transactions',
+  'admissions',
+  'drug_interactions',
+  'checkins',
+];
+
+function assertDemoSeedAllowed() {
   if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_SEED !== 'true') {
     throw new Error('Demo seeding is disabled in production. Set ALLOW_DEMO_SEED=true only for an isolated demo database.');
   }
-  const conn = await pool.getConnection();
+}
+
+// Keep this check ahead of the database import so a production CLI invocation
+// cannot open or create the configured database before it is rejected.
+if (require.main === module) {
+  assertDemoSeedAllowed();
+}
+
+const bcrypt = require('bcryptjs');
+const { randomUUID, generateAccessCode, generatePortalPin } = require('../utils/ids');
+
+let pool;
+function getPool() {
+  if (!pool) pool = require('./database');
+  return pool;
+}
+
+async function assertDemoFixtureTablesEmpty(conn) {
+  const [tableRows] = await conn.query("SELECT name FROM sqlite_master WHERE type = 'table'");
+  const existingTables = new Set(tableRows.map(row => row.name));
+  const populatedTables = [];
+  for (const table of DEMO_FIXTURE_TABLES.filter(name => existingTables.has(name))) {
+    const [rows] = await conn.query(`SELECT COUNT(*) AS count FROM "${table}"`);
+    const count = Number(rows[0]?.count || 0);
+    if (count > 0) populatedTables.push(`${table} (${count} rows)`);
+  }
+
+  if (populatedTables.length > 0) {
+    throw new Error(
+      'Demo seed requires an empty application database; refusing to add demo fixtures to existing data. '
+      + `Non-empty tables: ${populatedTables.join(', ')}. `
+      + 'Set DB_PATH to a fresh empty SQLite file (or back up and clear the existing database), '
+      + 'then run db:setup and db:seed again.'
+    );
+  }
+
+  const missingTables = DEMO_FIXTURE_TABLES.filter(table => !existingTables.has(table));
+  if (missingTables.length > 0) {
+    throw new Error(
+      `Demo seed requires a complete database schema. Missing tables: ${missingTables.join(', ')}. `
+      + 'Run npm run db:setup before npm run db:seed.'
+    );
+  }
+}
+
+async function seed() {
+  assertDemoSeedAllowed();
+  const activePool = getPool();
+  const conn = await activePool.getConnection();
   try {
+    await assertDemoFixtureTablesEmpty(conn);
+    const hashedPassword = await bcrypt.hash(
+      'password123',
+      process.env.NODE_ENV === 'test' ? 4 : 10
+    );
+    const portalPinHashCost = process.env.NODE_ENV === 'test' ? 4 : 12;
+
     await conn.beginTransaction();
     const demoPortalCredentials = [];
     console.log('Seeding database (SQLite)...');
-
-    const hashedPassword = await bcrypt.hash('password123', 10);
 
     // --- Specialties ---
     const [specRows] = await conn.query('SELECT id FROM specialties LIMIT 1');
@@ -133,7 +209,7 @@ async function seed() {
     );
     for (const patient of patientsWithoutPins) {
       const pin = generatePortalPin();
-      const hashedPin = await bcrypt.hash(pin, 12);
+      const hashedPin = await bcrypt.hash(pin, portalPinHashCost);
       await conn.query('UPDATE patients SET portal_pin = ? WHERE id = ?', [hashedPin, patient.id]);
       demoPortalCredentials.push({ mrn: patient.mrn, pin });
     }
@@ -347,14 +423,16 @@ async function seed() {
       for (let i = 0; i < billData.length; i++) {
         const bd = billData[i];
         const total = bd.items.reduce((sum, item) => sum + item.price, 0);
-        const paidAmount = bd.paid === 'paid' ? total : (bd.paid === 'partial' ? total * 0.5 : 0);
+        const tax = total * 0.1;
+        const netAmount = total + tax;
+        const paidAmount = bd.paid === 'paid' ? netAmount : (bd.paid === 'partial' ? netAmount * 0.5 : 0);
         const uuid = randomUUID();
         const today = new Date().toISOString().split('T')[0].replace(/-/g, '');
         const billNumber = `BIL-${today}-${String(i + 1).padStart(3, '0')}`;
         const [result] = await conn.query(
           `INSERT INTO bills (uuid, bill_number, patient_id, total_amount, discount, tax, net_amount, paid_amount, payment_status, payment_method, notes, created_by)
            VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
-          [uuid, billNumber, patientIds[bd.patientIdx % patientIds.length], total, total * 0.1, total + total * 0.1,
+          [uuid, billNumber, patientIds[bd.patientIdx % patientIds.length], total, tax, netAmount,
            paidAmount, bd.paid, bd.paid !== 'pending' ? 'card' : null,
            i === 2 ? 'Insurance claim pending' : null, userIds[4]]
         );

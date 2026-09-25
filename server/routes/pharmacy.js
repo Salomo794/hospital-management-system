@@ -4,7 +4,7 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { evaluateSafety } = require('../utils/safety');
 const { ApiError, asyncHandler, getPagination, isDateOnly, parseFiniteNumber, parseInteger, withTransaction } = require('../utils/http');
-const { randomUUID } = require('../utils/ids');
+const { getRequestId } = require('../utils/requestId');
 
 const PHARMACY_ROLES = ['admin', 'pharmacist'];
 const PHARMACY_READ_ROLES = ['admin', 'pharmacist', 'doctor', 'nurse'];
@@ -184,14 +184,7 @@ router.put('/medicines/:id', authenticate, authorize(...PHARMACY_ROLES), asyncHa
 router.post('/dispense', authenticate, authorize('pharmacist'), asyncHandler(async (req, res) => {
   const prescriptionItemId = parseInteger(req.body?.prescription_item_id, 'prescription_item_id', { min: 1 });
   const quantity = parseInteger(req.body?.quantity, 'quantity', { min: 1 });
-  const suppliedRequestId = typeof req.body?.request_id === 'string'
-    ? req.body.request_id.trim()
-    : null;
-  if (suppliedRequestId !== null && !suppliedRequestId) {
-    throw new ApiError(400, 'request_id cannot be blank');
-  }
-  const requestId = suppliedRequestId || (req.get('X-Request-ID') || '').trim() || randomUUID();
-  if (requestId.length > 100) throw new ApiError(400, 'request_id is too long');
+  const requestId = getRequestId(req, 'request_id', { required: true });
   const referenceNumber = `dispense:${requestId}`;
 
   const result = await withTransaction(pool, async connection => {
@@ -208,12 +201,17 @@ router.post('/dispense', authenticate, authorize('pharmacist'), asyncHandler(asy
     const item = items[0];
 
     const [replayRows] = await connection.query(
-      `SELECT it.id, it.quantity, it.medicine_id FROM inventory_transactions it
+      `SELECT it.id, it.quantity, it.medicine_id, it.prescription_item_id
+       FROM inventory_transactions it
        WHERE it.reference_number = ? AND it.transaction_type = 'dispense'`,
       [referenceNumber]
     );
     if (replayRows.length > 0) {
-      if (Number(replayRows[0].medicine_id) !== Number(item.medicine_id) || Number(replayRows[0].quantity) !== quantity) {
+      if (
+        Number(replayRows[0].prescription_item_id) !== Number(item.id)
+        || Number(replayRows[0].medicine_id) !== Number(item.medicine_id)
+        || Number(replayRows[0].quantity) !== quantity
+      ) {
         throw new ApiError(409, 'request_id has already been used for a different dispense request');
       }
       return {
@@ -266,9 +264,9 @@ router.post('/dispense', authenticate, authorize('pharmacist'), asyncHandler(asy
 
     await connection.query(
       `INSERT INTO inventory_transactions
-       (medicine_id, transaction_type, quantity, reference_number, performed_by)
-       VALUES (?, 'dispense', ?, ?, ?)`,
-      [item.medicine_id, quantity, referenceNumber, req.user.id]
+       (medicine_id, prescription_item_id, transaction_type, quantity, reference_number, performed_by)
+       VALUES (?, ?, 'dispense', ?, ?, ?)`,
+      [item.medicine_id, prescriptionItemId, quantity, referenceNumber, req.user.id]
     );
 
     const [pending] = await connection.query(

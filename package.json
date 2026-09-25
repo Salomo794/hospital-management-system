@@ -9,7 +9,7 @@
   "scripts": {
     "install:all": "npm install && npm --prefix server install && npm --prefix client install",
     "server": "node server/index.js",
-    "client": "cd client && npm run dev",
+    "client": "npm --prefix client run dev",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "db:setup": "node server/config/setup.js",
     "db:seed": "node server/config/seed.js",

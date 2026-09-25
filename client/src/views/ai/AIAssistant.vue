@@ -98,6 +98,7 @@ export default {
       { label: 'Find Patient', message: 'find patient Smith', roles: clinicalRoles },
       { label: 'Ward Status', message: 'Ward status and bed occupancy', roles: operationsRoles },
       { label: 'Drug Interaction', message: 'interaction between Warfarin and Aspirin', roles: ['admin', 'doctor', 'nurse', 'pharmacist'] },
+      { label: 'Abnormal Lab Results', message: 'abnormal lab results', roles: ['admin', 'doctor', 'nurse', 'lab_technician'] },
       { label: 'Patient Allergies', message: 'allergies of Maria Garcia', roles: clinicalRoles },
       { label: 'Low Stock', message: 'Check low stock medicines', roles: ['admin', 'pharmacist'] }
     ].filter(action => authStore.can(...action.roles)))

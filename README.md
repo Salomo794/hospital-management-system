@@ -52,8 +52,8 @@ Important optional settings:
 | `JWT_EXPIRE` | `7d` | Staff-session lifetime |
 | `PORTAL_JWT_EXPIRE` | `24h` | Patient-portal session lifetime |
 | `CORS_ORIGINS` | local dev origins | Comma-separated production client origins |
-| `DB_PATH` | `server/hospital.db` | SQLite database path |
-| `ALLOW_SIMULATED_PAYMENTS` | `false` | Explicitly enables demo portal payments in production |
+| `DB_PATH` | `server/hospital.db` | SQLite database path; relative paths resolve from `server/` |
+| `ALLOW_SIMULATED_PAYMENTS` | `false` | Enables demo portal payments only when `NODE_ENV` is `development` or `test` |
 
 To use a non-default API port during client development, create `client/.env.local`:
 
@@ -125,6 +125,10 @@ All endpoints are under `/api`:
 - `/portal` in the client for the patient portal SPA
 
 The API returns JSON for successful requests, validation failures, unknown routes, malformed JSON, and unexpected server errors.
+
+### Idempotent financial and inventory mutations
+
+Pharmacy dispensing and patient-portal bill payments require a stable `request_id` in the JSON body (or an `X-Request-ID` header). Retrying the same request with the same key returns the original result without applying the mutation twice; reusing a key with different parameters returns HTTP 409.
 
 ## Production
 

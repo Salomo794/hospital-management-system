@@ -280,6 +280,7 @@ export default {
 
     let wardsRequestId = 0
     let admissionsRequestId = 0
+    let patientListRequestId = 0
     let patientSearchRequestId = 0
     let patientSearchTimeout = null
     let patientSearchController = null
@@ -289,6 +290,7 @@ export default {
     const clearPatientSearch = () => {
       if (patientSearchTimeout) clearTimeout(patientSearchTimeout)
       patientSearchTimeout = null
+      patientListRequestId += 1
       patientSearchRequestId += 1
       patientSearchController?.abort()
       patientSearchController = null
@@ -315,7 +317,17 @@ export default {
         if (selectedBed.value) {
           const selected = wards.value.find(ward => ward.ward === selectedBed.value.ward)
             ?.beds.find(bed => bed.bed === selectedBed.value.bed)
-          if (!selected || selected.status !== 'occupied') selectedBed.value = null
+          if (!selected || selected.status !== 'occupied') {
+            selectedBed.value = null
+          } else {
+            const sameAdmission = selected.admissionId != null
+              && String(selected.admissionId) === String(selectedBed.value.admissionId)
+            const samePatient = selected.patientId != null
+              && String(selected.patientId) === String(selectedBed.value.patientId)
+            selectedBed.value = sameAdmission && samePatient
+              ? { ...selected, ward: selectedBed.value.ward }
+              : null
+          }
         }
       } catch {
         if (!componentUnmounted && requestId === wardsRequestId) toast.error('Failed to load ward data')
@@ -381,7 +393,7 @@ export default {
         }
       }
       if (!patients.value.length) {
-        const requestId = patientSearchRequestId
+        const requestId = ++patientListRequestId
         const controller = new AbortController()
         patientsRequestController = controller
         try {
@@ -392,13 +404,13 @@ export default {
           if (
             componentUnmounted ||
             controller.signal.aborted ||
-            requestId !== patientSearchRequestId ||
+            requestId !== patientListRequestId ||
             !showAdmitModal.value
           ) return
           patients.value = data.patients || []
           if (patientSearch.value.trim().length < 2) filteredPatients.value = patients.value
         } catch {
-          if (!componentUnmounted && requestId === patientSearchRequestId && !controller.signal.aborted && showAdmitModal.value) {
+          if (!componentUnmounted && requestId === patientListRequestId && !controller.signal.aborted && showAdmitModal.value) {
             toast.error('Failed to load patients')
           }
         } finally {
@@ -409,8 +421,6 @@ export default {
 
     const filterPatients = () => {
       if (patientSearchTimeout) clearTimeout(patientSearchTimeout)
-      patientsRequestController?.abort()
-      patientsRequestController = null
       patientSearchController?.abort()
       patientSearchController = null
       const query = patientSearch.value.trim()

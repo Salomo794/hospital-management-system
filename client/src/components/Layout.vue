@@ -388,6 +388,7 @@ export default {
     })
 
     return {
+      route,
       authStore, uiStore, collapsed, mobileOpen, dropdownOpen, panelOpen,
       notifications, unreadCount, isMobile,
       navSections, pageTitle, pageSection, todayLabel,

@@ -392,13 +392,19 @@ router.get('/patients', authenticate, authorize('admin', 'receptionist', 'doctor
   try {
     const [byGender] = await pool.query('SELECT gender, COUNT(*) as count FROM patients GROUP BY gender');
     const [byAge] = await pool.query(
-      `SELECT CASE
-        WHEN (julianday('now') - julianday(date_of_birth)) / 365.25 < 18 THEN 'Under 18'
-        WHEN (julianday('now') - julianday(date_of_birth)) / 365.25 BETWEEN 18 AND 35 THEN '18-35'
-        WHEN (julianday('now') - julianday(date_of_birth)) / 365.25 BETWEEN 36 AND 55 THEN '36-55'
-        WHEN (julianday('now') - julianday(date_of_birth)) / 365.25 BETWEEN 56 AND 75 THEN '56-75'
+      `WITH patient_ages AS (
+        SELECT CAST(strftime('%Y', 'now') AS INTEGER) - CAST(strftime('%Y', date_of_birth) AS INTEGER)
+          - CASE WHEN strftime('%m-%d', 'now') < strftime('%m-%d', date_of_birth) THEN 1 ELSE 0 END AS age
+        FROM patients
+      )
+      SELECT CASE
+        WHEN age < 18 THEN 'Under 18'
+        WHEN age <= 35 THEN '18-35'
+        WHEN age <= 55 THEN '36-55'
+        WHEN age <= 75 THEN '56-75'
         ELSE '75+'
-      END as age_group, COUNT(*) as count FROM patients GROUP BY age_group ORDER BY age_group`
+      END AS age_group, COUNT(*) AS count
+      FROM patient_ages GROUP BY age_group ORDER BY age_group`
     );
     const [byBloodType] = await pool.query('SELECT blood_type, COUNT(*) as count FROM patients WHERE blood_type IS NOT NULL GROUP BY blood_type');
     const [monthlyAdmissions] = await pool.query(

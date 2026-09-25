@@ -1,9 +1,14 @@
+const { loadEnvironment } = require('./environment');
+loadEnvironment();
+
 const pool = require('./database');
+const { paymentMethodConstraint } = require('./paymentMethods');
 
 async function setup() {
   const conn = await pool.getConnection();
 
   try {
+    await conn.beginTransaction();
     await conn.query(`CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       uuid TEXT UNIQUE NOT NULL,
@@ -39,6 +44,7 @@ async function setup() {
       allergies TEXT,
       chronic_conditions TEXT,
       portal_pin TEXT,
+      portal_session_version INTEGER NOT NULL DEFAULT 1,
       access_code TEXT UNIQUE,
       photo TEXT,
       status TEXT DEFAULT 'active' CHECK(status IN ('active','inactive','deceased')),
@@ -257,7 +263,7 @@ async function setup() {
       bill_id INTEGER NOT NULL,
       patient_id INTEGER NOT NULL,
       amount REAL NOT NULL CHECK(amount > 0),
-      payment_method TEXT NOT NULL CHECK(payment_method IN ('cash','card','insurance','online','bank_transfer','other')),
+      payment_method TEXT NOT NULL ${paymentMethodConstraint()},
       transaction_reference TEXT,
       received_by INTEGER,
       payment_date TEXT DEFAULT (datetime('now')),
@@ -296,6 +302,7 @@ async function setup() {
     await conn.query(`CREATE TABLE IF NOT EXISTS inventory_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       medicine_id INTEGER NOT NULL,
+      prescription_item_id INTEGER,
       transaction_type TEXT NOT NULL,
       quantity INTEGER NOT NULL,
       reference_number TEXT,
@@ -303,6 +310,7 @@ async function setup() {
       performed_by INTEGER,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (medicine_id) REFERENCES medicines(id) ON DELETE CASCADE,
+      FOREIGN KEY (prescription_item_id) REFERENCES prescription_items(id) ON DELETE SET NULL,
       FOREIGN KEY (performed_by) REFERENCES users(id)
     )`);
 
@@ -346,7 +354,7 @@ async function setup() {
       patient_id INTEGER NOT NULL,
       appointment_id INTEGER,
       checkin_time TEXT DEFAULT (datetime('now')),
-      checkin_date TEXT DEFAULT (date('now')),
+      checkin_date TEXT NOT NULL DEFAULT (date('now')),
       purpose TEXT,
       status TEXT DEFAULT 'waiting' CHECK(status IN ('waiting','in_consultation','completed','no_show','cancelled')),
       qr_token TEXT,
@@ -361,7 +369,7 @@ async function setup() {
     }
     await conn.query(`
       UPDATE checkins
-      SET checkin_date = date(checkin_time)
+      SET checkin_date = COALESCE(date(checkin_time), date(created_at), date('now'))
       WHERE checkin_date IS NULL OR TRIM(checkin_date) = ''
     `);
 
@@ -394,6 +402,25 @@ async function setup() {
         + `(check-in IDs: ${undatedCheckins.map(row => row.id).join(', ')}). Repair them and rerun setup.`
       );
     }
+    await conn.query('DROP TRIGGER IF EXISTS checkins_require_date_before_insert');
+    await conn.query('DROP TRIGGER IF EXISTS checkins_require_date_before_update');
+    await conn.query(`
+      CREATE TRIGGER checkins_require_date_before_insert
+      BEFORE INSERT ON checkins
+      WHEN NEW.checkin_date IS NULL OR TRIM(NEW.checkin_date) = ''
+      BEGIN
+        SELECT RAISE(ABORT, 'checkin_date is required');
+      END
+    `);
+    await conn.query(`
+      CREATE TRIGGER checkins_require_date_before_update
+      BEFORE UPDATE OF checkin_date, checkin_time ON checkins
+      WHEN NEW.checkin_date IS NULL OR TRIM(NEW.checkin_date) = ''
+      BEGIN
+        SELECT RAISE(ABORT, 'checkin_date is required');
+      END
+    `);
+
     const [duplicateAdmissions] = await conn.query(`
       SELECT patient_id, COUNT(*) AS duplicate_count
       FROM admissions
@@ -454,8 +481,10 @@ async function setup() {
     }
 
     await pool.isReady();
+    await conn.commit();
     console.log('All tables and indexes created successfully (SQLite)!');
   } catch (error) {
+    try { await conn.rollback(); } catch (_) { /* preserve original error */ }
     console.error('Error creating tables:', error);
     throw error;
   } finally {

@@ -1,9 +1,22 @@
+const { loadEnvironment, serverDirectory } = require('./environment');
+loadEnvironment();
+
+const {
+  PAYMENT_METHOD_VALUES,
+  PAYMENTS_TABLE_COLUMNS,
+  isPaymentMethod,
+  paymentMethodConstraint,
+  paymentMethodValueList,
+} = require('./paymentMethods');
+
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 
-const configuredPath = process.env.DB_PATH || path.join(__dirname, '..', 'hospital.db');
-const dbPath = configuredPath === ':memory:' ? configuredPath : path.resolve(configuredPath);
+const configuredPath = process.env.DB_PATH || path.join(serverDirectory, 'hospital.db');
+const dbPath = configuredPath === ':memory:'
+  ? configuredPath
+  : (path.isAbsolute(configuredPath) ? configuredPath : path.resolve(serverDirectory, configuredPath));
 if (dbPath !== ':memory:') {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 }
@@ -97,6 +110,86 @@ function assertNoActiveAdmissionDuplicates() {
   }
 }
 
+// SQLite cannot ALTER a CHECK constraint in place, so widening the accepted
+// payment methods means rebuilding the payments table. The rebuild is driven
+// by the canonical column list so rows are never lost, and it is a no-op once
+// the stored constraint already accepts every configured method.
+function paymentMethodConstraintIsCurrent() {
+  const table = sqlite
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'payments'")
+    .get();
+  if (!table || typeof table.sql !== 'string') return true;
+  return PAYMENT_METHOD_VALUES.every(value => table.sql.includes(`'${value}'`));
+}
+
+function rebuildPaymentsTable() {
+  const existingColumns = new Set(
+    sqlite.prepare('PRAGMA table_info(payments)').all().map(column => column.name)
+  );
+  const copied = PAYMENTS_TABLE_COLUMNS.filter(column => existingColumns.has(column));
+  if (copied.length === 0) {
+    throw new Error(
+      '[database] The payments table has no recognised columns, so its payment_method constraint cannot be '
+      + 'migrated automatically. Recreate the database with `npm run db:setup` and restore your data.'
+    );
+  }
+
+  // A table created outside setup.js may hold method values the constraint
+  // rejects. Fold them into "other" instead of leaving the API unable to boot.
+  const unexpected = sqlite
+    .prepare('SELECT DISTINCT payment_method FROM payments')
+    .all()
+    .map(row => row.payment_method)
+    .filter(value => !isPaymentMethod(value));
+  if (unexpected.length > 0) {
+    console.warn(
+      `[database] Stored payment method(s) ${unexpected.map(value => JSON.stringify(value)).join(', ')} are no longer `
+      + 'supported and were migrated to "other".'
+    );
+  }
+
+  const selectList = copied
+    .map(column => (column === 'payment_method'
+      ? `CASE WHEN payment_method IN (${paymentMethodValueList()}) THEN payment_method ELSE 'other' END`
+      : column))
+    .join(', ');
+
+  // foreign_keys is a no-op inside a transaction, so toggle it around the rebuild.
+  sqlite.pragma('foreign_keys = OFF');
+  try {
+    sqlite.exec('BEGIN IMMEDIATE');
+    try {
+      sqlite.exec('DROP TABLE IF EXISTS payments_rebuild');
+      sqlite.exec(`CREATE TABLE payments_rebuild (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT UNIQUE NOT NULL,
+        payment_number TEXT UNIQUE NOT NULL,
+        bill_id INTEGER NOT NULL,
+        patient_id INTEGER NOT NULL,
+        amount REAL NOT NULL CHECK(amount > 0),
+        payment_method TEXT NOT NULL ${paymentMethodConstraint()},
+        transaction_reference TEXT,
+        received_by INTEGER,
+        payment_date TEXT DEFAULT (datetime('now')),
+        notes TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
+        FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
+        FOREIGN KEY (received_by) REFERENCES users(id)
+      )`);
+      sqlite.exec(`INSERT INTO payments_rebuild (${copied.join(', ')}) SELECT ${selectList} FROM payments`);
+      sqlite.exec('DROP TABLE payments');
+      sqlite.exec('ALTER TABLE payments_rebuild RENAME TO payments');
+      sqlite.exec('COMMIT');
+    } catch (error) {
+      sqlite.exec('ROLLBACK');
+      throw error;
+    }
+  } finally {
+    sqlite.pragma('foreign_keys = ON');
+  }
+}
+
 function migrate() {
   // These tables are also declared by setup.js. Keeping their lightweight
   // migrations here allows the API to be inspected before a full setup run.
@@ -118,7 +211,7 @@ function migrate() {
     patient_id INTEGER NOT NULL,
     appointment_id INTEGER,
     checkin_time TEXT DEFAULT (datetime('now')),
-    checkin_date TEXT DEFAULT (date('now')),
+    checkin_date TEXT NOT NULL DEFAULT (date('now')),
     purpose TEXT,
     status TEXT DEFAULT 'waiting' CHECK(status IN ('waiting','in_consultation','completed','no_show','cancelled')),
     qr_token TEXT,
@@ -133,10 +226,28 @@ function migrate() {
     }
     sqlite.exec(`
       UPDATE checkins
-      SET checkin_date = date(checkin_time)
+      SET checkin_date = COALESCE(date(checkin_time), date(created_at), date('now'))
       WHERE checkin_date IS NULL OR TRIM(checkin_date) = ''
     `);
     assertNoActiveCheckinDuplicates();
+    sqlite.exec('DROP TRIGGER IF EXISTS checkins_require_date_before_insert');
+    sqlite.exec('DROP TRIGGER IF EXISTS checkins_require_date_before_update');
+    sqlite.exec(`
+      CREATE TRIGGER checkins_require_date_before_insert
+      BEFORE INSERT ON checkins
+      WHEN NEW.checkin_date IS NULL OR TRIM(NEW.checkin_date) = ''
+      BEGIN
+        SELECT RAISE(ABORT, 'checkin_date is required');
+      END
+    `);
+    sqlite.exec(`
+      CREATE TRIGGER checkins_require_date_before_update
+      BEFORE UPDATE OF checkin_date, checkin_time ON checkins
+      WHEN NEW.checkin_date IS NULL OR TRIM(NEW.checkin_date) = ''
+      BEGIN
+        SELECT RAISE(ABORT, 'checkin_date is required');
+      END
+    `);
     createRequiredIndex(
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_active_checkin_patient_date
        ON checkins(patient_id, checkin_date)
@@ -149,6 +260,9 @@ function migrate() {
   if (tableExists('patients')) {
     if (!columnExists('patients', 'portal_pin')) {
       sqlite.exec('ALTER TABLE patients ADD COLUMN portal_pin TEXT');
+    }
+    if (!columnExists('patients', 'portal_session_version')) {
+      sqlite.exec('ALTER TABLE patients ADD COLUMN portal_session_version INTEGER NOT NULL DEFAULT 1');
     }
     if (!columnExists('patients', 'access_code')) {
       sqlite.exec('ALTER TABLE patients ADD COLUMN access_code TEXT');
@@ -218,11 +332,18 @@ function migrate() {
       WHERE status = 'admitted' AND ward IS NOT NULL AND bed_number IS NOT NULL`);
   }
   if (tableExists('payments')) {
+    // Dropping the table removes its indexes, so widen the constraint first
+    // and then re-create idx_payment_transaction_reference.
+    if (!paymentMethodConstraintIsCurrent()) rebuildPaymentsTable();
     createIndexIfPossible(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_transaction_reference
       ON payments(transaction_reference)
       WHERE transaction_reference IS NOT NULL AND transaction_reference != ''`);
   }
   if (tableExists('inventory_transactions')) {
+    if (!columnExists('inventory_transactions', 'prescription_item_id')) {
+      sqlite.exec('ALTER TABLE inventory_transactions ADD COLUMN prescription_item_id INTEGER');
+    }
+    createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_inventory_prescription_item ON inventory_transactions(prescription_item_id)');
     createIndexIfPossible(`CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_reference_number
       ON inventory_transactions(reference_number)
       WHERE reference_number IS NOT NULL AND reference_number != ''`);

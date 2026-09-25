@@ -10,9 +10,31 @@ const { buildSlots } = require('../utils/schedule');
 const APPOINTMENT_ROLES = ['admin', 'receptionist', 'doctor', 'nurse'];
 const APPOINTMENT_STATUSES = ['scheduled', 'in_progress', 'completed', 'cancelled', 'no_show'];
 const BOOKED_STATUSES = ['scheduled', 'in_progress', 'completed'];
+const APPOINTMENT_TRANSITIONS = {
+  scheduled: new Set(['in_progress', 'completed', 'cancelled', 'no_show']),
+  in_progress: new Set(['completed', 'cancelled']),
+  completed: new Set(),
+  cancelled: new Set(),
+  no_show: new Set(),
+};
 
 function normalizeTime(value) {
   return String(value).slice(0, 5);
+}
+
+function isPastSlot(date, time) {
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  if (date !== today) return false;
+  const currentTime = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`;
+  return time <= currentTime;
+}
+
+function assertAppointmentTransition(currentStatus, nextStatus) {
+  if (currentStatus === nextStatus) return;
+  if (!APPOINTMENT_TRANSITIONS[currentStatus]?.has(nextStatus)) {
+    throw new ApiError(409, `Cannot transition appointment from ${currentStatus} to ${nextStatus}`);
+  }
 }
 
 router.get('/', authenticate, authorize(...APPOINTMENT_ROLES), asyncHandler(async (req, res) => {
@@ -81,7 +103,8 @@ router.get('/slots/:doctorId', authenticate, authorize(...APPOINTMENT_ROLES), as
     [doctorId, date, ...BOOKED_STATUSES]
   );
   const bookedTimes = new Set(booked.map(row => normalizeTime(row.appointment_time)));
-  res.json({ date, slots: scheduleSlots.filter(slot => !bookedTimes.has(slot)), available: true });
+  const slots = scheduleSlots.filter(slot => !bookedTimes.has(slot) && !isPastSlot(date, slot));
+  res.json({ date, slots, available: true });
 }));
 
 router.get('/:id', authenticate, authorize(...APPOINTMENT_ROLES), asyncHandler(async (req, res) => {
@@ -125,6 +148,9 @@ router.post('/', authenticate, authorize(...APPOINTMENT_ROLES), validateAppointm
   const time = normalizeTime(appointment_time);
   if (!buildSlots(doctor[0].schedule, appointment_date).includes(time)) {
     throw new ApiError(400, 'The requested time is outside the doctor’s schedule');
+  }
+  if (isPastSlot(appointment_date, time)) {
+    throw new ApiError(400, 'The requested time has already passed');
   }
 
   try {
@@ -173,16 +199,34 @@ router.put('/:id', authenticate, authorize(...APPOINTMENT_ROLES), asyncHandler(a
   if (req.user.role === 'doctor' && existing[0].doctor_id !== req.user.id) {
     throw new ApiError(403, 'You may only update your own appointments.');
   }
+  if (status !== undefined) assertAppointmentTransition(existing[0].status, status);
 
-  const updates = [];
-  const values = [];
-  if (status !== undefined) { updates.push('status = ?'); values.push(status); }
-  if (notes !== undefined) { updates.push('notes = ?'); values.push(notes); }
-  values.push(id);
-  const [result] = await pool.query(`UPDATE appointments SET ${updates.join(', ')} WHERE id = ?`, values);
-  if (result.affectedRows === 0) throw new ApiError(404, 'Appointment not found');
-  const [updated] = await pool.query('SELECT * FROM appointments WHERE id = ?', [id]);
-  res.json(updated[0]);
+  const updated = await withTransaction(pool, async connection => {
+    const updates = [];
+    const values = [];
+    if (status !== undefined) { updates.push('status = ?'); values.push(status); }
+    if (notes !== undefined) { updates.push('notes = ?'); values.push(notes); }
+    values.push(id);
+    if (status !== undefined) {
+      values.push(existing[0].status);
+      const [result] = await connection.query(
+        `UPDATE appointments SET ${updates.join(', ')} WHERE id = ? AND status = ?`,
+        values
+      );
+      if (result.affectedRows !== 1) {
+        throw new ApiError(409, 'Appointment status changed while the update was being processed');
+      }
+    } else {
+      const [result] = await connection.query(
+        `UPDATE appointments SET ${updates.join(', ')} WHERE id = ?`,
+        values
+      );
+      if (result.affectedRows !== 1) throw new ApiError(404, 'Appointment not found');
+    }
+    const [rows] = await connection.query('SELECT * FROM appointments WHERE id = ?', [id]);
+    return rows[0];
+  });
+  res.json(updated);
 }));
 
 router.put('/:id/cancel', authenticate, authorize('admin', 'receptionist', 'doctor'), asyncHandler(async (req, res) => {
@@ -192,8 +236,16 @@ router.put('/:id/cancel', authenticate, authorize('admin', 'receptionist', 'doct
   if (req.user.role === 'doctor' && existing[0].doctor_id !== req.user.id) {
     throw new ApiError(403, 'You may only cancel your own appointments.');
   }
-  if (existing[0].status === 'cancelled') throw new ApiError(409, 'Appointment is already cancelled');
-  await pool.query("UPDATE appointments SET status = 'cancelled' WHERE id = ?", [id]);
+  if (!['scheduled', 'in_progress'].includes(existing[0].status)) {
+    throw new ApiError(409, `Cannot cancel an appointment with status ${existing[0].status}`);
+  }
+  const [result] = await pool.query(
+    "UPDATE appointments SET status = 'cancelled' WHERE id = ? AND status = ?",
+    [id, existing[0].status]
+  );
+  if (result.affectedRows !== 1) {
+    throw new ApiError(409, 'Appointment status changed while cancellation was being processed');
+  }
   res.json({ message: 'Appointment cancelled' });
 }));
 

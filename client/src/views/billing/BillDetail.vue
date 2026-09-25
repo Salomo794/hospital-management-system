@@ -67,7 +67,7 @@
             <div v-for="p in bill.payments" :key="p.id" class="payment-item">
               <div class="payment-info">
                 <strong>{{ formatCurrency(p.amount) }}</strong>
-                <span>{{ p.payment_method }} | {{ formatDate(p.payment_date) }}</span>
+                <span>{{ paymentMethodLabel(p.payment_method) }} | {{ formatDate(p.payment_date) }}</span>
                 <span v-if="p.transaction_reference" class="text-muted">Ref: {{ p.transaction_reference }}</span>
               </div>
             </div>
@@ -99,11 +99,9 @@
               <div class="form-group">
                 <label>Payment Method *</label>
                 <select v-model="paymentForm.payment_method" required>
-                  <option value="cash">Cash</option>
-                  <option value="card">Card</option>
-                  <option value="insurance">Insurance</option>
-                  <option value="online">Online</option>
-                  <option value="bank_transfer">Bank Transfer</option>
+                  <option v-for="method in paymentMethods" :key="method.value" :value="method.value">
+                    {{ method.label }}
+                  </option>
                 </select>
               </div>
               <div class="form-group">
@@ -130,6 +128,7 @@ import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { formatDate, formatDateTime, formatCurrency, getStatusColor } from '../../utils/helpers'
+import { fetchPaymentMethods, paymentMethodLabel } from '../../utils/paymentMethods'
 
 export default {
   name: 'BillDetail',
@@ -142,7 +141,12 @@ export default {
     const showPaymentModal = ref(false)
     const recordingPayment = ref(false)
     const paymentForm = ref({ amount: 0, payment_method: 'cash', transaction_reference: '' })
+    const paymentMethods = ref([])
     const outstandingBalance = computed(() => Math.max(Number(bill.value?.net_amount || 0) - Number(bill.value?.paid_amount || 0), 0))
+
+    const loadPaymentMethods = async () => {
+      paymentMethods.value = await fetchPaymentMethods()
+    }
 
     const loadBill = async () => {
       loading.value = true
@@ -192,11 +196,14 @@ export default {
       window.print()
     }
 
-    onMounted(loadBill)
+    onMounted(() => {
+      loadBill()
+      loadPaymentMethods()
+    })
     watch(() => route.params.id, loadBill)
     return {
-      bill, loading, error, showPaymentModal, recordingPayment, paymentForm, outstandingBalance,
-      loadBill, openPaymentModal, recordPayment, printBill,
+      bill, loading, error, showPaymentModal, recordingPayment, paymentForm, paymentMethods,
+      outstandingBalance, loadBill, openPaymentModal, recordPayment, printBill, paymentMethodLabel,
       formatDate, formatDateTime, formatCurrency, getStatusColor
     }
   }

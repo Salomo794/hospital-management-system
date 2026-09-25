@@ -393,6 +393,8 @@ export default {
     const error = ref('')
     let recordRequestGeneration = 0
     let recordController = null
+    let prescriptionSubmissionGeneration = 0
+    let labOrderSubmissionGeneration = 0
     let componentUnmounted = false
 
     const parsedVitals = computed(() => {
@@ -587,6 +589,8 @@ export default {
     }
 
     async function submitPrescription(acknowledge = false) {
+      const recordId = Number(record.value?.id)
+      if (!recordId) return
       const invalidItem = prescriptionForm.items.find(item => {
         const quantity = Number(item.quantity)
         return !item.medicine_id || !String(item.dosage || '').trim() || !String(item.frequency || '').trim() || !Number.isInteger(quantity) || quantity <= 0
@@ -595,11 +599,21 @@ export default {
         toast.warning('Complete every prescription item, including medicine, dosage, frequency, and a positive whole-number quantity.')
         return
       }
+
+      const requestRecordGeneration = recordRequestGeneration
+      const submissionGeneration = ++prescriptionSubmissionGeneration
+      const isCurrentRequest = () => (
+        !componentUnmounted &&
+        submissionGeneration === prescriptionSubmissionGeneration &&
+        requestRecordGeneration === recordRequestGeneration &&
+        Number(route.params.id) === recordId &&
+        Number(record.value?.id) === recordId
+      )
       submittingPrescription.value = true
       if (!acknowledge) safetyWarnings.value = []
       try {
         const { data } = await axios.post('/api/emr/prescriptions', {
-          medical_record_id: record.value.id,
+          medical_record_id: recordId,
           patient_id: record.value.patient_id,
           items: prescriptionForm.items.map(i => ({
             medicine_id: i.medicine_id,
@@ -612,6 +626,7 @@ export default {
           notes: prescriptionForm.notes,
           acknowledge_warnings: acknowledge
         })
+        if (!isCurrentRequest()) return
         if (data.warnings && data.warnings.length) {
           toast.warning(`Prescription created with ${data.warnings.length} safety warning(s).`)
         } else {
@@ -620,6 +635,7 @@ export default {
         closePrescriptionModal()
         await fetchRecord()
       } catch (err) {
+        if (!isCurrentRequest()) return
         const res = err.response?.data
         if (err.response?.status === 409 && res?.warnings) {
           safetyWarnings.value = res.warnings
@@ -628,7 +644,7 @@ export default {
           toast.error(res?.message || 'Failed to create prescription.')
         }
       } finally {
-        submittingPrescription.value = false
+        if (submissionGeneration === prescriptionSubmissionGeneration) submittingPrescription.value = false
       }
     }
 
@@ -687,27 +703,41 @@ export default {
     }
 
     async function submitLabOrder() {
+      const recordId = Number(record.value?.id)
+      if (!recordId) return
       if (!labOrderForm.test_ids.length) {
         toast.warning('Please select at least one lab test.')
         return
       }
+
+      const requestRecordGeneration = recordRequestGeneration
+      const submissionGeneration = ++labOrderSubmissionGeneration
+      const isCurrentRequest = () => (
+        !componentUnmounted &&
+        submissionGeneration === labOrderSubmissionGeneration &&
+        requestRecordGeneration === recordRequestGeneration &&
+        Number(route.params.id) === recordId &&
+        Number(record.value?.id) === recordId
+      )
       submittingLabOrder.value = true
       try {
         await axios.post('/api/laboratory/orders', {
           patient_id: record.value.patient_id,
           doctor_id: record.value.doctor_id,
-          medical_record_id: record.value.id,
+          medical_record_id: recordId,
           test_ids: labOrderForm.test_ids,
           priority: labOrderForm.priority,
           clinical_notes: labOrderForm.clinical_notes
         })
+        if (!isCurrentRequest()) return
         toast.success('Lab order submitted successfully.')
         closeLabOrderModal()
         await fetchRecord()
       } catch (err) {
+        if (!isCurrentRequest()) return
         toast.error(err.response?.data?.message || 'Failed to submit lab order.')
       } finally {
-        submittingLabOrder.value = false
+        if (submissionGeneration === labOrderSubmissionGeneration) submittingLabOrder.value = false
       }
     }
 
@@ -721,6 +751,10 @@ export default {
     }
 
     watch(() => route.params.id, () => {
+      prescriptionSubmissionGeneration += 1
+      labOrderSubmissionGeneration += 1
+      submittingPrescription.value = false
+      submittingLabOrder.value = false
       closePrescriptionModal()
       closeLabOrderModal()
       fetchRecord()
@@ -732,6 +766,8 @@ export default {
     onBeforeUnmount(() => {
       componentUnmounted = true
       recordRequestGeneration += 1
+      prescriptionSubmissionGeneration += 1
+      labOrderSubmissionGeneration += 1
       recordController?.abort()
       recordController = null
       clearMedicineSearches()

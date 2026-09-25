@@ -61,12 +61,16 @@ const authenticatePortal = async (req, res, next) => {
   try {
     const [rows] = await pool.query(
       `SELECT id, uuid, mrn, first_name, last_name, date_of_birth, gender, phone, email,
-              blood_type, insurance_provider, allergies, chronic_conditions, status
+              blood_type, insurance_provider, allergies, chronic_conditions, status,
+              portal_session_version
        FROM patients WHERE id = ? AND status = 'active'`,
       [decoded.pid]
     );
     if (rows.length === 0) {
       return res.status(401).json({ message: 'Patient record not found or inactive.' });
+    }
+    if (Number(decoded.psv) !== Number(rows[0].portal_session_version)) {
+      return res.status(401).json({ message: 'This portal session has been revoked. Please sign in again.' });
     }
     req.patient = rows[0];
     return next();

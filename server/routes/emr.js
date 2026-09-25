@@ -119,7 +119,7 @@ router.post('/prescriptions', authenticate, authorize('doctor', 'admin'), asyncH
       `INSERT INTO prescriptions
        (uuid, prescription_number, medical_record_id, patient_id, doctor_id, notes)
        VALUES (?,?,?,?,?,?)`,
-      [uuid, prescriptionNumber, recordId, patientId, req.user.id, notes || null]
+      [uuid, prescriptionNumber, recordId, patientId, records[0].doctor_id, notes || null]
     );
     for (const item of normalizedItems) {
       await connection.query(
@@ -251,8 +251,16 @@ router.post('/', authenticate, authorize('doctor', 'admin'), asyncHandler(async 
     if (req.user.role === 'doctor' && appointment.doctor_id !== req.user.id) {
       throw new ApiError(403, 'You may only complete your own appointments.');
     }
+    const [treatingDoctors] = await pool.query(
+      "SELECT id FROM users WHERE id = ? AND role = 'doctor' AND is_active = 1",
+      [appointment.doctor_id]
+    );
+    if (treatingDoctors.length === 0) {
+      throw new ApiError(409, 'The assigned treating doctor is missing or inactive.');
+    }
   }
   const serializedVitals = serializeVitalSigns(vital_signs);
+  const recordDoctorId = appointment ? Number(appointment.doctor_id) : Number(req.user.id);
 
   const record = await withTransaction(pool, async connection => {
     const uuid = randomUUID();
@@ -262,7 +270,7 @@ router.post('/', authenticate, authorize('doctor', 'admin'), asyncHandler(async 
         vital_signs, physical_examination, diagnosis, treatment_plan, notes)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       [
-        uuid, patientId, req.user.id, appointment?.id || null, chief_complaint || null,
+        uuid, patientId, recordDoctorId, appointment?.id || null, chief_complaint || null,
         history_of_present_illness || null, serializedVitals, physical_examination || null,
         diagnosis || null, treatment_plan || null, notes || null,
       ]
