@@ -102,14 +102,13 @@
         </div>
         <div class="card-body">
           <div class="search-filters">
-            <input type="text" v-model="search" placeholder="Search patient / MRN / bed..." @keyup.enter="loadAdmissions" />
-            <select v-model="statusFilter" @change="loadAdmissions">
+            <input type="text" v-model="search" placeholder="Search patient / MRN / bed..." @keyup.enter="page = 1; loadAdmissions" />
+            <select v-model="statusFilter" @change="page = 1; loadAdmissions()">
               <option value="">All Statuses</option>
               <option value="admitted">Admitted</option>
-              <option value="transferred">Transferred</option>
               <option value="discharged">Discharged</option>
             </select>
-            <select v-model="wardFilter" @change="loadAdmissions">
+            <select v-model="wardFilter" @change="page = 1; loadAdmissions()">
               <option value="">All Wards</option>
               <option v-for="w in wards" :key="w.ward" :value="w.ward">{{ w.ward }}</option>
             </select>
@@ -145,6 +144,11 @@
             <p>No admissions found.</p>
             <span class="empty-hint">Adjust filters or admit a new patient.</span>
           </div>
+        </div>
+        <div class="pagination" v-if="totalAdmissions > limit">
+          <button class="btn btn-sm" :disabled="page <= 1" @click="page--; loadAdmissions()">Previous</button>
+          <span>Page {{ page }} of {{ Math.ceil(totalAdmissions / limit) }}</span>
+          <button class="btn btn-sm" :disabled="page >= Math.ceil(totalAdmissions / limit)" @click="page++; loadAdmissions()">Next</button>
         </div>
       </div>
     </template>
@@ -236,7 +240,7 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { useAuthStore } from '../../store/auth'
@@ -258,6 +262,8 @@ export default {
 
     const admissions = ref([])
     const totalAdmissions = ref(0)
+    const page = ref(1)
+    const limit = ref(20)
     const loadingAdmissions = ref(false)
     const search = ref('')
     const statusFilter = ref('')
@@ -284,20 +290,23 @@ export default {
       }
     }
 
+    let admissionsRequestId = 0
     const loadAdmissions = async () => {
+      const requestId = ++admissionsRequestId
       loadingAdmissions.value = true
       try {
-        const params = {}
+        const params = { page: page.value, limit: limit.value }
         if (statusFilter.value) params.status = statusFilter.value
         if (wardFilter.value) params.ward = wardFilter.value
         if (search.value) params.search = search.value
         const { data } = await axios.get('/api/admissions', { params })
+        if (requestId !== admissionsRequestId) return
         admissions.value = data.admissions
         totalAdmissions.value = data.total
       } catch (e) {
         toast.error('Failed to load admissions')
       } finally {
-        loadingAdmissions.value = false
+        if (requestId === admissionsRequestId) loadingAdmissions.value = false
       }
     }
 
@@ -334,13 +343,24 @@ export default {
       }
     }
 
+    let patientSearchTimeout = null
+    let patientSearchRequestId = 0
     const filterPatients = () => {
-      const q = patientSearch.value.toLowerCase()
-      if (!q) { filteredPatients.value = patients.value; return }
-      filteredPatients.value = patients.value.filter(p =>
-        (p.first_name + ' ' + p.last_name).toLowerCase().includes(q) ||
-        (p.mrn || '').toLowerCase().includes(q)
-      )
+      clearTimeout(patientSearchTimeout)
+      const query = patientSearch.value.trim()
+      const requestId = ++patientSearchRequestId
+      if (query.length < 2) {
+        filteredPatients.value = patients.value
+        return
+      }
+      patientSearchTimeout = setTimeout(async () => {
+        try {
+          const { data } = await axios.get('/api/patients', { params: { search: query, status: 'active', limit: 20 } })
+          if (requestId === patientSearchRequestId) filteredPatients.value = data.patients || []
+        } catch (e) {
+          if (requestId === patientSearchRequestId) filteredPatients.value = []
+        }
+      }, 300)
     }
 
     const submitAdmission = async () => {
@@ -370,9 +390,10 @@ export default {
     }
 
     onMounted(loadAll)
+    onUnmounted(() => clearTimeout(patientSearchTimeout))
 
     return {
-      wards, totals, loadingWards, selectedBed, admissions, totalAdmissions, loadingAdmissions,
+      wards, totals, loadingWards, selectedBed, admissions, totalAdmissions, page, limit, loadingAdmissions,
       search, statusFilter, wardFilter, canAdmit, canDischarge,
       showAdmitModal, savingAdmission, doctors, patients, filteredPatients, patientSearch, admitForm,
       loadAll, loadAdmissions, selectBed, openAdmitModal, filterPatients, submitAdmission,

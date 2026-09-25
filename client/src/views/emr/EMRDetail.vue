@@ -5,6 +5,14 @@
       <p>Loading medical record...</p>
     </div>
 
+    <div v-else-if="error" class="loading-state">
+      <p>{{ error }}</p>
+      <div class="btn-group">
+        <button class="btn btn-primary" @click="fetchRecord">Retry</button>
+        <button class="btn btn-outline" @click="$router.back()">Go back</button>
+      </div>
+    </div>
+
     <template v-else-if="record">
       <div class="detail-header">
         <button class="btn btn-sm" @click="$router.back()">&larr; Back</button>
@@ -367,12 +375,12 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, onBeforeUnmount, reactive } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, reactive, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { useAuthStore } from '../../store/auth'
-import { formatDate, formatCurrency, getStatusColor, debounce } from '../../utils/helpers'
+import { formatDate, formatCurrency, getStatusColor } from '../../utils/helpers'
 
 export default {
   name: 'EMRDetail',
@@ -382,6 +390,7 @@ export default {
     const auth = useAuthStore()
     const record = ref(null)
     const loading = ref(true)
+    const error = ref('')
 
     const parsedVitals = computed(() => {
       if (!record.value?.vital_signs) return {}
@@ -413,11 +422,14 @@ export default {
 
     async function fetchRecord() {
       loading.value = true
+      error.value = ''
+      record.value = null
       try {
         const { data } = await axios.get(`/api/emr/${route.params.id}`)
         record.value = data
       } catch (err) {
-        toast.error('Failed to load medical record.')
+        error.value = err.response?.data?.message || 'Failed to load medical record.'
+        toast.error(error.value)
       } finally {
         loading.value = false
       }
@@ -452,32 +464,37 @@ export default {
       items: [createEmptyItem()]
     })
 
-    const searchMedicineDebounced = debounce(async (idx, query) => {
-      const item = prescriptionForm.items[idx]
-      if (!item) return
-      if (!query || query.length < 2) {
-        item.medicineOptions = []
-        return
-      }
-      try {
-        const { data } = await axios.get('/api/pharmacy/medicines', { params: { search: query } })
-        if (prescriptionForm.items[idx] === item && item.medicineSearch === query) {
-          item.medicineOptions = Array.isArray(data) ? data : (data.data || data.medicines || [])
-        }
-      } catch {
-        if (prescriptionForm.items[idx] === item) item.medicineOptions = []
-      }
-    }, 350)
+    const medicineSearchDebouncers = new Map()
 
     function clearPrescriptionWarnings() {
       safetyWarnings.value = []
     }
 
     function searchMedicine(idx, value) {
-      prescriptionForm.items[idx].medicineSearch = value
-      prescriptionForm.items[idx].medicine_id = null
+      const item = prescriptionForm.items[idx]
+      if (!item) return
+      item.medicineSearch = value
+      item.medicine_id = null
       clearPrescriptionWarnings()
-      searchMedicineDebounced(idx, value)
+      clearTimeout(medicineSearchDebouncers.get(idx))
+      if (!value || value.length < 2) {
+        item.medicineOptions = []
+        medicineSearchDebouncers.delete(idx)
+        return
+      }
+      const requestId = (item.searchRequestId || 0) + 1
+      item.searchRequestId = requestId
+      const timer = setTimeout(async () => {
+        try {
+          const { data } = await axios.get('/api/pharmacy/medicines', { params: { search: value, limit: 20 } })
+          if (prescriptionForm.items[idx] === item && item.searchRequestId === requestId && item.medicineSearch === value) {
+            item.medicineOptions = data.medicines || []
+          }
+        } catch {
+          if (prescriptionForm.items[idx] === item && item.searchRequestId === requestId) item.medicineOptions = []
+        }
+      }, 350)
+      medicineSearchDebouncers.set(idx, timer)
     }
 
     function selectMedicine(idx, med) {
@@ -494,11 +511,19 @@ export default {
     }
 
     function removePrescriptionItem(idx) {
+      clearTimeout(medicineSearchDebouncers.get(idx))
+      medicineSearchDebouncers.delete(idx)
       prescriptionForm.items.splice(idx, 1)
       clearPrescriptionWarnings()
     }
 
+    function clearMedicineSearches() {
+      medicineSearchDebouncers.forEach(timer => clearTimeout(timer))
+      medicineSearchDebouncers.clear()
+    }
+
     function openPrescriptionModal() {
+      clearMedicineSearches()
       prescriptionForm.notes = ''
       prescriptionForm.items = [createEmptyItem()]
       safetyWarnings.value = []
@@ -506,6 +531,7 @@ export default {
     }
 
     function closePrescriptionModal() {
+      clearMedicineSearches()
       showPrescriptionModal.value = false
       safetyWarnings.value = []
     }
@@ -626,6 +652,7 @@ export default {
       })
     }
 
+    watch(() => route.params.id, fetchRecord)
     onMounted(() => {
       fetchRecord()
       document.addEventListener('click', handleOutsideClick)
@@ -638,6 +665,8 @@ export default {
     return {
       record,
       loading,
+      error,
+      fetchRecord,
       parsedVitals,
       canCreatePrescription,
       canCreateLabOrder,

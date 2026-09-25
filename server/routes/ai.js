@@ -14,6 +14,9 @@ router.post('/chat', authenticate, async (req, res) => {
     const lowerMsg = message.toLowerCase();
     const hospitalOverviewRequested = lowerMsg.includes('overview') || lowerMsg.includes('command center') || lowerMsg.includes('live status') || lowerMsg.includes('hospital status');
     const clinicalRoles = ['admin', 'doctor', 'nurse', 'receptionist', 'lab_technician'];
+    const operationsRoles = ['admin', 'receptionist', 'doctor', 'nurse'];
+    const pharmacyRoles = ['admin', 'pharmacist'];
+    const medicationRoles = ['admin', 'doctor', 'nurse', 'pharmacist'];
     let response = '';
     let data = null;
 
@@ -69,6 +72,9 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     // Today's appointments
     else if (lowerMsg.includes('today') && (lowerMsg.includes('appointment') || lowerMsg.includes('schedule'))) {
+      if (!operationsRoles.includes(req.user.role)) {
+        return res.status(403).json({ response: 'You do not have permission to view appointment schedules.', data: null });
+      }
       const today = new Date().toISOString().split('T')[0];
       let query = `SELECT a.appointment_time, a.status, a.type,
         p.first_name || ' ' || p.last_name as patient_name,
@@ -137,6 +143,9 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     // Pending tasks
     else if (lowerMsg.includes('pending') || lowerMsg.includes('overdue') || lowerMsg.includes('tasks')) {
+      if (!operationsRoles.includes(req.user.role)) {
+        return res.status(403).json({ response: 'You do not have permission to view operational tasks.', data: null });
+      }
       const [pendingAppts] = await pool.query("SELECT COUNT(*) as count FROM appointments WHERE status = 'scheduled'");
       const [pendingBills] = await pool.query("SELECT COUNT(*) as count FROM bills WHERE payment_status IN ('pending','partial')");
       const [pendingLab] = await pool.query("SELECT COUNT(*) as count FROM lab_orders WHERE status IN ('ordered','in_progress')");
@@ -162,6 +171,9 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     // Bed / ward status
     else if (lowerMsg.includes('ward') || lowerMsg.includes('occupancy') || lowerMsg.includes('bed')) {
+      if (!operationsRoles.includes(req.user.role)) {
+        return res.status(403).json({ response: 'You do not have permission to view ward occupancy.', data: null });
+      }
       const [admissions] = await pool.query("SELECT ward, COUNT(*) as count FROM admissions WHERE status = 'admitted' GROUP BY ward");
       const byWard = {};
       admissions.forEach(a => { byWard[a.ward] = a.count; });
@@ -184,6 +196,9 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     // Medicine stock checks (specific + low stock)
     else if (lowerMsg.includes('low stock') || lowerMsg.includes('stock alert') || lowerMsg.includes('stock alerts')) {
+      if (!pharmacyRoles.includes(req.user.role) && !operationsRoles.includes(req.user.role)) {
+        return res.status(403).json({ response: 'You do not have permission to view pharmacy inventory.', data: null });
+      }
       const [low] = await pool.query(
         "SELECT name, generic_name, stock_quantity, min_stock_level, unit FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1 ORDER BY stock_quantity ASC"
       );
@@ -199,6 +214,9 @@ router.post('/chat', authenticate, async (req, res) => {
       }
     }
     else if (lowerMsg.includes('stock') || lowerMsg.includes('inventory')) {
+      if (!pharmacyRoles.includes(req.user.role) && !operationsRoles.includes(req.user.role)) {
+        return res.status(403).json({ response: 'You do not have permission to view pharmacy inventory.', data: null });
+      }
       const medMatch = message.match(/(?:stock\s+of\s+|stock\s+for\s+)?(.+)/i);
       const raw = medMatch && medMatch[1] ? medMatch[1] : '';
       const searchTerm = raw
@@ -243,6 +261,9 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     // Drug interaction check
     else if (lowerMsg.includes('interaction') && lowerMsg.includes('between')) {
+      if (!medicationRoles.includes(req.user.role)) {
+        return res.status(403).json({ response: 'You do not have permission to view medication interaction data.', data: null });
+      }
       const pairMatch = message.match(/between\s+(.+?)\s+and\s+(.+)/i);
       if (pairMatch) {
         const a = pairMatch[1].trim();
@@ -326,6 +347,9 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     // Live hospital overview
     else if (lowerMsg.includes('overview') || lowerMsg.includes('command center') || lowerMsg.includes('live status') || lowerMsg.includes('hospital status')) {
+      if (!operationsRoles.includes(req.user.role)) {
+        return res.status(403).json({ response: 'You do not have permission to view the live hospital overview.', data: null });
+      }
       const today = new Date().toISOString().split('T')[0];
       const [apptsToday] = await pool.query('SELECT COUNT(*) as count FROM appointments WHERE appointment_date = ?', [today]);
       const [waiting] = await pool.query("SELECT COUNT(*) as count FROM checkins WHERE date(checkin_time) = date('now') AND status IN ('waiting','in_consultation')");
@@ -344,6 +368,9 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     // Predictive forecast
     else if (lowerMsg.includes('forecast') || lowerMsg.includes('predict') || lowerMsg.includes('outlook') || lowerMsg.includes('trend')) {
+      if (!operationsRoles.includes(req.user.role)) {
+        return res.status(403).json({ response: 'You do not have permission to view operational forecasts.', data: null });
+      }
       const [history] = await pool.query(
         `SELECT appointment_date, COUNT(*) as count FROM appointments
          WHERE appointment_date >= date('now', '-42 days') AND appointment_date < date('now')

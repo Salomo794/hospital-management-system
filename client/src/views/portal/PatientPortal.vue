@@ -119,6 +119,7 @@ import { getStoredItem, getStoredJson, removeStoredItem, setStoredItem, setStore
 export default {
   name: 'PatientPortal',
   setup() {
+    const portalApi = axios.create({ baseURL: '/api' })
     const token = ref(getStoredItem('portal-token'))
     const patient = ref(getStoredJson('portal-patient', value => !!value?.id))
     const loginForm = reactive({ identifier: '', portal_pin: '' })
@@ -161,11 +162,11 @@ export default {
       error.value = ''
       try {
         const [profile, appointmentData, labData, prescriptionData, billData] = await Promise.all([
-          axios.get('/api/portal/me', { headers: authorization.value }),
-          axios.get('/api/portal/appointments', { headers: authorization.value }),
-          axios.get('/api/portal/lab-results', { headers: authorization.value }),
-          axios.get('/api/portal/prescriptions', { headers: authorization.value }),
-          axios.get('/api/portal/bills', { headers: authorization.value })
+          portalApi.get('/portal/me', { headers: authorization.value }),
+          portalApi.get('/portal/appointments', { headers: authorization.value }),
+          portalApi.get('/portal/lab-results', { headers: authorization.value }),
+          portalApi.get('/portal/prescriptions', { headers: authorization.value }),
+          portalApi.get('/portal/bills', { headers: authorization.value })
         ])
         patient.value = profile.data.patient
         checkin.value = profile.data.checkin
@@ -188,7 +189,7 @@ export default {
       loggingIn.value = true
       error.value = ''
       try {
-        const { data } = await axios.post('/api/portal/login', loginForm)
+        const { data } = await portalApi.post('/portal/login', loginForm)
         token.value = data.token
         patient.value = data.patient
         setStoredItem('portal-token', data.token)
@@ -207,7 +208,7 @@ export default {
     const checkIn = async () => {
       checkingIn.value = true
       try {
-        const { data } = await axios.post('/api/portal/checkin', checkinForm)
+        const { data } = await portalApi.post('/portal/checkin', checkinForm)
         checkinResult.value = data
         if (token.value) await loadPortalData()
       } catch (requestError) {
@@ -229,7 +230,7 @@ export default {
       payingBillId.value = bill.id
       paymentMessage.value = ''
       try {
-        const { data } = await axios.post(`/api/portal/bills/${bill.id}/pay`, {
+        const { data } = await portalApi.post(`/portal/bills/${bill.id}/pay`, {
           amount,
           payment_method: 'card',
           request_id: paymentRequestIds.get(bill.id)

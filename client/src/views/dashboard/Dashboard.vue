@@ -253,15 +253,16 @@ export default {
     })
 
     const statCards = computed(() => [
-      { label: 'Total Patients',        value: stats.value.totalPatients        || 0,  icon: '👥', gradient: 'linear-gradient(135deg,#ccfbf1,#99f6e4)', trend: undefined },
-      { label: 'Active Doctors',        value: stats.value.totalDoctors         || 0,  icon: '👨‍⚕️', gradient: 'linear-gradient(135deg,#dbeafe,#bfdbfe)', trend: undefined },
-      { label: "Today's Appointments",  value: stats.value.todayAppointments    || 0,  icon: '📅', gradient: 'linear-gradient(135deg,#ede9fe,#ddd6fe)', trend: undefined },
-      { label: 'Pending',               value: stats.value.pendingAppointments  || 0,  icon: '⏳', gradient: 'linear-gradient(135deg,#fef3c7,#fde68a)', trend: undefined },
-      { label: "Today's Revenue",       value: formatCurrency(stats.value.todayRevenue   || 0), icon: '💵', gradient: 'linear-gradient(135deg,#dcfce7,#bbf7d0)', trend: undefined },
-      { label: 'Monthly Revenue',       value: formatCurrency(stats.value.monthlyRevenue || 0), icon: '📈', gradient: 'linear-gradient(135deg,#cffafe,#a5f3fc)', trend: undefined },
-      { label: 'Unpaid Bills',          value: stats.value.pendingBills         || 0,  icon: '🧾', gradient: 'linear-gradient(135deg,#fee2e2,#fecaca)', trend: undefined },
-      { label: 'Low Stock Alerts',      value: stats.value.lowStockMedications  || 0,  icon: '⚠️', gradient: 'linear-gradient(135deg,#ffedd5,#fed7aa)', trend: undefined },
-    ])
+      { label: 'Total Patients', value: stats.value.totalPatients || 0, icon: '👥', gradient: 'linear-gradient(135deg,#ccfbf1,#99f6e4)', roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+      { label: 'Active Doctors', value: stats.value.totalDoctors || 0, icon: '👨‍⚕️', gradient: 'linear-gradient(135deg,#dbeafe,#bfdbfe)' },
+      { label: "Today's Appointments", value: stats.value.todayAppointments || 0, icon: '📅', gradient: 'linear-gradient(135deg,#ede9fe,#ddd6fe)', roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+      { label: 'Pending Appointments', value: stats.value.pendingAppointments || 0, icon: '⏳', gradient: 'linear-gradient(135deg,#fef3c7,#fde68a)', roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+      { label: "Today's Revenue", value: formatCurrency(stats.value.todayRevenue || 0), icon: '💵', gradient: 'linear-gradient(135deg,#dcfce7,#bbf7d0)', roles: ['admin', 'receptionist'] },
+      { label: 'Monthly Revenue', value: formatCurrency(stats.value.monthlyRevenue || 0), icon: '📈', gradient: 'linear-gradient(135deg,#cffafe,#a5f3fc)', roles: ['admin', 'receptionist'] },
+      { label: 'Unpaid Bills', value: stats.value.pendingBills || 0, icon: '🧾', gradient: 'linear-gradient(135deg,#fee2e2,#fecaca)', roles: ['admin', 'receptionist'] },
+      { label: 'Pending Lab Orders', value: stats.value.pendingLabOrders || 0, icon: '🧪', gradient: 'linear-gradient(135deg,#ede9fe,#ddd6fe)' },
+      { label: 'Low Stock Alerts', value: stats.value.lowStockMedications || 0, icon: '⚠️', gradient: 'linear-gradient(135deg,#ffedd5,#fed7aa)' }
+    ].filter(card => !card.roles || authStore.can(...card.roles)))
 
     const weeklyChartData = computed(() => ({
       labels: weeklyStats.value.map(d => fmtDay(d.date)),
@@ -311,14 +312,14 @@ export default {
       }
     })
 
-    const quickActions = [
-      { to: '/patients',     icon: '🏥', label: 'New Patient' },
-      { to: '/appointments', icon: '📅', label: 'Book Appt.' },
-      { to: '/emr',          icon: '📋', label: 'New Record' },
-      { to: '/pharmacy',     icon: '💊', label: 'Pharmacy' },
-      { to: '/laboratory',   icon: '🧪', label: 'Lab Order' },
-      { to: '/billing',      icon: '💳', label: 'New Bill' },
-    ]
+    const quickActions = computed(() => [
+      { to: '/patients', icon: '🏥', label: 'Patients', roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+      { to: '/appointments', icon: '📅', label: 'Appointments', roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+      { to: '/emr', icon: '📋', label: 'Medical Records', roles: ['admin', 'doctor', 'nurse'] },
+      { to: '/pharmacy', icon: '💊', label: 'Pharmacy', roles: ['admin', 'pharmacist'] },
+      { to: '/laboratory', icon: '🧪', label: 'Laboratory', roles: ['admin', 'doctor', 'nurse', 'lab_technician'] },
+      { to: '/billing', icon: '💳', label: 'Billing', roles: ['admin', 'receptionist'] }
+    ].filter(action => authStore.can(...action.roles)))
 
     const fmtDay = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })
 
