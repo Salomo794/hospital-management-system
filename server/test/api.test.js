@@ -808,6 +808,101 @@ test('only networks the configured market can actually charge are offered', asyn
   }
 });
 
+test('selecting a provider this build has no adapter for is reported, not silently ignored', async () => {
+  const token = await login();
+  const provider = process.env.MOBILE_MONEY_PROVIDER;
+  try {
+    // Mukuru is the provider a Rwandan deployment needs, but no adapter is
+    // built for it yet. The configuration must say so plainly rather than
+    // looking like a missing key, so nobody ships believing the rail works.
+    process.env.MOBILE_MONEY_PROVIDER = 'mukuru';
+    const config = await request(app)
+      .get('/api/billing/mobile-money/config')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    assert.equal(config.body.enabled, false);
+    assert.match(config.body.reason, /"mukuru" is not a provider this build can use/i);
+  } finally {
+    if (provider === undefined) delete process.env.MOBILE_MONEY_PROVIDER;
+    else process.env.MOBILE_MONEY_PROVIDER = provider;
+  }
+});
+
+test('assisted mobile money is recorded from a confirmation code, with no provider needed', async () => {
+  const token = await login();
+  const bill = await createBillWithBalance(token, 90);
+
+  // The confirmation code is the only evidence the money moved, so it is not
+  // optional. Without it a reception slip would look identical to a patient
+  // who simply never paid.
+  const missingCode = await request(app)
+    .post(`/api/billing/${bill.id}/payments`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ amount: 90, payment_method: 'mobile_money' })
+    .expect(400);
+  assert.match(missingCode.body.message, /confirmation code is required/i);
+  await request(app)
+    .post(`/api/billing/${bill.id}/payments`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ amount: 90, payment_method: 'mobile_money', transaction_reference: 'MP' })
+    .expect(400);
+
+  // A partial transfer is allowed, exactly like any other payment method.
+  const partial = await request(app)
+    .post(`/api/billing/${bill.id}/payments`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ amount: 40, payment_method: 'mobile_money', transaction_reference: 'MP260716.1234.A45678' })
+    .expect(201);
+  assert.equal(partial.body.bill.payment_status, 'partial');
+  assert.equal(partial.body.bill.paid_amount, 40);
+
+  // Settled on the spot, because reception has already seen the money.
+  const detail = await request(app)
+    .get(`/api/billing/${bill.id}`)
+    .set('Authorization', `Bearer ${token}`)
+    .expect(200);
+  const recorded = detail.body.payments.find(p => p.transaction_reference === 'MP260716.1234.A45678');
+  assert.equal(recorded.status, 'completed');
+  assert.match(recorded.notes, /assisted mobile money/i);
+  assert.ok(recorded.completed_at, 'an assisted payment records when it was taken');
+  assert.equal(recorded.provider, null, 'an assisted payment has no provider behind it');
+
+  const settled = await request(app)
+    .post(`/api/billing/${bill.id}/payments`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ amount: 50, payment_method: 'mobile_money', transaction_reference: 'MP260716.9999.B11111' })
+    .expect(201);
+  assert.equal(settled.body.bill.payment_status, 'paid');
+
+  // It is auditable as a distinct action, so a disputed payment is traceable
+  // to the member of staff who entered it.
+  const [auditRows] = await pool.query(
+    "SELECT COUNT(*) AS count FROM audit_log WHERE action = 'billing.mobile_money.assisted'"
+  );
+  assert.ok(auditRows[0].count >= 2, 'assisted payments must be recorded under their own audit action');
+});
+
+test('assisted mobile money still works when the automated rail is switched off', async () => {
+  const token = await login();
+  const bill = await createBillWithBalance(token, 15);
+  const enabled = process.env.MOBILE_MONEY_ENABLED;
+  try {
+    // Recording a transfer the patient already made needs no provider, so the
+    // feature switch must not break the way hospitals take MoMo today. Only the
+    // automated request flow depends on a provider being configured.
+    delete process.env.MOBILE_MONEY_ENABLED;
+    const recorded = await request(app)
+      .post(`/api/billing/${bill.id}/payments`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ amount: 15, payment_method: 'mobile_money', transaction_reference: 'MP260716.5555.C22222' })
+      .expect(201);
+    assert.equal(recorded.body.bill.payment_status, 'paid');
+  } finally {
+    if (enabled === undefined) delete process.env.MOBILE_MONEY_ENABLED;
+    else process.env.MOBILE_MONEY_ENABLED = enabled;
+  }
+});
+
 test('portal payments are idempotent and PIN resets revoke existing sessions', async () => {
   const adminToken = await login();
   const unique = `${Date.now()}@example.com`;

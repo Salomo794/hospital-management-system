@@ -13,6 +13,7 @@
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "db:setup": "node server/config/setup.js",
     "db:seed": "node server/config/seed.js",
+    "db:backup": "node server/config/backup.js",
     "build": "npm run build --prefix client",
     "test": "npm test --prefix server",
     "check": "npm run build && npm test",

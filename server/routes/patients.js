@@ -103,6 +103,17 @@ router.get('/:id', authenticate, authorize(...CLINICAL_ROLES), asyncHandler(asyn
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const [rows] = await pool.query('SELECT * FROM patients WHERE id = ?', [id]);
   if (rows.length === 0) throw new ApiError(404, 'Patient not found');
+  // Reading a chart is an access event in its own right. Without this, someone
+  // browsing patient records leaves no trace at all, which is exactly the thing
+  // an access log exists to detect. Only the identity of the record is stored -
+  // no clinical values - so the log does not become a second copy of the PHI.
+  await recordAudit({
+    req,
+    action: 'patient.record.viewed',
+    table: 'patients',
+    recordId: id,
+    summary: `${req.user.role} opened the record for ${rows[0].mrn}`,
+  });
   res.json(withoutPortalPin(rows[0]));
 }));
 
@@ -236,6 +247,16 @@ router.get('/:id/history', authenticate, authorize(...CLINICAL_ROLES), asyncHand
      FROM bills WHERE patient_id = ? ORDER BY created_at DESC`,
     [id]
   );
+  // The history view pulls the chart, prescriptions and bills in one request,
+  // so it is the single most revealing read in the system and is logged on its
+  // own action rather than looking like an ordinary record open.
+  await recordAudit({
+    req,
+    action: 'patient.history.viewed',
+    table: 'patients',
+    recordId: id,
+    summary: `${req.user.role} opened the clinical history for patient ${id}`,
+  });
   res.json({ appointments, medical_records: records, prescriptions, bills });
 }));
 

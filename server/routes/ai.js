@@ -4,6 +4,7 @@ const pool = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { FixedWindowRateLimiter } = require('../utils/rateLimiter');
 const { WARDS: WARD_CAPACITY } = require('../config/wards');
+const { zonedDate, zonedDayRange } = require('../config/time');
 
 const MAX_MESSAGE_LENGTH = 500;
 const CLINICAL_ROLES = ['admin', 'receptionist', 'doctor', 'nurse'];
@@ -288,8 +289,20 @@ router.post('/chat', authenticate, async (req, res) => {
       if (req.user.role !== 'admin') {
         return res.status(403).json({ response: 'Only administrators can view revenue data.', data: null });
       }
-      const [today] = await pool.query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE DATE(payment_date) = date('now')");
-      const [month] = await pool.query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE CAST(strftime('%m', payment_date) AS INTEGER) = CAST(strftime('%m', 'now') AS INTEGER) AND CAST(strftime('%Y', payment_date) AS INTEGER) = CAST(strftime('%Y', 'now') AS INTEGER)");
+      // Net of refunds and bounded by the hospital's calendar, so the figures
+      // here agree with the billing summary and the reports.
+      const todayRange = zonedDayRange(zonedDate());
+      const monthRange = zonedDayRange(`${zonedDate().slice(0, 7)}-01`);
+      const [today] = await pool.query(
+        `SELECT COALESCE((SELECT SUM(amount) FROM payments WHERE payment_date >= ? AND payment_date < ?), 0)
+                - COALESCE((SELECT SUM(amount) FROM payment_refunds WHERE refund_date >= ? AND refund_date < ?), 0) AS total`,
+        [todayRange.start, todayRange.end, todayRange.start, todayRange.end]
+      );
+      const [month] = await pool.query(
+        `SELECT COALESCE((SELECT SUM(amount) FROM payments WHERE payment_date >= ? AND payment_date < ?), 0)
+                - COALESCE((SELECT SUM(amount) FROM payment_refunds WHERE refund_date >= ? AND refund_date < ?), 0) AS total`,
+        [monthRange.start, todayRange.end, monthRange.start, todayRange.end]
+      );
       response = 'Revenue summary:';
       data = {
         today: today[0].total,

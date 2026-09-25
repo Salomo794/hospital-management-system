@@ -137,29 +137,62 @@
                 </select>
               </div>
               <div class="form-group" v-if="paymentForm.payment_method === MOBILE_MONEY_METHOD">
-                <!-- Mobile money is not collected here: the prompt goes to the
-                     patient's handset and the bill settles when they approve. -->
+                <!-- Two ways to take mobile money. Assisted needs nothing but a
+                     confirmation code; the request flow needs a provider and is
+                     only offered when one is configured. -->
                 <div class="notice">
-                  Mobile money is charged on the patient's phone. This will send
-                  {{ formatCurrency(outstandingBalance) }} to the number below; the bill stays
-                  unpaid until they approve the prompt.
+                  <template v-if="mobileMoneyConfig.enabled">
+                    Send the request to the patient's phone and they approve it there,
+                    or record a transfer they have already made.
+                  </template>
+                  <template v-else>
+                    Record a transfer the patient has already made to the hospital's
+                    mobile money number. Enter the confirmation code from their phone.
+                  </template>
                 </div>
-                <div class="form-group">
-                  <label>Patient Mobile Money Number *</label>
-                  <input v-model.trim="mobileMoneyForm.phone" placeholder="e.g. 0551234567" required />
+                <div class="form-group" v-if="mobileMoneyConfig.enabled">
+                  <label class="radio-label">
+                    <input type="radio" v-model="mobileMoneyMode" value="request" />
+                    Send request to their phone
+                  </label>
+                  <label class="radio-label">
+                    <input type="radio" v-model="mobileMoneyMode" value="assisted" />
+                    They already transferred
+                  </label>
                 </div>
+                <template v-if="mobileMoneyMode === 'request' && mobileMoneyConfig.enabled">
+                  <div class="form-group">
+                    <label>Patient Mobile Money Number *</label>
+                    <input v-model.trim="mobileMoneyForm.phone" placeholder="e.g. 0781234567" />
+                  </div>
+                  <div class="form-group">
+                    <label>Network *</label>
+                    <select v-model="mobileMoneyForm.network">
+                      <option value="" disabled>Select network</option>
+                      <option v-for="network in mobileMoneyConfig.networks" :key="network.value" :value="network.value">
+                        {{ network.label }}
+                      </option>
+                    </select>
+                  </div>
+                </template>
                 <div class="form-group">
-                  <label>Network *</label>
-                  <select v-model="mobileMoneyForm.network" required>
-                    <option value="" disabled>Select network</option>
-                    <option v-for="network in mobileMoneyConfig.networks" :key="network.value" :value="network.value">
-                      {{ network.label }}
-                    </option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label>Email for receipt</label>
-                  <input v-model.trim="mobileMoneyForm.email" type="email" :placeholder="bill.patient_email || 'Receipt address'" />
+                  <label>{{ mobileMoneyMode === 'request' && mobileMoneyConfig.enabled ? 'Email for receipt (optional)' : 'Confirmation Code *' }}</label>
+                  <input
+                    v-if="mobileMoneyMode === 'request' && mobileMoneyConfig.enabled"
+                    v-model.trim="mobileMoneyForm.email"
+                    type="email"
+                    :placeholder="bill.patient_email || 'Receipt address'"
+                  />
+                  <input
+                    v-else
+                    v-model.trim="paymentForm.transaction_reference"
+                    placeholder="e.g. MP260716.1234.A45678"
+                    required
+                  />
+                  <small class="text-muted" v-if="!(mobileMoneyMode === 'request' && mobileMoneyConfig.enabled)">
+                    This is the code the patient received on their phone. It is the
+                    only proof the money arrived, so it is required.
+                  </small>
                 </div>
               </div>
               <div class="form-group" v-else>
@@ -169,7 +202,7 @@
               <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" @click="showPaymentModal = false">Cancel</button>
                 <button type="submit" class="btn btn-success" :disabled="recordingPayment">
-                  {{ recordingPayment ? 'Sending...' : (paymentForm.payment_method === MOBILE_MONEY_METHOD ? 'Send Request' : 'Record Payment') }}
+                  {{ recordingPayment ? 'Saving...' : submitLabel }}
                 </button>
               </div>
             </form>
@@ -288,17 +321,27 @@ export default {
     const refundForm = ref({ amount: 0, reason: '' })
     const mobileMoneyConfig = ref(disabledMobileMoney)
     const mobileMoneyForm = ref({ phone: '', network: '', email: '' })
+    const mobileMoneyMode = ref('assisted')
     const pendingCharge = ref(null)
     const checkingPending = ref(false)
     const outstandingBalance = computed(() => Math.max(Number(bill.value?.net_amount || 0) - Number(bill.value?.paid_amount || 0), 0))
 
-    // Mobile money is hidden from the dropdown when no provider is configured,
-    // so staff are never offered a method that would fail on submit.
-    const staffPaymentMethods = computed(() => (
-      mobileMoneyConfig.value.enabled
-        ? paymentMethods.value
-        : paymentMethods.value.filter(method => method.value !== MOBILE_MONEY_METHOD)
-    ))
+    // The button has to say what pressing it actually does. "Send Request"
+    // leaves the bill unpaid, "Record Payment" settles it now, and mixing the
+    // two up at a counter is how patients get told they have paid when they
+    // have not.
+    const submitLabel = computed(() => {
+      if (usesMobileMoneyRequest()) return 'Send Request'
+      return 'Record Payment'
+    })
+
+    // Mobile money is always offered. Without a configured provider it records
+    // an assisted payment: the patient transferred to the hospital's MoMo
+    // number and reception enters the confirmation code. With a provider the
+    // request can instead be pushed to the patient's phone. Hiding the method
+    // until a provider exists would leave the hospital unable to take the most
+    // common payment in the country.
+    const staffPaymentMethods = computed(() => paymentMethods.value)
 
     const loadPaymentMethods = async () => {
       const [methods, mobileMoney] = await Promise.all([
@@ -337,8 +380,17 @@ export default {
         network: '',
         email: bill.value?.patient_email || ''
       }
+      // Assisted is the default: it needs no provider, so it is the option that
+      // always works.
+      mobileMoneyMode.value = 'assisted'
       showPaymentModal.value = true
     }
+
+    const usesMobileMoneyRequest = () => (
+      paymentForm.value.payment_method === MOBILE_MONEY_METHOD
+      && mobileMoneyConfig.value.enabled
+      && mobileMoneyMode.value === 'request'
+    )
 
     const requestMobileMoney = async () => {
       const { phone, network } = mobileMoneyForm.value
@@ -372,13 +424,19 @@ export default {
     }
 
     const recordPayment = async () => {
-      if (paymentForm.value.payment_method === MOBILE_MONEY_METHOD) {
+      if (usesMobileMoneyRequest()) {
         await requestMobileMoney()
         return
       }
       const amount = Number(paymentForm.value.amount)
       if (!Number.isFinite(amount) || amount <= 0 || amount > outstandingBalance.value) {
         toast.warning('Enter a positive amount within the outstanding balance.')
+        return
+      }
+      // Assisted mobile money is recorded as settled money the moment reception
+      // saves it, so the confirmation code is checked here rather than after.
+      if (paymentForm.value.payment_method === MOBILE_MONEY_METHOD && paymentForm.value.transaction_reference.trim().length < 4) {
+        toast.warning('Enter the confirmation code from the patient\'s phone.')
         return
       }
       recordingPayment.value = true
@@ -487,8 +545,8 @@ export default {
     watch(() => route.params.id, loadBill)
     return {
       bill, loading, error, showPaymentModal, recordingPayment, paymentForm, paymentMethods,
-      staffPaymentMethods, mobileMoneyConfig, mobileMoneyForm, pendingCharge, checkingPending,
-      outstandingBalance, loadBill, openPaymentModal, recordPayment, printBill, paymentMethodLabel,
+      staffPaymentMethods, mobileMoneyConfig, mobileMoneyForm, mobileMoneyMode, pendingCharge, checkingPending,
+      outstandingBalance, submitLabel, loadBill, openPaymentModal, recordPayment, printBill, paymentMethodLabel,
       checkPendingCharge, dismissPending, MOBILE_MONEY_METHOD,
       showRefundModal, processingRefund, refundTarget, refundForm,
       refundableFor, openRefundModal, closeRefundModal, submitRefund,
@@ -530,6 +588,17 @@ export default {
   font-size: 13px;
   color: #78350f;
   line-height: 1.5;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--gray-700);
+  font-weight: 400;
+  margin-bottom: 6px;
+  cursor: pointer;
 }
 
 .loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: var(--gray-500); }

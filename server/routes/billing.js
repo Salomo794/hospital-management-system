@@ -6,7 +6,13 @@ const {
   ApiError, asyncHandler, getPagination, isDateOnly, parseFiniteNumber, parseInteger, withTransaction,
 } = require('../utils/http');
 const { randomUUID, generateRecordNumber } = require('../utils/ids');
-const { PAYMENT_METHODS, isPaymentMethod, PENDING_PAYMENT_STATUS, COMPLETED_PAYMENT_STATUS } = require('../config/paymentMethods');
+const {
+  PAYMENT_METHODS,
+  isPaymentMethod,
+  PENDING_PAYMENT_STATUS,
+  COMPLETED_PAYMENT_STATUS,
+  MOBILE_MONEY_METHOD,
+} = require('../config/paymentMethods');
 const { isMobileMoneyEnabled, publicConfig: mobileMoneyPublicConfig, paystackSettings } = require('../config/mobileMoney');
 const {
   getAdapter: getMobileMoneyAdapter,
@@ -22,6 +28,7 @@ const {
 } = require('../services/mobileMoneyPayments');
 const { recordAudit, pick } = require('../utils/audit');
 const { money, recalculateBillPayment } = require('../utils/bills');
+const { zonedDate, zonedDayRange } = require('../config/time');
 
 const BILLING_ROLES = ['admin', 'receptionist'];
 const BILL_STATUSES = ['pending', 'partial', 'paid', 'cancelled'];
@@ -73,11 +80,16 @@ router.get('/summary', authenticate, authorize(...BILLING_ROLES), asyncHandler(a
             COALESCE(SUM(CASE WHEN net_amount > paid_amount THEN net_amount - paid_amount ELSE 0 END), 0) AS pending_amount
      FROM bills WHERE payment_status IN ('pending','partial')`
   );
-  // Net of refunds, so the cash figure matches what is actually banked.
+  // Net of refunds, so the cash figure matches what is actually banked, and
+  // bounded by the hospital's day rather than UTC's.
+  const today = zonedDayRange(zonedDate());
   const [collected] = await pool.query(
-    `SELECT COALESCE((SELECT SUM(amount) FROM payments WHERE date(payment_date) = date('now')), 0)
-            - COALESCE((SELECT SUM(amount) FROM payment_refunds WHERE date(refund_date) = date('now')), 0)
-            AS collected_today`
+    `SELECT COALESCE((SELECT SUM(amount) FROM payments
+              WHERE payment_date >= ? AND payment_date < ?), 0)
+            - COALESCE((SELECT SUM(amount) FROM payment_refunds
+              WHERE refund_date >= ? AND refund_date < ?), 0)
+            AS collected_today`,
+    [today.start, today.end, today.start, today.end]
   );
   res.json({
     unpaid_count: pending[0].unpaid_count,
@@ -388,6 +400,19 @@ router.post('/:id/payments', authenticate, authorize(...BILLING_ROLES), asyncHan
   const transactionReference = req.body?.transaction_reference ? String(req.body.transaction_reference).trim() : null;
   if (transactionReference && transactionReference.length > 150) throw new ApiError(400, 'transaction_reference is too long');
 
+  // Mobile money recorded through this endpoint is the assisted kind: the
+  // patient transferred to the hospital's own MoMo number and reception is
+  // entering it after the fact. The automated kind, where a prompt is pushed
+  // and the provider confirms it, is a separate endpoint and never lands here.
+  //
+  // The confirmation code is mandatory because it is the only evidence the money
+  // moved. Without it a reception error would be indistinguishable from a
+  // payment that simply never happened, which is the whole risk of this method.
+  const assistedMobileMoney = paymentMethod === MOBILE_MONEY_METHOD;
+  if (assistedMobileMoney && (!transactionReference || transactionReference.length < 4)) {
+    throw new ApiError(400, 'A mobile money confirmation code is required (at least 4 characters)');
+  }
+
   const payment = await withTransaction(pool, async connection => {
     const [bills] = await connection.query('SELECT * FROM bills WHERE id = ?', [id]);
     if (bills.length === 0) throw new ApiError(404, 'Bill not found');
@@ -399,21 +424,39 @@ router.post('/:id/payments', authenticate, authorize(...BILLING_ROLES), asyncHan
 
     const uuid = randomUUID();
     const paymentNumber = generateRecordNumber('PAY');
+    // An assisted charge is settled money, so it is recorded as completed and
+    // counts towards the bill immediately. The notes name it as manual so the
+    // audit trail separates it from provider-confirmed charges without anyone
+    // having to remember which is which.
+    const notes = assistedMobileMoney
+      ? `Assisted mobile money received${req.body?.notes ? `: ${req.body.notes}` : ''}`
+      : (req.body?.notes || null);
+    // This endpoint only ever records settled money, so the status is always
+    // completed. A pending charge can only come from the automated mobile money
+    // flow, which writes its row on a different path.
     const [result] = await connection.query(
       `INSERT INTO payments
-       (uuid, payment_number, bill_id, patient_id, amount, payment_method,
-        transaction_reference, received_by, notes)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
-      [uuid, paymentNumber, id, bill.patient_id, amount, paymentMethod, transactionReference, req.user.id, req.body?.notes || null]
+       (uuid, payment_number, bill_id, patient_id, amount, payment_method, status,
+        transaction_reference, received_by, notes, completed_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        uuid, paymentNumber, id, bill.patient_id, amount, paymentMethod, COMPLETED_PAYMENT_STATUS,
+        transactionReference, req.user.id, notes,
+        assistedMobileMoney ? new Date().toISOString() : null,
+      ]
     );
     const updatedBill = await recalculateBillPayment(connection, id);
     await recordAudit({
       req,
       connection,
-      action: 'billing.payment.recorded',
+      // A distinct action so an assisted entry is easy to find later when a
+      // patient disputes having paid.
+      action: assistedMobileMoney ? 'billing.mobile_money.assisted' : 'billing.payment.recorded',
       table: 'payments',
       recordId: result.insertId,
-      summary: `${paymentNumber} ${amount} by ${paymentMethod}`,
+      summary: assistedMobileMoney
+        ? `${paymentNumber} ${amount} by mobile money, confirmed by ${req.user.email || `user ${req.user.id}`}`
+        : `${paymentNumber} ${amount} by ${paymentMethod}`,
       after: {
         payment_number: paymentNumber,
         amount,

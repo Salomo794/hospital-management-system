@@ -20,6 +20,9 @@ const DEMO_FIXTURE_TABLES = [
   'notifications',
   'audit_log',
   'inventory_transactions',
+  'suppliers',
+  'purchase_order_items',
+  'purchase_orders',
   'admissions',
   'drug_interactions',
   'checkins',
@@ -309,6 +312,126 @@ async function seed() {
       }
     }
     console.log('  Medicines seeded');
+
+    // --- Procurement: suppliers plus orders part-way through the workflow ---
+    const [existingSuppliers] = await conn.query('SELECT COUNT(*) as count FROM suppliers');
+    if (existingSuppliers[0].count === 0) {
+      const adminUserId = userIds[0];
+      const suppliers = [
+        { name: 'Medisource Pharmaceuticals', contact: 'Amara Okafor', email: 'orders@medisource.example', phone: '+1-555-0142', lead: 5, notes: 'Preferred generics supplier. Consignment on antibiotics.' },
+        { name: 'Northgate Medical Supply', contact: 'Daniel Reyes', email: 'sales@northgate.example', phone: '+1-555-0177', lead: 10, notes: 'Cold-chain and device lines.' },
+        { name: 'VitalCare Distributors', contact: 'Priya Raman', email: 'supply@vitalcare.example', phone: '+1-555-0198', lead: 3, notes: 'Fast local delivery for high-consumption lines.' },
+        { name: 'Harbour Diagnostics', contact: 'Tomasz Nowak', email: 'reagents@harbourdiag.example', phone: '+1-555-0210', lead: 14, notes: 'Laboratory reagents and calibrators only.' },
+      ];
+      for (const supplier of suppliers) {
+        await conn.query(
+          `INSERT INTO suppliers (name, contact_name, email, phone, address, lead_time_days, notes, is_active)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+          [supplier.name, supplier.contact, supplier.email, supplier.phone, 'Industrial Park', supplier.lead, supplier.notes]
+        );
+      }
+
+      // One fully received order and one awaiting approval, so a fresh demo
+      // database shows the whole pipeline instead of an empty screen.
+      const [supplierRows] = await conn.query('SELECT id FROM suppliers ORDER BY id');
+      const [medRowsForPo] = await conn.query(
+        'SELECT id, name, cost_price FROM medicines WHERE is_active = 1 ORDER BY id'
+      );
+      const medByName = {};
+      medRowsForPo.forEach(row => { medByName[row.name] = row; });
+      const supplierByIndex = index => supplierRows[index]?.id;
+
+      async function seedOrder({ number, supplierIndex, status, lines, note, expectedDate, submittedOffsetDays, approvedOffsetDays, receivedOffsetDays }) {
+        const usable = lines.filter(line => medByName[line.medicine]);
+        if (usable.length === 0) return;
+        const received = status === 'received';
+        // Timestamps are SQLite expressions rather than bound values, because
+        // datetime('now', ?) is not evaluated in a parameter slot.
+        const [poResult] = await conn.query(
+          `INSERT INTO purchase_orders
+           (uuid, order_number, supplier_id, status, total_amount, ordered_by, approved_by,
+            expected_date, notes, submitted_at, approved_at, received_at)
+           VALUES (?, ?, ?, ?, 0, ?, ?,
+                   CASE WHEN ? IS NULL THEN NULL ELSE date('now', ?) END,
+                   ?,
+                   datetime('now', ?),
+                   CASE WHEN ? THEN datetime('now', ?) ELSE NULL END,
+                   CASE WHEN ? THEN datetime('now', ?) ELSE NULL END)`,
+          [
+            randomUUID(),
+            number,
+            supplierByIndex(supplierIndex),
+            status,
+            doctorUserId1,
+            received ? adminUserId : null,
+            expectedDate || null,
+            expectedDate || null,
+            note,
+            submittedOffsetDays === null ? null : `-${submittedOffsetDays} days`,
+            received ? 1 : 0,
+            approvedOffsetDays === null ? null : `-${approvedOffsetDays} days`,
+            received ? 1 : 0,
+            receivedOffsetDays === null ? null : `-${receivedOffsetDays} days`,
+          ]
+        );
+        for (const line of usable) {
+          const medicine = medByName[line.medicine];
+          const receivedUnits = received ? line.quantity : 0;
+          const [itemResult] = await conn.query(
+            `INSERT INTO purchase_order_items (purchase_order_id, medicine_id, quantity, unit_cost, quantity_received)
+             VALUES (?, ?, ?, ?, ?)`,
+            [poResult.insertId, medicine.id, line.quantity, medicine.cost_price || 0, receivedUnits]
+          );
+          if (receivedUnits > 0) {
+            await conn.query('UPDATE medicines SET stock_quantity = stock_quantity + ? WHERE id = ?', [receivedUnits, medicine.id]);
+            await conn.query(
+              `INSERT INTO inventory_transactions
+               (medicine_id, transaction_type, quantity, reference_number, notes, performed_by)
+               VALUES (?, 'purchase', ?, ?, ?, ?)`,
+              [medicine.id, receivedUnits, `po:${number}:${itemResult.insertId}:${receivedUnits}`, `Received against ${number}`, doctorUserId1]
+            );
+          }
+        }
+        await conn.query(
+          `UPDATE purchase_orders SET total_amount =
+             (SELECT COALESCE(SUM(quantity * unit_cost), 0) FROM purchase_order_items WHERE purchase_order_id = ?)
+           WHERE id = ?`,
+          [poResult.insertId, poResult.insertId]
+        );
+      }
+
+      await seedOrder({
+        number: 'PO-DEMO-0001',
+        supplierIndex: 0,
+        status: 'received',
+        note: 'Quarterly antibiotic top-up.',
+        expectedDate: null,
+        submittedOffsetDays: 16,
+        approvedOffsetDays: 15,
+        receivedOffsetDays: 12,
+        lines: [
+          { medicine: 'Amoxicillin 500mg', quantity: 400 },
+          { medicine: 'Ciprofloxacin 500mg', quantity: 200 },
+          { medicine: 'Diazepam 5mg', quantity: 150 },
+        ],
+      });
+
+      await seedOrder({
+        number: 'PO-DEMO-0002',
+        supplierIndex: 2,
+        status: 'submitted',
+        note: 'Chronic-care top-up awaiting approval.',
+        expectedDate: '+7 days',
+        submittedOffsetDays: 1,
+        approvedOffsetDays: null,
+        receivedOffsetDays: null,
+        lines: [
+          { medicine: 'Salbutamol Inhaler', quantity: 60 },
+          { medicine: 'Levothyroxine 50mcg', quantity: 300 },
+        ],
+      });
+    }
+    console.log('  Procurement seeded');
 
     // --- Prescriptions with items ---
     const [existingRx] = await conn.query('SELECT COUNT(*) as count FROM prescriptions');

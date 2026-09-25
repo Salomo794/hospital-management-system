@@ -4,6 +4,7 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { ApiError, asyncHandler, getPagination, parseFiniteNumber, parseInteger, withTransaction } = require('../utils/http');
 const { randomUUID, generateRecordNumber } = require('../utils/ids');
+const { recordAudit } = require('../utils/audit');
 
 const LAB_ROLES = ['admin', 'doctor', 'nurse', 'lab_technician'];
 const ORDER_STATUSES = ['ordered', 'in_progress', 'completed', 'cancelled'];
@@ -223,6 +224,15 @@ router.get('/orders/:id', authenticate, authorize(...LAB_ROLES), asyncHandler(as
      WHERE loi.lab_order_id = ? ORDER BY loi.id`,
     [id]
   );
+  // Lab results are among the most sensitive data a hospital holds, so viewing
+  // an order is logged like any other read of patient data.
+  await recordAudit({
+    req,
+    action: 'laboratory.order.viewed',
+    table: 'lab_orders',
+    recordId: id,
+    summary: `${req.user.role} opened lab order ${order[0].order_number || id} for ${order[0].mrn}`,
+  });
   res.json({ ...order[0], items });
 }));
 

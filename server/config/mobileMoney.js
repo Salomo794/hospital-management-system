@@ -92,12 +92,17 @@ function requestedProvider() {
 function activeProviderName() {
   if (!flagEnabled('MOBILE_MONEY_ENABLED')) return null;
   const requested = requestedProvider();
-  if (mockAllowed()) return PROVIDER_MOCK;
-  if (requested === PROVIDER_MOCK) return null;
-  if (requested === PROVIDER_PAYSTACK || paystackConfigured()) {
-    return paystackConfigured() ? PROVIDER_PAYSTACK : null;
+  // An explicitly configured provider wins over the development mock. If the
+  // mock could take precedence, a developer pointing the app at real sandbox
+  // keys would be silently served simulated charges, and every test would
+  // pass against a provider that is not the one they are deploying.
+  if (requested) {
+    if (requested === PROVIDER_MOCK) return mockAllowed() ? PROVIDER_MOCK : null;
+    if (!SUPPORTED_PROVIDERS.includes(requested)) return null;
+    return requested === PROVIDER_PAYSTACK && paystackConfigured() ? PROVIDER_PAYSTACK : null;
   }
-  return null;
+  if (mockAllowed()) return PROVIDER_MOCK;
+  return paystackConfigured() ? PROVIDER_PAYSTACK : null;
 }
 
 function isMobileMoneyEnabled() {
@@ -137,6 +142,16 @@ function activeNetworks() {
 function unavailableReason() {
   if (!flagEnabled('MOBILE_MONEY_ENABLED')) return 'Mobile money is switched off (MOBILE_MONEY_ENABLED).';
   if (activeProviderName() === PROVIDER_MOCK) return null;
+  const requested = requestedProvider();
+  if (requested && !SUPPORTED_PROVIDERS.includes(requested)) {
+    // Naming the value matters: collapsing this into "no provider selected"
+    // would look like a configuration mistake rather than the real problem,
+    // which is that this build ships no adapter for it.
+    return `"${requested}" is not a provider this build can use. Supported providers: ${SUPPORTED_PROVIDERS.join(', ')}.`;
+  }
+  if (requested === PROVIDER_MOCK && !mockAllowed()) {
+    return 'The mock provider is development and test only, and is refused when NODE_ENV=production.';
+  }
   if (activeProviderName() === null) {
     return paystackConfigured()
       ? 'No mobile money provider is selected.'

@@ -1,12 +1,19 @@
 import { defineStore } from 'pinia'
 import axios from 'axios'
 import { getStoredItem, getStoredJson, removeStoredItem, setStoredItem, setStoredJson } from '../utils/storage'
+import { setDisplayZone } from '../utils/datetime'
 
 let interceptorsInstalled = false
 
+// Times are rendered in the hospital's timezone. The server reports it on
+// sign-in and on /me; a stored value from a previous session is applied
+// immediately so the first paint is already correct.
+const storedUser = getStoredJson('user', user => !!user && typeof user === 'object' && typeof user.role === 'string')
+if (storedUser?.timezone) setDisplayZone(storedUser.timezone)
+
 export const useAuthStore = defineStore('auth', {
   state: () => ({
-    user: getStoredJson('user', user => !!user && typeof user === 'object' && typeof user.role === 'string'),
+    user: storedUser,
     token: getStoredItem('token')
   }),
   getters: {
@@ -22,9 +29,26 @@ export const useAuthStore = defineStore('auth', {
       const { data } = await axios.post('/api/auth/login', { email, password })
       this.token = data.token
       this.user = data.user
+      if (data.user?.timezone) setDisplayZone(data.user.timezone)
       setStoredItem('token', data.token)
       setStoredJson('user', data.user)
       axios.defaults.headers.common.Authorization = `Bearer ${data.token}`
+    },
+    // Keeps the display timezone in step with the server, in case APP_TIMEZONE
+    // changed since the stored session was written.
+    async refreshTimezone() {
+      try {
+        const { data } = await axios.get('/api/auth/me')
+        if (data?.timezone) {
+          setDisplayZone(data.timezone)
+          if (this.user) {
+            this.user = { ...this.user, timezone: data.timezone }
+            setStoredJson('user', this.user)
+          }
+        }
+      } catch {
+        // The browser's own zone remains in use, which is a safe fallback.
+      }
     },
     logout() {
       this.token = null

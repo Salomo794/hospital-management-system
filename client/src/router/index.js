@@ -29,6 +29,7 @@ const routes = [
       { path: 'emr/:id', name: 'EMRDetail', component: () => import('../views/emr/EMRDetail.vue'), meta: { title: 'Medical record', roles: ['admin', 'doctor', 'nurse'] } },
       { path: 'ward', name: 'Ward', component: () => import('../views/ward/Ward.vue'), meta: { title: 'Ward', roles: ['admin', 'receptionist', 'doctor', 'nurse'] } },
       { path: 'pharmacy', name: 'Pharmacy', component: () => import('../views/pharmacy/Pharmacy.vue'), meta: { title: 'Pharmacy', roles: ['admin', 'pharmacist'] } },
+      { path: 'procurement', name: 'Procurement', component: () => import('../views/procurement/Procurement.vue'), meta: { title: 'Procurement', roles: ['admin', 'pharmacist'] } },
       { path: 'laboratory', name: 'Laboratory', component: () => import('../views/laboratory/Laboratory.vue'), meta: { title: 'Laboratory', roles: ['admin', 'doctor', 'nurse', 'lab_technician'] } },
       { path: 'laboratory/orders/:id', name: 'LabOrderDetail', component: () => import('../views/laboratory/LabOrderDetail.vue'), meta: { title: 'Lab order', roles: ['admin', 'doctor', 'nurse', 'lab_technician'] } },
       { path: 'billing', name: 'Billing', component: () => import('../views/billing/Billing.vue'), meta: { title: 'Billing', roles: ['admin', 'receptionist'] } },
@@ -53,9 +54,17 @@ const router = createRouter({
   scrollBehavior: () => ({ top: 0 })
 })
 
+let timezoneChecked = false
+
 router.beforeEach(to => {
   if (to.meta.portal) return true
   const authStore = useAuthStore()
+  // Ask the server which timezone to render in once per page load, so a change
+  // to APP_TIMEZONE is picked up without the staff member signing out.
+  if (!timezoneChecked && authStore.isAuthenticated) {
+    timezoneChecked = true
+    authStore.refreshTimezone()
+  }
   if (to.matched.some(record => record.meta.requiresAuth) && !authStore.isAuthenticated) {
     return { name: 'Login', query: { redirect: to.fullPath } }
   }

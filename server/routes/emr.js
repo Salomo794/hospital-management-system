@@ -5,6 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { evaluateSafety } = require('../utils/safety');
 const { ApiError, asyncHandler, parseInteger, withTransaction } = require('../utils/http');
 const { randomUUID, generateRecordNumber } = require('../utils/ids');
+const { recordAudit } = require('../utils/audit');
 
 const EMR_ROLES = ['admin', 'doctor', 'nurse'];
 const RECORD_STATUSES = ['draft', 'final', 'amended'];
@@ -160,6 +161,17 @@ router.get('/:id', authenticate, authorize(...EMR_ROLES), asyncHandler(async (re
   if (req.user.role === 'doctor' && rows[0].doctor_id !== req.user.id) {
     throw new ApiError(403, 'You may only view your own medical records.');
   }
+
+  // A clinical note is the most sensitive record in the system, so opening one
+  // is logged. The patient's identity is recorded; the note's contents are not,
+  // so the access log never becomes a second copy of the clinical data.
+  await recordAudit({
+    req,
+    action: 'emr.record.viewed',
+    table: 'medical_records',
+    recordId: id,
+    summary: `${req.user.role} opened the medical record for ${rows[0].mrn}`,
+  });
 
   const [prescriptionRows] = await pool.query(
     `SELECT pr.*

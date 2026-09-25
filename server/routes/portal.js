@@ -21,6 +21,7 @@ const {
   applyGatewayResult,
 } = require('../services/mobileMoneyPayments');
 const { recalculateBillPayment } = require('../utils/bills');
+const { zonedDate, zonedDateTime } = require('../config/time');
 const { recordAudit } = require('../utils/audit');
 
 const CHECKIN_TRANSITIONS = {
@@ -261,10 +262,10 @@ router.post('/checkin', asyncHandler(async (req, res) => {
   if (patient.status !== 'active') throw new ApiError(403, 'This patient record is inactive.');
 
   const result = await withTransaction(pool, async connection => {
-    const [clockRows] = await connection.query(
-      "SELECT datetime('now') AS checkin_time, date('now') AS today"
-    );
-    const { checkin_time: checkinTime, today } = clockRows[0];
+    // The check-in clock is the hospital's wall clock, not the server's UTC one,
+    // and 'today' is the hospital's calendar day.
+    const checkinTime = zonedDateTime();
+    const today = zonedDate();
     const [todayAppointments] = await connection.query(
       `SELECT id, appointment_time, type, reason FROM appointments
        WHERE patient_id = ? AND appointment_date = ? AND status = 'scheduled'
@@ -372,14 +373,15 @@ router.get('/me', authenticatePortal, asyncHandler(async (req, res) => {
      FROM patients WHERE id = ?`,
     [req.patient.id]
   );
+  const hospitalToday = zonedDate();
   const [todayCheckins] = await pool.query(
-    "SELECT * FROM checkins WHERE patient_id = ? AND checkin_date = date('now') ORDER BY id DESC LIMIT 1",
-    [req.patient.id]
+    'SELECT * FROM checkins WHERE patient_id = ? AND checkin_date = ? ORDER BY id DESC LIMIT 1',
+    [req.patient.id, hospitalToday]
   );
   const [aheadRows] = await pool.query(
     `SELECT COUNT(*) as count FROM checkins
-     WHERE checkin_date = date('now') AND status IN ('waiting','in_consultation') AND id < ?`,
-    [todayCheckins[0]?.id || 0]
+     WHERE checkin_date = ? AND status IN ('waiting','in_consultation') AND id < ?`,
+    [hospitalToday, todayCheckins[0]?.id || 0]
   );
   res.json({
     patient: rows[0],

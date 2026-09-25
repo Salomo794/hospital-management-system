@@ -1,33 +1,27 @@
-import dayjs from 'dayjs'
-import relativeTime from 'dayjs/plugin/relativeTime'
+// Timestamps are formatted through utils/datetime.js. The API stores instants in
+// UTC and sends them without a marker, so they have to be read as UTC and shown
+// in the hospital's timezone; doing that inline in every view is how the offset
+// bug spread in the first place.
+export {
+  formatDate,
+  formatDateTime,
+  formatTimeOnly,
+  formatClockTime,
+  timeAgo,
+  setDisplayZone,
+  getDisplayZone,
+} from './datetime'
 
-dayjs.extend(relativeTime)
-
-export function formatDate(date) {
-  if (!date) return '-'
-  return dayjs(date).format('MMM D, YYYY')
-}
-
-export function formatDateTime(date) {
-  if (!date) return '-'
-  return dayjs(date).format('MMM D, YYYY h:mm A')
-}
-
+// Appointment and slot times are wall-clock strings rather than instants, so
+// they are trimmed to HH:mm without any timezone conversion.
 export function formatTime(time) {
-  if (!time) return ''
-  const t = String(time)
-  return t.substring(0, 5)
+  return formatClockTime(time)
 }
 
 export function formatCurrency(amount) {
   const value = Number(amount)
   if (!Number.isFinite(value)) return '$0.00'
   return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-export function timeAgo(date) {
-  if (!date) return ''
-  return dayjs(date).fromNow()
 }
 
 export function getStatusColor(status) {

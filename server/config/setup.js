@@ -341,6 +341,57 @@ async function setup() {
       FOREIGN KEY (performed_by) REFERENCES users(id)
     )`);
 
+    // Procurement closes the loop the low-stock forecast opens: a reorder
+    // suggestion has to be raisable as an order, and a received order has to
+    // land in inventory_transactions so stock levels stay truthful.
+    await conn.query(`CREATE TABLE IF NOT EXISTS suppliers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      contact_name TEXT,
+      email TEXT,
+      phone TEXT,
+      address TEXT,
+      lead_time_days INTEGER NOT NULL DEFAULT 7 CHECK(lead_time_days >= 0),
+      notes TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )`);
+
+    await conn.query(`CREATE TABLE IF NOT EXISTS purchase_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uuid TEXT UNIQUE NOT NULL,
+      order_number TEXT UNIQUE NOT NULL,
+      supplier_id INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','approved','partially_received','received','cancelled')),
+      total_amount REAL NOT NULL DEFAULT 0 CHECK(total_amount >= 0),
+      ordered_by INTEGER,
+      approved_by INTEGER,
+      expected_date TEXT,
+      notes TEXT,
+      cancellation_reason TEXT,
+      submitted_at TEXT,
+      approved_at TEXT,
+      received_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE RESTRICT,
+      FOREIGN KEY (ordered_by) REFERENCES users(id) ON DELETE SET NULL,
+      FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL
+    )`);
+
+    await conn.query(`CREATE TABLE IF NOT EXISTS purchase_order_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      purchase_order_id INTEGER NOT NULL,
+      medicine_id INTEGER NOT NULL,
+      quantity INTEGER NOT NULL CHECK(quantity > 0),
+      unit_cost REAL NOT NULL DEFAULT 0 CHECK(unit_cost >= 0),
+      quantity_received INTEGER NOT NULL DEFAULT 0 CHECK(quantity_received >= 0),
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+      FOREIGN KEY (medicine_id) REFERENCES medicines(id) ON DELETE RESTRICT
+    )`);
+
     await conn.query(`CREATE TABLE IF NOT EXISTS admissions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       uuid TEXT UNIQUE NOT NULL,
@@ -505,8 +556,13 @@ async function setup() {
     await conn.query('CREATE INDEX IF NOT EXISTS idx_admissions_ward_status ON admissions(ward, status)');
     await conn.query('CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read)');
     await conn.query('CREATE INDEX IF NOT EXISTS idx_prescription_items_medicine ON prescription_items(medicine_id)');
+    await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_orders_status ON purchase_orders(status)');
+    await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_orders_supplier ON purchase_orders(supplier_id)');
+    await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_orders_created ON purchase_orders(created_at)');
+    await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_order_items_order ON purchase_order_items(purchase_order_id)');
+    await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_order_items_medicine ON purchase_order_items(medicine_id)');
 
-    for (const table of ['users', 'patients', 'appointments', 'medical_records', 'medicines', 'bills', 'admissions']) {
+    for (const table of ['users', 'patients', 'appointments', 'medical_records', 'medicines', 'bills', 'admissions', 'suppliers', 'purchase_orders']) {
       const trigger = `${table}_set_updated_at`;
       await conn.query(`DROP TRIGGER IF EXISTS ${trigger}`);
       await conn.query(`CREATE TRIGGER ${trigger}

@@ -386,6 +386,66 @@ test('the audit log records financial and security events and stays admin-only',
   assert.ok(actionList.body.actions.includes('billing.payment.refunded'));
 });
 
+test('reading a patient record is logged, not just changing it', async () => {
+  const adminToken = await login();
+  const doctorToken = await login('doctor@hospital.com');
+
+  const [patient] = await pool.query("SELECT id, mrn FROM patients WHERE status = 'active' ORDER BY id LIMIT 1");
+  assert.ok(patient, 'fixture should contain an active patient');
+
+  const before = await request(app)
+    .get(`/api/audit?action=patient.record.viewed&patient_marker=${patient[0].id}`)
+    .set('Authorization', `Bearer ${adminToken}`)
+    .expect(200);
+  const countBefore = before.body.total;
+
+  // A doctor opening a chart must leave a trace.
+  await request(app)
+    .get(`/api/patients/${patient[0].id}`)
+    .set('Authorization', `Bearer ${doctorToken}`)
+    .expect(200);
+
+  const afterView = await request(app)
+    .get('/api/audit?action=patient.record.viewed')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .expect(200);
+  assert.equal(afterView.body.total, countBefore + 1, 'reading a record should be audited');
+
+  const entry = afterView.body.entries[0];
+  assert.equal(entry.actor_type, 'staff');
+  assert.equal(entry.actor_label, 'doctor@hospital.com');
+  assert.equal(entry.record_id, patient[0].id);
+  assert.match(entry.summary, new RegExp(patient[0].mrn));
+
+  // The access log must not become a second copy of the patient's data.
+  const values = `${entry.old_values || ''}${entry.new_values || ''}`;
+  assert.equal(values, '', 'a read entry should not store any record contents');
+  assert.equal(JSON.stringify(entry).includes('portal_pin'), false);
+
+  // A record that does not exist is not logged as a view.
+  await request(app)
+    .get('/api/patients/99999999')
+    .set('Authorization', `Bearer ${doctorToken}`)
+    .expect(404);
+  const afterMiss = await request(app)
+    .get('/api/audit?action=patient.record.viewed')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .expect(200);
+  assert.equal(afterMiss.body.total, countBefore + 1, 'a failed read should not count as an access');
+
+  // The clinical history is the most revealing read, and is logged separately.
+  await request(app)
+    .get(`/api/patients/${patient[0].id}/history`)
+    .set('Authorization', `Bearer ${doctorToken}`)
+    .expect(200);
+  const history = await request(app)
+    .get('/api/audit?action=patient.history.viewed')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .expect(200);
+  assert.ok(history.body.total > 0);
+  assert.equal(history.body.entries[0].actor_label, 'doctor@hospital.com');
+});
+
 test('a patient portal payment is attributed to the patient, not a staff id', async () => {
   const adminToken = await login();
   const unique = `portal-audit-${Date.now()}@example.com`;

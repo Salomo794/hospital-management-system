@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { WARDS: WARD_CAPACITY, wardCapacityOrDefault } = require('../config/wards');
+const { zonedDate, zonedDayRange, addDays } = require('../config/time');
 
 const CLINICAL_ROLES = ['admin', 'receptionist', 'doctor', 'nurse'];
 const BILLING_ROLES = ['admin', 'receptionist'];
@@ -13,7 +14,8 @@ const INSIGHT_LAB_ROLES = ['admin', 'doctor', 'nurse'];
 // Dashboard stats
 router.get('/dashboard', authenticate, async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    // The hospital's day, not the server's UTC one.
+    const today = zonedDate();
     const canViewClinical = CLINICAL_ROLES.includes(req.user.role);
     const canViewRevenue = BILLING_ROLES.includes(req.user.role);
     const canViewPharmacy = PHARMACY_DASHBOARD_ROLES.includes(req.user.role);
@@ -75,10 +77,11 @@ router.get('/dashboard', authenticate, async (req, res) => {
       recentPatients = patientList;
 
       const weeklyByDate = new Map(weeklyRows.map(row => [String(row.date), row]));
+      // Calendar arithmetic only: 'today' is already the hospital's date, so
+      // stepping back six days must stay in calendar space rather than being
+      // run through Date and a timezone.
       weeklyStats = Array.from({ length: 7 }, (_, index) => {
-        const date = new Date(`${today}T00:00:00.000Z`);
-        date.setUTCDate(date.getUTCDate() - (6 - index));
-        const dateKey = date.toISOString().slice(0, 10);
+        const dateKey = addDays(today, index - 6);
         const row = weeklyByDate.get(dateKey);
         return {
           date: dateKey,
@@ -94,20 +97,25 @@ router.get('/dashboard', authenticate, async (req, res) => {
     let pendingBills = [{ count: 0, amount: 0 }];
     if (canViewRevenue) {
       // Revenue is reported net of refunds, so a reversed payment reduces the
-      // period it was originally collected in rather than being ignored.
+      // period it was originally collected in rather than being ignored. Both
+      // windows are resolved against the hospital's calendar.
+      const todayRange = zonedDayRange(today);
+      const monthStart = `${today.slice(0, 7)}-01`;
+      const monthRange = zonedDayRange(monthStart);
       const [[todayRows], [monthRows], [billRows]] = await Promise.all([
         pool.query(
-          `SELECT COALESCE((SELECT SUM(amount) FROM payments WHERE DATE(payment_date) = ?), 0)
-                  - COALESCE((SELECT SUM(amount) FROM payment_refunds WHERE DATE(refund_date) = ?), 0) AS total`,
-          [today, today]
+          `SELECT COALESCE((SELECT SUM(amount) FROM payments
+                    WHERE payment_date >= ? AND payment_date < ?), 0)
+                  - COALESCE((SELECT SUM(amount) FROM payment_refunds
+                    WHERE refund_date >= ? AND refund_date < ?), 0) AS total`,
+          [todayRange.start, todayRange.end, todayRange.start, todayRange.end]
         ),
         pool.query(
           `SELECT COALESCE((SELECT SUM(amount) FROM payments
-                    WHERE CAST(strftime('%m', payment_date) AS INTEGER) = CAST(strftime('%m', 'now') AS INTEGER)
-                      AND CAST(strftime('%Y', payment_date) AS INTEGER) = CAST(strftime('%Y', 'now') AS INTEGER)), 0)
+                    WHERE payment_date >= ? AND payment_date < ?), 0)
                   - COALESCE((SELECT SUM(amount) FROM payment_refunds
-                    WHERE CAST(strftime('%m', refund_date) AS INTEGER) = CAST(strftime('%m', 'now') AS INTEGER)
-                      AND CAST(strftime('%Y', refund_date) AS INTEGER) = CAST(strftime('%Y', 'now') AS INTEGER)), 0) AS total`
+                    WHERE refund_date >= ? AND refund_date < ?), 0) AS total`,
+          [monthRange.start, todayRange.end, monthRange.start, todayRange.end]
         ),
         pool.query("SELECT COUNT(*) as count, COALESCE(SUM(net_amount - paid_amount), 0) as amount FROM bills WHERE payment_status IN ('pending','partial')"),
       ]);
@@ -161,7 +169,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
 router.get('/insights', authenticate, authorize('admin', 'receptionist', 'doctor', 'nurse'), async (req, res) => {
   try {
     const insights = [];
-    const today = new Date().toISOString().split('T')[0];
+    const today = zonedDate();
     const canViewOperational = CLINICAL_ROLES.includes(req.user.role);
     const canViewBilling = BILLING_ROLES.includes(req.user.role);
     const canViewLab = INSIGHT_LAB_ROLES.includes(req.user.role);
@@ -320,15 +328,24 @@ router.get('/insights', authenticate, authorize('admin', 'receptionist', 'doctor
 
     // Revenue pulse (today vs yesterday)
     if (canViewBilling) {
+      // Yesterday's window is derived from the hospital's calendar rather than
+      // SQLite's 'now', so the two figures being compared share a timezone.
+      const todayRange = zonedDayRange(today);
+      const yesterdayRange = zonedDayRange(addDays(today, -1));
       const [[todayRev], [yesterdayRev]] = await Promise.all([
         pool.query(
-          `SELECT COALESCE((SELECT SUM(amount) FROM payments WHERE DATE(payment_date) = ?), 0)
-                  - COALESCE((SELECT SUM(amount) FROM payment_refunds WHERE DATE(refund_date) = ?), 0) AS total`,
-          [today, today]
+          `SELECT COALESCE((SELECT SUM(amount) FROM payments
+                    WHERE payment_date >= ? AND payment_date < ?), 0)
+                  - COALESCE((SELECT SUM(amount) FROM payment_refunds
+                    WHERE refund_date >= ? AND refund_date < ?), 0) AS total`,
+          [todayRange.start, todayRange.end, todayRange.start, todayRange.end]
         ),
         pool.query(
-          `SELECT COALESCE((SELECT SUM(amount) FROM payments WHERE DATE(payment_date) = date('now', '-1 day')), 0)
-                  - COALESCE((SELECT SUM(amount) FROM payment_refunds WHERE DATE(refund_date) = date('now', '-1 day')), 0) AS total`
+          `SELECT COALESCE((SELECT SUM(amount) FROM payments
+                    WHERE payment_date >= ? AND payment_date < ?), 0)
+                  - COALESCE((SELECT SUM(amount) FROM payment_refunds
+                    WHERE refund_date >= ? AND refund_date < ?), 0) AS total`,
+          [yesterdayRange.start, yesterdayRange.end, yesterdayRange.start, yesterdayRange.end]
         ),
       ]);
       const delta = yesterdayRev[0].total > 0

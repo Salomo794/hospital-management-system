@@ -222,6 +222,7 @@ const icons = {
   appointments: s('<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8.5 14h3"/>'),
   records:      s('<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1.2"/><path d="M8.5 12.5h7M8.5 16.5h4.5"/>'),
   pharmacy:     s('<path d="M10.5 20.5 3.6 13.6a4.9 4.9 0 0 1 6.9-6.9l6.9 6.9a4.9 4.9 0 0 1-6.9 6.9Z"/><path d="M8.2 8.2l6.9 6.9"/>'),
+  procurement:  s('<path d="M3 21h18"/><path d="M5 21V8l7-4 7 4v13"/><path d="M9.5 11h5v4h-5z"/>'),
   ward:         s('<path d="M4 21V5.5A2.5 2.5 0 0 1 6.5 3h7A2.5 2.5 0 0 1 16 5.5V21"/><path d="M16 10h2.5A2.5 2.5 0 0 1 21 12.5V21"/><path d="M9.5 7.5h3M11 6v3"/><path d="M2 21h20"/>'),
   laboratory:   s('<path d="M9.5 2.5h5"/><path d="M10.5 2.5v6.4L5 18.2A2 2 0 0 0 6.7 21.2h10.6A2 2 0 0 0 19 18.2l-5.5-9.3V2.5"/><path d="M7.6 15h8.8"/>'),
   billing:      s('<rect x="2.5" y="5" width="19" height="14" rx="2.4"/><path d="M2.5 9.8h19"/><path d="M6.5 14.6h3.5"/>'),
@@ -238,6 +239,7 @@ const routeMeta = [
   { prefix: '/appointments', label: 'Appointments',             section: 'Clinical' },
   { prefix: '/emr',          label: 'Medical Records',          section: 'Clinical' },
   { prefix: '/pharmacy',     label: 'Pharmacy',                 section: 'Departments' },
+  { prefix: '/procurement',  label: 'Procurement',              section: 'Departments' },
   { prefix: '/ward',         label: 'Wards & Beds',             section: 'Departments' },
   { prefix: '/laboratory',   label: 'Laboratory',               section: 'Departments' },
   { prefix: '/billing',      label: 'Billing & Payments',       section: 'Departments' },
@@ -283,6 +285,7 @@ export default {
         ]},
         { title: 'Departments', items: [
           { to: '/pharmacy', label: 'Pharmacy', icon: icons.pharmacy, roles: ['admin', 'pharmacist'] },
+          { to: '/procurement', label: 'Procurement', icon: icons.procurement, roles: ['admin', 'pharmacist'] },
           { to: '/ward', label: 'Wards & Beds', icon: icons.ward, roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
           { to: '/laboratory', label: 'Laboratory', icon: icons.laboratory, roles: ['admin', 'doctor', 'nurse', 'lab_technician'] },
           { to: '/billing', label: 'Billing', icon: icons.billing, roles: ['admin', 'receptionist'] }
@@ -323,7 +326,7 @@ export default {
     const formatRole = role => role ? role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''
     const typeColor = type => ({
       admission: 'dot-teal', appointment: 'dot-blue', lab: 'dot-purple',
-      billing: 'dot-orange', system: 'dot-gray'
+      billing: 'dot-orange', procurement: 'dot-teal', system: 'dot-gray'
     })[type] || 'dot-gray'
 
     const relativeTime = dateStr => {

@@ -9,6 +9,7 @@ const { ApiError, asyncHandler } = require('../utils/http');
 const { randomUUID } = require('../utils/ids');
 const { FixedWindowRateLimiter } = require('../utils/rateLimiter');
 const { recordAudit } = require('../utils/audit');
+const { appTimezone } = require('../config/time');
 
 const loginByIdentifier = new FixedWindowRateLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
 const loginByIp = new FixedWindowRateLimiter({ windowMs: 15 * 60 * 1000, max: 30 });
@@ -107,6 +108,8 @@ router.post('/login', asyncHandler(async (req, res) => {
       first_name: user.first_name,
       last_name: user.last_name,
       phone: user.phone,
+      // Sent on sign-in so the client can render times correctly straight away.
+      timezone: appTimezone(),
     },
   });
 }));
@@ -116,7 +119,9 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
     'SELECT id, uuid, email, role, first_name, last_name, phone, avatar, created_at FROM users WHERE id = ?',
     [req.user.id]
   );
-  res.json(rows[0]);
+  // The client renders every timestamp in the hospital's timezone so two staff
+  // members never disagree about when something happened.
+  res.json({ ...rows[0], timezone: appTimezone() });
 }));
 
 router.put('/change-password', authenticate, asyncHandler(async (req, res) => {

@@ -240,15 +240,25 @@ const mockAdapter = {
   },
 };
 
+// Every provider this build can actually talk to. A new aggregator is added
+// here and nowhere else: the billing and portal routes only ever call the three
+// methods on an adapter, so nothing outside this file has to change.
+const PROVIDER_ADAPTERS = {
+  [PROVIDER_PAYSTACK]: paystackAdapter,
+  [PROVIDER_MOCK]: mockAdapter,
+};
+
 function getAdapter() {
   const name = activeProviderName();
   // An unavailable reason explains a misconfiguration; a bare 503 would leave
   // the operator guessing why a configured provider is not being offered.
   const reason = unavailableReason();
   if (reason) throw new ApiError(503, reason);
-  if (name === PROVIDER_PAYSTACK) return paystackAdapter;
-  if (name === PROVIDER_MOCK) return mockAdapter;
-  throw new ApiError(503, 'Mobile money payments are not enabled on this server');
+  const adapter = name ? PROVIDER_ADAPTERS[name] : null;
+  if (!adapter) {
+    throw new ApiError(503, `No mobile money adapter is built for "${name || 'the selected provider'}".`);
+  }
+  return adapter;
 }
 
 // Test hook for the mock rail: stands in for the customer approving (or
@@ -273,6 +283,7 @@ function mockWebhookSignature(rawBody) {
 }
 
 module.exports = {
+  PROVIDER_ADAPTERS,
   getAdapter,
   isNetwork,
   networkLabel,
