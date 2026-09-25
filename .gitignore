@@ -6,6 +6,7 @@ _old_modules/
 *.db
 *.db-shm
 *.db-wal
+*.db.bak-*
 *.sqlite
 *.sqlite3
 dist/
