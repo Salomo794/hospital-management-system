@@ -20,7 +20,17 @@
             <span class="text-muted">MRN: {{ patient.mrn }} | {{ patient.gender }} | DOB: {{ formatDate(patient.date_of_birth) }}</span>
           </div>
         </div>
-        <button class="btn btn-primary" @click="openEditModal">Edit Profile</button>
+        <div class="header-actions">
+          <button
+            v-if="canResetPortalPin"
+            class="btn btn-outline"
+            :disabled="resettingPortalPin"
+            @click="resetPortalPin"
+          >
+            {{ resettingPortalPin ? 'Resetting…' : 'Reset Portal PIN' }}
+          </button>
+          <button class="btn btn-primary" @click="openEditModal">Edit Profile</button>
+        </div>
       </div>
 
       <div class="detail-grid">
@@ -56,6 +66,14 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <div v-if="newPortalPin" class="portal-pin-notice" role="status">
+        <div>
+          <strong>New portal PIN: {{ newPortalPin }}</strong>
+          <span>Share it securely with the patient. It will not be shown again.</span>
+        </div>
+        <button class="btn btn-sm btn-secondary" @click="newPortalPin = ''">Dismiss</button>
       </div>
 
       <div class="card" style="margin-top:20px">
@@ -166,10 +184,11 @@
 </template>
 
 <script>
-import { ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
+import { useAuthStore } from '../../store/auth'
 import { formatDate, formatTime, formatCurrency, getStatusColor } from '../../utils/helpers'
 
 const emptyEditForm = () => ({
@@ -183,6 +202,7 @@ export default {
   setup() {
     const route = useRoute()
     const toast = useToast()
+    const auth = useAuthStore()
     const patient = ref(null)
     const history = ref({ appointments: [], medical_records: [], prescriptions: [], bills: [] })
     const tab = ref('records')
@@ -191,6 +211,9 @@ export default {
     const saving = ref(false)
     const error = ref('')
     const editForm = ref(emptyEditForm())
+    const resettingPortalPin = ref(false)
+    const newPortalPin = ref('')
+    const canResetPortalPin = computed(() => ['admin', 'receptionist'].includes(auth.userRole))
     const today = new Date().toISOString().slice(0, 10)
     const bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
 
@@ -199,6 +222,7 @@ export default {
       loading.value = true
       error.value = ''
       patient.value = null
+      newPortalPin.value = ''
       try {
         const patientResponse = await axios.get(`/api/patients/${id}`)
         patient.value = patientResponse.data
@@ -247,13 +271,31 @@ export default {
       }
     }
 
+    const resetPortalPin = async () => {
+      if (!patient.value || resettingPortalPin.value) return
+      const confirmed = window.confirm(`Reset the portal PIN for ${patient.value.first_name} ${patient.value.last_name}? The current PIN will stop working immediately.`)
+      if (!confirmed) return
+      resettingPortalPin.value = true
+      try {
+        const { data } = await axios.post(`/api/patients/${patient.value.id}/portal-pin`)
+        newPortalPin.value = data.plain_pin
+        patient.value.portal_pin_provisioned = true
+        toast.success('Portal PIN reset successfully.')
+      } catch (requestError) {
+        toast.error(requestError.response?.data?.message || 'Failed to reset portal PIN.')
+      } finally {
+        resettingPortalPin.value = false
+      }
+    }
+
     onMounted(loadPatient)
     watch(() => route.params.id, loadPatient)
 
     return {
       patient, history, tab, showEditModal, loading, saving, error, editForm,
+      resettingPortalPin, newPortalPin, canResetPortalPin,
       today, bloodTypes, formatDate, formatTime, formatCurrency, getStatusColor,
-      loadPatient, openEditModal, closeEditModal, savePatient
+      loadPatient, openEditModal, closeEditModal, savePatient, resetPortalPin
     }
   }
 }
@@ -261,6 +303,10 @@ export default {
 
 <style scoped>
 .detail-header { display: flex; align-items: center; gap: 20px; margin-bottom: 24px; }
+.header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.portal-pin-notice { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 20px; padding: 14px 16px; border: 1px solid var(--brand-200); border-radius: 10px; background: var(--brand-50); }
+.portal-pin-notice div { display: grid; gap: 4px; }
+.portal-pin-notice span { color: var(--gray-600); font-size: 12px; }
 .patient-title { display: flex; align-items: center; gap: 16px; flex: 1; }
 .patient-avatar-large {
   width: 56px; height: 56px; background: #0d9488; color: white;

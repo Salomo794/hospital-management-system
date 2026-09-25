@@ -346,6 +346,7 @@ async function setup() {
       patient_id INTEGER NOT NULL,
       appointment_id INTEGER,
       checkin_time TEXT DEFAULT (datetime('now')),
+      checkin_date TEXT DEFAULT (date('now')),
       purpose TEXT,
       status TEXT DEFAULT 'waiting' CHECK(status IN ('waiting','in_consultation','completed','no_show','cancelled')),
       qr_token TEXT,
@@ -354,10 +355,74 @@ async function setup() {
       FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL
     )`);
 
+    const [checkinColumns] = await conn.query('PRAGMA table_info(checkins)');
+    if (!checkinColumns.some(column => column.name === 'checkin_date')) {
+      await conn.query('ALTER TABLE checkins ADD COLUMN checkin_date TEXT');
+    }
+    await conn.query(`
+      UPDATE checkins
+      SET checkin_date = date(checkin_time)
+      WHERE checkin_date IS NULL OR TRIM(checkin_date) = ''
+    `);
+
+    const [duplicateCheckins] = await conn.query(`
+      SELECT patient_id, checkin_date, COUNT(*) AS duplicate_count
+      FROM checkins
+      WHERE status IN ('waiting', 'in_consultation')
+      GROUP BY patient_id, checkin_date
+      HAVING COUNT(*) > 1
+      ORDER BY patient_id, checkin_date
+      LIMIT 10
+    `);
+    if (duplicateCheckins.length > 0) {
+      const summary = duplicateCheckins
+        .map(row => `patient ${row.patient_id} on ${row.checkin_date || 'an unknown date'} (${row.duplicate_count} rows)`)
+        .join('; ');
+      throw new Error(
+        'Cannot create the active check-in index because duplicate legacy check-ins remain '
+        + `(${summary}). Resolve them and rerun setup.`
+      );
+    }
+    const [undatedCheckins] = await conn.query(`
+      SELECT id FROM checkins
+      WHERE status IN ('waiting', 'in_consultation') AND checkin_date IS NULL
+      ORDER BY id LIMIT 10
+    `);
+    if (undatedCheckins.length > 0) {
+      throw new Error(
+        'Cannot create the active check-in index because legacy check-ins have no valid checkin_date '
+        + `(check-in IDs: ${undatedCheckins.map(row => row.id).join(', ')}). Repair them and rerun setup.`
+      );
+    }
+    const [duplicateAdmissions] = await conn.query(`
+      SELECT patient_id, COUNT(*) AS duplicate_count
+      FROM admissions
+      WHERE status = 'admitted'
+      GROUP BY patient_id
+      HAVING COUNT(*) > 1
+      ORDER BY patient_id
+      LIMIT 10
+    `);
+    if (duplicateAdmissions.length > 0) {
+      const summary = duplicateAdmissions
+        .map(row => `patient ${row.patient_id} (${row.duplicate_count} rows)`)
+        .join('; ');
+      throw new Error(
+        'Cannot create the active admission index because duplicate legacy admissions remain '
+        + `(${summary}). Resolve them and rerun setup.`
+      );
+    }
+
     await conn.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_doctor_profiles_user ON doctor_profiles(user_id)');
     await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_active_appointment_slot
       ON appointments(doctor_id, appointment_date, appointment_time)
       WHERE status IN ('scheduled','in_progress','completed')`);
+    await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_active_admission_patient
+      ON admissions(patient_id)
+      WHERE status = 'admitted'`);
+    await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_active_checkin_patient_date
+      ON checkins(patient_id, checkin_date)
+      WHERE status IN ('waiting', 'in_consultation')`);
     await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_active_admission_bed
       ON admissions(ward, bed_number)
       WHERE status = 'admitted' AND ward IS NOT NULL AND bed_number IS NOT NULL`);

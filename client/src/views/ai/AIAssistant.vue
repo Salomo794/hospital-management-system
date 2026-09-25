@@ -12,14 +12,9 @@
           <div class="message-content">
             <div class="message-text">Hello! I'm your AI Hospital Assistant. I can help you find patient information, check schedules, and more. Try asking me:</div>
             <div class="quick-actions">
-              <button @click="sendMessage('Show today\'s appointments')">Today's Appointments</button>
-              <button @click="sendMessage('Show pending tasks')">Pending Tasks</button>
-              <button @click="sendMessage('Show revenue this month')">Monthly Revenue</button>
-              <button @click="sendMessage('find patient Smith')">Find Patient</button>
-              <button @click="sendMessage('Ward status and bed occupancy')">Ward Status</button>
-              <button @click="sendMessage('interaction between Warfarin and Aspirin')">Drug Interaction</button>
-              <button @click="sendMessage('allergies of Maria Garcia')">Patient Allergies</button>
-              <button @click="sendMessage('Check low stock medicines')">Low Stock</button>
+              <button v-for="action in quickActions" :key="action.label" @click="sendMessage(action.message)">
+                {{ action.label }}
+              </button>
             </div>
           </div>
         </div>
@@ -83,15 +78,29 @@
 </template>
 
 <script>
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
+import { useAuthStore } from '../../store/auth'
 import { formatDateTime } from '../../utils/helpers'
 
 export default {
   name: 'AIAssistant',
   setup() {
     const toast = useToast()
+    const authStore = useAuthStore()
+    const clinicalRoles = ['admin', 'receptionist', 'doctor', 'nurse']
+    const operationsRoles = ['admin', 'receptionist', 'doctor', 'nurse']
+    const quickActions = computed(() => [
+      { label: "Today's Appointments", message: "Show today's appointments", roles: operationsRoles },
+      { label: 'Pending Tasks', message: 'Show pending tasks', roles: operationsRoles },
+      { label: 'Monthly Revenue', message: 'Show revenue this month', roles: ['admin'] },
+      { label: 'Find Patient', message: 'find patient Smith', roles: clinicalRoles },
+      { label: 'Ward Status', message: 'Ward status and bed occupancy', roles: operationsRoles },
+      { label: 'Drug Interaction', message: 'interaction between Warfarin and Aspirin', roles: ['admin', 'doctor', 'nurse', 'pharmacist'] },
+      { label: 'Patient Allergies', message: 'allergies of Maria Garcia', roles: clinicalRoles },
+      { label: 'Low Stock', message: 'Check low stock medicines', roles: ['admin', 'pharmacist'] }
+    ].filter(action => authStore.can(...action.roles)))
     const messages = ref([])
     const input = ref('')
     const loading = ref(false)
@@ -119,8 +128,9 @@ export default {
         const { data } = await axios.post('/api/ai/chat', { message: msg })
         messages.value.push({ role: 'system', text: data.response, data: data.data, timestamp: new Date() })
       } catch (e) {
-        toast.error('Failed to get a response. Please try again.')
-        messages.value.push({ role: 'system', text: 'Sorry, I encountered an error. Please try again.', timestamp: new Date() })
+        const responseText = e.response?.data?.response || e.response?.data?.message || 'Sorry, I encountered an error. Please try again.'
+        toast.error(responseText)
+        messages.value.push({ role: 'system', text: responseText, timestamp: new Date() })
       } finally {
         loading.value = false
       }
@@ -141,7 +151,7 @@ export default {
       chatInput.value?.focus()
     })
 
-    return { messages, input, loading, chatContainer, chatInput, sendMessage, formatKey, formatValue, formatTime }
+    return { messages, input, loading, chatContainer, chatInput, quickActions, sendMessage, formatKey, formatValue, formatTime }
   }
 }
 </script>

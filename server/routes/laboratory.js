@@ -199,7 +199,8 @@ router.post('/orders', authenticate, authorize('doctor', 'admin', 'nurse'), asyn
 router.get('/orders/:id', authenticate, authorize(...LAB_ROLES), asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const [order] = await pool.query(
-    `SELECT lo.*, p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn,
+    `SELECT lo.*, p.first_name as patient_first_name, p.last_name as patient_last_name,
+            p.mrn, p.mrn as patient_mrn,
             p.gender as patient_gender, p.date_of_birth as patient_dob,
             u.first_name as doctor_first_name, u.last_name as doctor_last_name
      FROM lab_orders lo JOIN patients p ON lo.patient_id = p.id JOIN users u ON lo.doctor_id = u.id
@@ -211,9 +212,12 @@ router.get('/orders/:id', authenticate, authorize(...LAB_ROLES), asyncHandler(as
     throw new ApiError(403, 'You may only view lab orders that you requested.');
   }
   const [items] = await pool.query(
-    `SELECT loi.*, lt.name as test_name, lt.normal_range, lt.unit as test_unit, lt.category,
+    `SELECT loi.*, loi.id as order_item_id, lt.id as test_id, lt.name, lo.status,
+            lo.status as order_status, loi.result_value, loi.result_value as result,
+            lt.name as test_name, lt.normal_range, lt.unit as test_unit, lt.category,
             u.first_name as technician_first_name, u.last_name as technician_last_name
      FROM lab_order_items loi
+     JOIN lab_orders lo ON lo.id = loi.lab_order_id
      JOIN lab_tests lt ON loi.lab_test_id = lt.id
      LEFT JOIN users u ON loi.technician_id = u.id
      WHERE loi.lab_order_id = ? ORDER BY loi.id`,

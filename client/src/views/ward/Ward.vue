@@ -154,11 +154,11 @@
     </template>
 
     <!-- Admit Modal -->
-    <div class="modal-overlay" v-if="showAdmitModal" @click.self="showAdmitModal = false">
+    <div class="modal-overlay" v-if="showAdmitModal" @click.self="closeAdmitModal">
       <div class="modal modal-lg">
         <div class="modal-header">
           <h3>Admit Patient</h3>
-          <button class="modal-close" @click="showAdmitModal = false">&times;</button>
+          <button class="modal-close" @click="closeAdmitModal">&times;</button>
         </div>
         <div class="modal-body">
           <form @submit.prevent="submitAdmission">
@@ -202,7 +202,7 @@
                 <label>Triage Severity</label>
                 <select v-model="admitForm.triage_severity">
                   <option value="">None</option>
-                  <option value="minor">Minor</option>
+                  <option value="low">Minor</option>
                   <option value="moderate">Moderate</option>
                   <option value="high">High</option>
                   <option value="critical">Critical</option>
@@ -226,7 +226,7 @@
               <textarea v-model="admitForm.notes" rows="2"></textarea>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" @click="showAdmitModal = false">Cancel</button>
+              <button type="button" class="btn btn-secondary" @click="closeAdmitModal">Cancel</button>
               <button type="submit" class="btn btn-primary" :disabled="savingAdmission">
                 <span v-if="savingAdmission" class="spinner-sm"></span>
                 {{ savingAdmission ? 'Admitting...' : 'Confirm Admission' }}
@@ -275,23 +275,57 @@ export default {
     const patients = ref([])
     const filteredPatients = ref([])
     const patientSearch = ref('')
-    const admitForm = ref({ patient_id: '', doctor_id: '', ward: '', bed_number: '', diagnosis: '', treatment_plan: '', notes: '', chief_complaint: '', triage_severity: '' })
+    const emptyAdmitForm = () => ({ patient_id: '', doctor_id: '', ward: '', bed_number: '', diagnosis: '', treatment_plan: '', notes: '', chief_complaint: '', triage_severity: '' })
+    const admitForm = ref(emptyAdmitForm())
+
+    let wardsRequestId = 0
+    let admissionsRequestId = 0
+    let patientSearchRequestId = 0
+    let patientSearchTimeout = null
+    let patientSearchController = null
+    let patientsRequestController = null
+    let componentUnmounted = false
+
+    const clearPatientSearch = () => {
+      if (patientSearchTimeout) clearTimeout(patientSearchTimeout)
+      patientSearchTimeout = null
+      patientSearchRequestId += 1
+      patientSearchController?.abort()
+      patientSearchController = null
+      patientsRequestController?.abort()
+      patientsRequestController = null
+    }
+
+    const closeAdmitModal = () => {
+      showAdmitModal.value = false
+      patientSearch.value = ''
+      filteredPatients.value = []
+      clearPatientSearch()
+    }
 
     const loadWards = async () => {
+      if (componentUnmounted) return
+      const requestId = ++wardsRequestId
       loadingWards.value = true
       try {
         const { data } = await axios.get('/api/admissions/wards')
-        wards.value = data.wards
-        totals.value = data.totals
-      } catch (e) {
-        toast.error('Failed to load ward data')
+        if (componentUnmounted || requestId !== wardsRequestId) return
+        wards.value = data.wards || []
+        totals.value = data.totals || {}
+        if (selectedBed.value) {
+          const selected = wards.value.find(ward => ward.ward === selectedBed.value.ward)
+            ?.beds.find(bed => bed.bed === selectedBed.value.bed)
+          if (!selected || selected.status !== 'occupied') selectedBed.value = null
+        }
+      } catch {
+        if (!componentUnmounted && requestId === wardsRequestId) toast.error('Failed to load ward data')
       } finally {
-        loadingWards.value = false
+        if (!componentUnmounted && requestId === wardsRequestId) loadingWards.value = false
       }
     }
 
-    let admissionsRequestId = 0
     const loadAdmissions = async () => {
+      if (componentUnmounted) return
       const requestId = ++admissionsRequestId
       loadingAdmissions.value = true
       try {
@@ -300,13 +334,26 @@ export default {
         if (wardFilter.value) params.ward = wardFilter.value
         if (search.value) params.search = search.value
         const { data } = await axios.get('/api/admissions', { params })
-        if (requestId !== admissionsRequestId) return
-        admissions.value = data.admissions
-        totalAdmissions.value = data.total
-      } catch (e) {
-        toast.error('Failed to load admissions')
+        if (componentUnmounted || requestId !== admissionsRequestId) return
+
+        const total = Number(data.total || 0)
+        const totalPages = Math.max(1, Math.ceil(total / Math.max(Number(limit.value) || 1, 1)))
+        const safePage = Math.min(Math.max(Number(page.value) || 1, 1), totalPages)
+        totalAdmissions.value = total
+        if (safePage !== page.value) {
+          page.value = safePage
+          await loadAdmissions()
+          return
+        }
+        admissions.value = data.admissions || []
+      } catch {
+        if (!componentUnmounted && requestId === admissionsRequestId) {
+          admissions.value = []
+          totalAdmissions.value = 0
+          toast.error('Failed to load admissions')
+        }
       } finally {
-        if (requestId === admissionsRequestId) loadingAdmissions.value = false
+        if (!componentUnmounted && requestId === admissionsRequestId) loadingAdmissions.value = false
       }
     }
 
@@ -319,46 +366,82 @@ export default {
     }
 
     const openAdmitModal = async () => {
+      clearPatientSearch()
       showAdmitModal.value = true
       patientSearch.value = ''
-      admitForm.value = { patient_id: '', doctor_id: '', ward: '', bed_number: '', diagnosis: '', treatment_plan: '', notes: '', chief_complaint: '', triage_severity: '' }
-      patientSearch.value = ''
       filteredPatients.value = patients.value
+      admitForm.value = emptyAdmitForm()
+
       if (!doctors.value.length) {
         try {
           const { data } = await axios.get('/api/doctors')
-          doctors.value = data.doctors || data
-        } catch (e) {
-          toast.error('Failed to load doctors')
+          if (!componentUnmounted && showAdmitModal.value) doctors.value = data.doctors || data
+        } catch {
+          if (!componentUnmounted && showAdmitModal.value) toast.error('Failed to load doctors')
         }
       }
       if (!patients.value.length) {
+        const requestId = patientSearchRequestId
+        const controller = new AbortController()
+        patientsRequestController = controller
         try {
-          const { data } = await axios.get('/api/patients', { params: { limit: 100 } })
+          const { data } = await axios.get('/api/patients', {
+            params: { status: 'active', limit: 100 },
+            signal: controller.signal
+          })
+          if (
+            componentUnmounted ||
+            controller.signal.aborted ||
+            requestId !== patientSearchRequestId ||
+            !showAdmitModal.value
+          ) return
           patients.value = data.patients || []
-          filteredPatients.value = patients.value
-        } catch (e) {
-          toast.error('Failed to load patients')
+          if (patientSearch.value.trim().length < 2) filteredPatients.value = patients.value
+        } catch {
+          if (!componentUnmounted && requestId === patientSearchRequestId && !controller.signal.aborted && showAdmitModal.value) {
+            toast.error('Failed to load patients')
+          }
+        } finally {
+          if (patientsRequestController === controller) patientsRequestController = null
         }
       }
     }
 
-    let patientSearchTimeout = null
-    let patientSearchRequestId = 0
     const filterPatients = () => {
-      clearTimeout(patientSearchTimeout)
+      if (patientSearchTimeout) clearTimeout(patientSearchTimeout)
+      patientsRequestController?.abort()
+      patientsRequestController = null
+      patientSearchController?.abort()
+      patientSearchController = null
       const query = patientSearch.value.trim()
       const requestId = ++patientSearchRequestId
       if (query.length < 2) {
         filteredPatients.value = patients.value
         return
       }
+
+      const controller = new AbortController()
+      patientSearchController = controller
       patientSearchTimeout = setTimeout(async () => {
+        patientSearchTimeout = null
         try {
-          const { data } = await axios.get('/api/patients', { params: { search: query, status: 'active', limit: 20 } })
-          if (requestId === patientSearchRequestId) filteredPatients.value = data.patients || []
-        } catch (e) {
-          if (requestId === patientSearchRequestId) filteredPatients.value = []
+          const { data } = await axios.get('/api/patients', {
+            params: { search: query, status: 'active', limit: 20 },
+            signal: controller.signal
+          })
+          if (
+            !componentUnmounted &&
+            !controller.signal.aborted &&
+            requestId === patientSearchRequestId &&
+            showAdmitModal.value &&
+            query === patientSearch.value.trim()
+          ) filteredPatients.value = data.patients || []
+        } catch {
+          if (!componentUnmounted && requestId === patientSearchRequestId && !controller.signal.aborted) {
+            filteredPatients.value = []
+          }
+        } finally {
+          if (patientSearchController === controller) patientSearchController = null
         }
       }, 300)
     }
@@ -368,8 +451,8 @@ export default {
       try {
         await axios.post('/api/admissions', admitForm.value)
         toast.success('Patient admitted successfully')
-        showAdmitModal.value = false
-        loadAll()
+        closeAdmitModal()
+        await loadAll()
       } catch (e) {
         toast.error(e.response?.data?.message || 'Error admitting patient')
       } finally {
@@ -383,20 +466,25 @@ export default {
         await axios.post(`/api/admissions/${id}/discharge`)
         toast.success('Admission discharged')
         selectedBed.value = null
-        loadAll()
+        await loadAll()
       } catch (e) {
         toast.error(e.response?.data?.message || 'Error discharging admission')
       }
     }
 
     onMounted(loadAll)
-    onUnmounted(() => clearTimeout(patientSearchTimeout))
+    onUnmounted(() => {
+      componentUnmounted = true
+      wardsRequestId += 1
+      admissionsRequestId += 1
+      clearPatientSearch()
+    })
 
     return {
       wards, totals, loadingWards, selectedBed, admissions, totalAdmissions, page, limit, loadingAdmissions,
       search, statusFilter, wardFilter, canAdmit, canDischarge,
       showAdmitModal, savingAdmission, doctors, patients, filteredPatients, patientSearch, admitForm,
-      loadAll, loadAdmissions, selectBed, openAdmitModal, filterPatients, submitAdmission,
+      loadAll, loadAdmissions, selectBed, openAdmitModal, closeAdmitModal, filterPatients, submitAdmission,
       dischargeAdmission, getStatusColor, getStatusLabel
     }
   }

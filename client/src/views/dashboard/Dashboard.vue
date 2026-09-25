@@ -11,7 +11,7 @@
         <router-link to="/ai-assistant" class="btn btn-ghost btn-sm">
           <span class="btn-icon-inline">✨</span> AI Assistant
         </router-link>
-        <router-link to="/reports" class="btn btn-primary btn-sm">
+        <router-link v-if="canViewReports" to="/reports" class="btn btn-primary btn-sm">
           <span class="btn-icon-inline">📊</span> View Reports
         </router-link>
       </div>
@@ -54,7 +54,7 @@
       <div class="dash-grid">
 
         <!-- Smart insights — full width -->
-        <div class="card dash-insights" v-if="insights.length">
+        <div class="card dash-insights" v-if="canViewClinical && insights.length">
           <div class="card-header">
             <div class="d-flex align-center gap-2">
               <span class="section-badge">✨</span>
@@ -64,26 +64,34 @@
           </div>
           <div class="card-body">
             <div class="insights-grid">
-              <router-link
-                v-for="(ins, i) in insights"
-                :key="i"
-                :to="ins.link || '#'"
-                class="insight-card"
-                :class="`insight-${ins.severity}`"
-              >
-                <span class="insight-emoji">{{ ins.icon }}</span>
-                <div class="insight-body">
-                  <div class="insight-title">{{ ins.title }}</div>
-                  <div class="insight-msg">{{ ins.message }}</div>
+              <template v-for="(ins, i) in insights" :key="i">
+                <router-link
+                  v-if="ins.link && canAccessInsight(ins)"
+                  :to="ins.link"
+                  class="insight-card"
+                  :class="`insight-${ins.severity}`"
+                >
+                  <span class="insight-emoji">{{ ins.icon }}</span>
+                  <div class="insight-body">
+                    <div class="insight-title">{{ ins.title }}</div>
+                    <div class="insight-msg">{{ ins.message }}</div>
+                  </div>
+                  <span class="insight-arrow">→</span>
+                </router-link>
+                <div v-else class="insight-card" :class="`insight-${ins.severity}`">
+                  <span class="insight-emoji">{{ ins.icon }}</span>
+                  <div class="insight-body">
+                    <div class="insight-title">{{ ins.title }}</div>
+                    <div class="insight-msg">{{ ins.message }}</div>
+                  </div>
                 </div>
-                <span class="insight-arrow">→</span>
-              </router-link>
+              </template>
             </div>
           </div>
         </div>
 
         <!-- Today's appointments -->
-        <div class="card">
+        <div class="card" v-if="canViewClinical">
           <div class="card-header">
             <div class="d-flex align-center gap-2">
               <span class="section-badge">📅</span>
@@ -123,7 +131,7 @@
         </div>
 
         <!-- Recent patients -->
-        <div class="card">
+        <div class="card" v-if="canViewClinical">
           <div class="card-header">
             <div class="d-flex align-center gap-2">
               <span class="section-badge">👤</span>
@@ -156,7 +164,7 @@
         </div>
 
         <!-- Weekly chart -->
-        <div class="card">
+        <div class="card" v-if="canViewClinical">
           <div class="card-header">
             <div class="d-flex align-center gap-2">
               <span class="section-badge">📈</span>
@@ -227,20 +235,43 @@ export default {
       const h = new Date().getHours()
       return h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening'
     })
-    const firstName = computed(() => authStore.user?.first_name || 'Doctor')
+    const clinicalRoles = ['admin', 'receptionist', 'doctor', 'nurse']
+    const canViewClinical = computed(() => authStore.can(...clinicalRoles))
+    const canViewReports = computed(() => authStore.can(...clinicalRoles))
+    const insightLinkRoles = {
+      '/appointments': clinicalRoles,
+      '/billing': ['admin', 'receptionist'],
+      '/laboratory': ['admin', 'doctor', 'nurse', 'lab_technician'],
+      '/pharmacy': ['admin', 'pharmacist'],
+      '/reports': clinicalRoles,
+      '/ward': clinicalRoles
+    }
+    const canAccessInsight = insight => {
+      const link = insight?.link
+      if (typeof link !== 'string' || !link.startsWith('/')) return false
+      const path = link.split(/[?#]/)[0].replace(/\/+$/, '') || '/'
+      const roles = insightLinkRoles[path]
+      return !!roles && authStore.can(...roles)
+    }
+    const firstName = computed(() => authStore.user?.first_name || authStore.userName || 'there')
 
     onMounted(async () => {
       clockTimer = setInterval(() => { clockTick.value = Date.now() }, 60000)
       try {
         const [{ data }, insRes] = await Promise.all([
           axios.get('/api/reports/dashboard'),
-          axios.get('/api/reports/insights').catch(() => ({ data: { insights: [] } }))
+          canViewClinical.value
+            ? axios.get('/api/reports/insights').catch(() => ({ data: { insights: [] } }))
+            : Promise.resolve({ data: { insights: [] } })
         ])
-        stats.value             = data.stats || {}
-        recentAppointments.value = data.recentAppointments || []
-        recentPatients.value    = data.recentPatients || []
-        weeklyStats.value       = data.weeklyStats || []
-        insights.value          = insRes.data?.insights || insRes.data || []
+        stats.value = data.stats || {}
+        recentAppointments.value = canViewClinical.value ? data.recentAppointments || [] : []
+        recentPatients.value = canViewClinical.value ? data.recentPatients || [] : []
+        weeklyStats.value = canViewClinical.value ? data.weeklyStats || [] : []
+        const insightData = insRes.data?.insights
+        insights.value = Array.isArray(insightData)
+          ? insightData
+          : (Array.isArray(insRes.data) ? insRes.data : [])
       } catch {
         toast.error('Failed to load dashboard data')
       } finally {
@@ -260,8 +291,8 @@ export default {
       { label: "Today's Revenue", value: formatCurrency(stats.value.todayRevenue || 0), icon: '💵', gradient: 'linear-gradient(135deg,#dcfce7,#bbf7d0)', roles: ['admin', 'receptionist'] },
       { label: 'Monthly Revenue', value: formatCurrency(stats.value.monthlyRevenue || 0), icon: '📈', gradient: 'linear-gradient(135deg,#cffafe,#a5f3fc)', roles: ['admin', 'receptionist'] },
       { label: 'Unpaid Bills', value: stats.value.pendingBills || 0, icon: '🧾', gradient: 'linear-gradient(135deg,#fee2e2,#fecaca)', roles: ['admin', 'receptionist'] },
-      { label: 'Pending Lab Orders', value: stats.value.pendingLabOrders || 0, icon: '🧪', gradient: 'linear-gradient(135deg,#ede9fe,#ddd6fe)' },
-      { label: 'Low Stock Alerts', value: stats.value.lowStockMedications || 0, icon: '⚠️', gradient: 'linear-gradient(135deg,#ffedd5,#fed7aa)' }
+      { label: 'Pending Lab Orders', value: stats.value.pendingLabOrders || 0, icon: '🧪', gradient: 'linear-gradient(135deg,#ede9fe,#ddd6fe)', roles: ['admin', 'doctor', 'nurse', 'lab_technician'] },
+      { label: 'Low Stock Alerts', value: stats.value.lowStockMedications || 0, icon: '⚠️', gradient: 'linear-gradient(135deg,#ffedd5,#fed7aa)', roles: ['admin', 'pharmacist'] }
     ].filter(card => !card.roles || authStore.can(...card.roles)))
 
     const weeklyChartData = computed(() => ({
@@ -327,8 +358,8 @@ export default {
       loading, stats, statCards, insights,
       recentAppointments, recentPatients,
       weeklyStats, weeklyChartData, chartOptions,
-      quickActions, greeting, firstName, uiStore,
-      formatTime, getStatusColor,
+      quickActions, greeting, firstName, uiStore, canViewClinical, canViewReports,
+      canAccessInsight, formatTime, getStatusColor,
     }
   }
 }

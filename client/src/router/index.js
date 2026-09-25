@@ -39,12 +39,6 @@ const routes = [
     ]
   },
   {
-    path: '/portal',
-    name: 'PatientPortal',
-    component: () => import('../views/portal/PatientPortal.vue'),
-    meta: { title: 'Patient Portal' }
-  },
-  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('../views/NotFound.vue'),

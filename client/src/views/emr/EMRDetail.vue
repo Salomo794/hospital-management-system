@@ -391,6 +391,9 @@ export default {
     const record = ref(null)
     const loading = ref(true)
     const error = ref('')
+    let recordRequestGeneration = 0
+    let recordController = null
+    let componentUnmounted = false
 
     const parsedVitals = computed(() => {
       if (!record.value?.vital_signs) return {}
@@ -421,17 +424,42 @@ export default {
     }
 
     async function fetchRecord() {
+      if (componentUnmounted) return
+      recordRequestGeneration += 1
+      const requestGeneration = recordRequestGeneration
+      const recordId = route.params.id
+      recordController?.abort()
+      const controller = new AbortController()
+      recordController = controller
       loading.value = true
       error.value = ''
       record.value = null
       try {
-        const { data } = await axios.get(`/api/emr/${route.params.id}`)
+        const { data } = await axios.get(`/api/emr/${recordId}`, { signal: controller.signal })
+        if (
+          componentUnmounted ||
+          controller.signal.aborted ||
+          requestGeneration !== recordRequestGeneration
+        ) return
         record.value = data
       } catch (err) {
+        if (
+          componentUnmounted ||
+          controller.signal.aborted ||
+          requestGeneration !== recordRequestGeneration ||
+          axios.isCancel(err)
+        ) return
         error.value = err.response?.data?.message || 'Failed to load medical record.'
         toast.error(error.value)
       } finally {
-        loading.value = false
+        if (
+          !componentUnmounted &&
+          requestGeneration === recordRequestGeneration &&
+          recordController === controller
+        ) {
+          loading.value = false
+          recordController = null
+        }
       }
     }
 
@@ -465,6 +493,7 @@ export default {
     })
 
     const medicineSearchDebouncers = new Map()
+    const medicineSearchControllers = new Map()
 
     function clearPrescriptionWarnings() {
       safetyWarnings.value = []
@@ -477,21 +506,38 @@ export default {
       item.medicine_id = null
       clearPrescriptionWarnings()
       clearTimeout(medicineSearchDebouncers.get(idx))
-      if (!value || value.length < 2) {
-        item.medicineOptions = []
-        medicineSearchDebouncers.delete(idx)
-        return
-      }
+      medicineSearchDebouncers.delete(idx)
+      medicineSearchControllers.get(idx)?.abort()
+      medicineSearchControllers.delete(idx)
       const requestId = (item.searchRequestId || 0) + 1
       item.searchRequestId = requestId
+      if (!value || value.length < 2) {
+        item.medicineOptions = []
+        return
+      }
+      const controller = new AbortController()
+      medicineSearchControllers.set(idx, controller)
       const timer = setTimeout(async () => {
         try {
-          const { data } = await axios.get('/api/pharmacy/medicines', { params: { search: value, limit: 20 } })
-          if (prescriptionForm.items[idx] === item && item.searchRequestId === requestId && item.medicineSearch === value) {
+          const { data } = await axios.get('/api/pharmacy/medicines', {
+            params: { search: value, limit: 20 },
+            signal: controller.signal
+          })
+          if (
+            !componentUnmounted &&
+            !controller.signal.aborted &&
+            prescriptionForm.items[idx] === item &&
+            item.searchRequestId === requestId &&
+            item.medicineSearch === value
+          ) {
             item.medicineOptions = data.medicines || []
           }
         } catch {
-          if (prescriptionForm.items[idx] === item && item.searchRequestId === requestId) item.medicineOptions = []
+          if (!componentUnmounted && !controller.signal.aborted && prescriptionForm.items[idx] === item && item.searchRequestId === requestId) {
+            item.medicineOptions = []
+          }
+        } finally {
+          if (medicineSearchControllers.get(idx) === controller) medicineSearchControllers.delete(idx)
         }
       }, 350)
       medicineSearchDebouncers.set(idx, timer)
@@ -513,6 +559,8 @@ export default {
     function removePrescriptionItem(idx) {
       clearTimeout(medicineSearchDebouncers.get(idx))
       medicineSearchDebouncers.delete(idx)
+      medicineSearchControllers.get(idx)?.abort()
+      medicineSearchControllers.delete(idx)
       prescriptionForm.items.splice(idx, 1)
       clearPrescriptionWarnings()
     }
@@ -520,6 +568,8 @@ export default {
     function clearMedicineSearches() {
       medicineSearchDebouncers.forEach(timer => clearTimeout(timer))
       medicineSearchDebouncers.clear()
+      medicineSearchControllers.forEach(controller => controller.abort())
+      medicineSearchControllers.clear()
     }
 
     function openPrescriptionModal() {
@@ -587,6 +637,8 @@ export default {
     const submittingLabOrder = ref(false)
     const loadingLabTests = ref(false)
     const availableLabTests = ref([])
+    let labTestsGeneration = 0
+    let labTestsController = null
 
     const labOrderForm = reactive({
       test_ids: [],
@@ -604,17 +656,33 @@ export default {
 
     function closeLabOrderModal() {
       showLabOrderModal.value = false
+      labTestsGeneration += 1
+      labTestsController?.abort()
+      labTestsController = null
+      loadingLabTests.value = false
     }
 
     async function fetchLabTests() {
+      if (componentUnmounted) return
+      labTestsGeneration += 1
+      const requestGeneration = labTestsGeneration
+      labTestsController?.abort()
+      const controller = new AbortController()
+      labTestsController = controller
       loadingLabTests.value = true
       try {
-        const { data } = await axios.get('/api/laboratory/tests')
+        const { data } = await axios.get('/api/laboratory/tests', { signal: controller.signal })
+        if (componentUnmounted || controller.signal.aborted || requestGeneration !== labTestsGeneration) return
         availableLabTests.value = Array.isArray(data) ? data : (data.data || data.tests || [])
       } catch {
-        toast.error('Failed to load lab tests.')
+        if (!componentUnmounted && !controller.signal.aborted && requestGeneration === labTestsGeneration) {
+          toast.error('Failed to load lab tests.')
+        }
       } finally {
-        loadingLabTests.value = false
+        if (!componentUnmounted && requestGeneration === labTestsGeneration && labTestsController === controller) {
+          loadingLabTests.value = false
+          labTestsController = null
+        }
       }
     }
 
@@ -652,13 +720,24 @@ export default {
       })
     }
 
-    watch(() => route.params.id, fetchRecord)
-    onMounted(() => {
+    watch(() => route.params.id, () => {
+      closePrescriptionModal()
+      closeLabOrderModal()
       fetchRecord()
+    }, { immediate: true })
+    onMounted(() => {
       document.addEventListener('click', handleOutsideClick)
     })
 
     onBeforeUnmount(() => {
+      componentUnmounted = true
+      recordRequestGeneration += 1
+      recordController?.abort()
+      recordController = null
+      clearMedicineSearches()
+      labTestsGeneration += 1
+      labTestsController?.abort()
+      labTestsController = null
       document.removeEventListener('click', handleOutsideClick)
     })
 

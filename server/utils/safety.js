@@ -42,11 +42,17 @@ function checkAllergies(patient, medicines) {
   return warnings;
 }
 
-async function checkInteractions(medicineIds) {
+function runQuery(queryExecutor, sql, params = []) {
+  if (typeof queryExecutor === 'function') return queryExecutor(sql, params);
+  return queryExecutor.query(sql, params);
+}
+
+async function checkInteractions(medicineIds, queryExecutor = pool) {
   const ids = [...new Set((medicineIds || []).map(Number).filter(Boolean))];
   if (ids.length < 2) return [];
   const placeholders = ids.map(() => '?').join(',');
-  const [rows] = await pool.query(
+  const [rows] = await runQuery(
+    queryExecutor,
     `SELECT di.severity, di.description, di.clinical_management,
        ma.id as medicine_a_id, ma.name as medicine_a,
        mb.id as medicine_b_id, mb.name as medicine_b
@@ -70,21 +76,23 @@ async function checkInteractions(medicineIds) {
   }));
 }
 
-async function evaluateSafety(patientId, medicineIds) {
+async function evaluateSafety(patientId, medicineIds, queryExecutor = pool) {
   const requestedIds = (medicineIds || [])
     .map(value => Number(value))
     .filter(value => Number.isInteger(value) && value > 0);
   let patient = null;
   let existingMedicineIds = [];
   if (patientId) {
-    const [p] = await pool.query(
+    const [p] = await runQuery(
+      queryExecutor,
       'SELECT id, first_name, last_name, allergies FROM patients WHERE id = ?',
       [patientId]
     );
     patient = p[0] || null;
     // Include medications the patient is already taking. Checking only the
     // newly submitted list can miss an interaction with an active prescription.
-    const [activePrescriptions] = await pool.query(
+    const [activePrescriptions] = await runQuery(
+      queryExecutor,
       `SELECT DISTINCT pi.medicine_id
        FROM prescription_items pi
        JOIN prescriptions pr ON pr.id = pi.prescription_id
@@ -97,13 +105,14 @@ async function evaluateSafety(patientId, medicineIds) {
   let medicines = [];
   if (ids.length) {
     const placeholders = ids.map(() => '?').join(',');
-    const [m] = await pool.query(
+    const [m] = await runQuery(
+      queryExecutor,
       `SELECT id, name, generic_name FROM medicines WHERE id IN (${placeholders})`,
       ids
     );
     medicines = m;
   }
-  const warnings = [...checkAllergies(patient, medicines), ...(await checkInteractions(ids))];
+  const warnings = [...checkAllergies(patient, medicines), ...(await checkInteractions(ids, queryExecutor))];
   warnings.sort((a, b) => (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9));
   const blocking = warnings.some((w) => w.type === 'allergy' || w.severity === 'contraindicated');
   return {

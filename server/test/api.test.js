@@ -162,15 +162,32 @@ test('portal payment requires an explicit positive amount', async () => {
     })
     .expect(201);
 
+  assert.equal(createdPatient.body.patient.portal_pin_provisioned, true);
+  const originalPortalPin = createdPatient.body.plain_pin;
   const portalLogin = await request(app)
     .post('/api/portal/login')
-    .send({ identifier: unique, portal_pin: createdPatient.body.plain_pin })
+    .send({ identifier: unique, portal_pin: originalPortalPin })
     .expect(200);
   await request(app)
     .post(`/api/portal/bills/${bill.body.id}/pay`)
     .set('Authorization', `Bearer ${portalLogin.body.token}`)
     .send({ amount: 0, payment_method: 'card', request_id: 'zero-payment-test' })
     .expect(400);
+  await request(app)
+    .post(`/api/portal/bills/${bill.body.id}/pay`)
+    .set('Authorization', `Bearer ${portalLogin.body.token}`)
+    .send({ amount: 1, payment_method: 'card', request_id: '   ' })
+    .expect(400);
+
+  const resetPin = await request(app)
+    .post(`/api/patients/${createdPatient.body.patient.id}/portal-pin`)
+    .set('Authorization', `Bearer ${adminToken}`)
+    .expect(200);
+  assert.match(resetPin.body.plain_pin, /^\d{6}$/);
+  await request(app)
+    .post('/api/portal/login')
+    .send({ identifier: unique, portal_pin: resetPin.body.plain_pin })
+    .expect(200);
 });
 
 test('partial pharmacy dispensing preserves the remaining quantity', async () => {
@@ -183,6 +200,11 @@ test('partial pharmacy dispensing preserves the remaining quantity', async () =>
   assert.ok(item, 'fixture should contain a multi-unit prescription item');
 
   const requestId = `test-dispense-${Date.now()}`;
+  await request(app)
+    .post('/api/pharmacy/dispense')
+    .set('Authorization', `Bearer ${token}`)
+    .send({ prescription_item_id: item.id, quantity: 1, request_id: '   ' })
+    .expect(400);
   await request(app)
     .post('/api/pharmacy/dispense')
     .set('Authorization', `Bearer ${token}`)
@@ -207,4 +229,59 @@ test('partial pharmacy dispensing preserves the remaining quantity', async () =>
     [item.id]
   );
   assert.equal(afterReplay[0].dispensed_quantity, 1);
+});
+
+test('AI search validation and role boundaries are enforced', async () => {
+  const adminToken = await login();
+  await request(app)
+    .post('/api/ai/chat')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ message: 'find patient' })
+    .expect(400);
+  await request(app)
+    .post('/api/ai/chat')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ message: 'x'.repeat(501) })
+    .expect(400);
+
+  const pharmacistToken = await login('pharmacist@hospital.com');
+  const stock = await request(app)
+    .post('/api/ai/chat')
+    .set('Authorization', `Bearer ${pharmacistToken}`)
+    .send({ message: 'show current stock of Amoxicillin' })
+    .expect(200);
+  assert.match(stock.body.response, /stock status/i);
+
+  const receptionistToken = await login('receptionist@hospital.com');
+  await request(app)
+    .post('/api/ai/chat')
+    .set('Authorization', `Bearer ${receptionistToken}`)
+    .send({ message: 'abnormal lab results' })
+    .expect(403);
+
+  const labTechToken = await login('labtech@hospital.com');
+  await request(app)
+    .post('/api/ai/chat')
+    .set('Authorization', `Bearer ${labTechToken}`)
+    .send({ message: 'find patient Garcia' })
+    .expect(403);
+});
+
+test('dashboard returns role-filtered data and seven weekly buckets', async () => {
+  const adminToken = await login();
+  const adminDashboard = await request(app)
+    .get('/api/reports/dashboard')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .expect(200);
+  assert.equal(adminDashboard.body.weeklyStats.length, 7);
+  assert.equal(new Set(adminDashboard.body.weeklyStats.map(day => day.date)).size, 7);
+
+  const pharmacistToken = await login('pharmacist@hospital.com');
+  const pharmacistDashboard = await request(app)
+    .get('/api/reports/dashboard')
+    .set('Authorization', `Bearer ${pharmacistToken}`)
+    .expect(200);
+  assert.equal(typeof pharmacistDashboard.body.stats.lowStockMedications, 'number');
+  assert.equal(pharmacistDashboard.body.stats.pendingLabOrders, null);
+  assert.deepEqual(pharmacistDashboard.body.weeklyStats, []);
 });

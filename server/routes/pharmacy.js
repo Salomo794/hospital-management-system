@@ -184,52 +184,29 @@ router.put('/medicines/:id', authenticate, authorize(...PHARMACY_ROLES), asyncHa
 router.post('/dispense', authenticate, authorize('pharmacist'), asyncHandler(async (req, res) => {
   const prescriptionItemId = parseInteger(req.body?.prescription_item_id, 'prescription_item_id', { min: 1 });
   const quantity = parseInteger(req.body?.quantity, 'quantity', { min: 1 });
-  const requestId = typeof req.body?.request_id === 'string'
+  const suppliedRequestId = typeof req.body?.request_id === 'string'
     ? req.body.request_id.trim()
-    : (req.get('X-Request-ID') || randomUUID());
+    : null;
+  if (suppliedRequestId !== null && !suppliedRequestId) {
+    throw new ApiError(400, 'request_id cannot be blank');
+  }
+  const requestId = suppliedRequestId || (req.get('X-Request-ID') || '').trim() || randomUUID();
   if (requestId.length > 100) throw new ApiError(400, 'request_id is too long');
   const referenceNumber = `dispense:${requestId}`;
 
-  const [items] = await pool.query(
-    `SELECT pi.*, pr.patient_id, pr.status as prescription_status,
-            m.name as medicine_name, m.stock_quantity, m.is_active as medicine_active, m.expiry_date
-     FROM prescription_items pi
-     JOIN prescriptions pr ON pr.id = pi.prescription_id
-     JOIN medicines m ON m.id = pi.medicine_id
-     WHERE pi.id = ?`,
-    [prescriptionItemId]
-  );
-  if (items.length === 0) throw new ApiError(404, 'Prescription item not found');
-  const item = items[0];
-  if (item.prescription_status !== 'active') throw new ApiError(409, 'This prescription is not active');
-  if (!item.medicine_active) throw new ApiError(409, 'This medicine is inactive');
-  if (item.expiry_date && item.expiry_date < new Date().toISOString().slice(0, 10)) {
-    throw new ApiError(409, 'This medicine has expired');
-  }
-
-  const dispensedQuantity = Number(item.dispensed_quantity || 0);
-  const remaining = Number(item.quantity) - dispensedQuantity;
-  if (remaining <= 0) throw new ApiError(409, 'This prescription item has already been fully dispensed');
-  if (quantity > remaining) throw new ApiError(400, `Only ${remaining} unit(s) remain to be dispensed`);
-
-  const [activeMedicines] = await pool.query(
-    `SELECT DISTINCT pi2.medicine_id
-     FROM prescription_items pi2
-     JOIN prescriptions pr2 ON pi2.prescription_id = pr2.id
-     WHERE pr2.patient_id = ? AND pr2.status = 'active' AND pi2.dispensed_quantity < pi2.quantity`,
-    [item.patient_id]
-  );
-  const medicineIds = [...new Set([...activeMedicines.map(row => row.medicine_id), item.medicine_id])];
-  const safety = await evaluateSafety(item.patient_id, medicineIds);
-  if (safety.blocking && req.body.acknowledge_warnings !== true) {
-    return res.status(409).json({
-      message: 'Safety alert: dispensing this medicine conflicts with a recorded allergy or a contraindicated interaction.',
-      warnings: safety.warnings,
-      requires_acknowledgement: true,
-    });
-  }
-
   const result = await withTransaction(pool, async connection => {
+    const [items] = await connection.query(
+      `SELECT pi.*, pr.patient_id, pr.status as prescription_status,
+              m.name as medicine_name, m.stock_quantity, m.is_active as medicine_active, m.expiry_date
+       FROM prescription_items pi
+       JOIN prescriptions pr ON pr.id = pi.prescription_id
+       JOIN medicines m ON m.id = pi.medicine_id
+       WHERE pi.id = ?`,
+      [prescriptionItemId]
+    );
+    if (items.length === 0) throw new ApiError(404, 'Prescription item not found');
+    const item = items[0];
+
     const [replayRows] = await connection.query(
       `SELECT it.id, it.quantity, it.medicine_id FROM inventory_transactions it
        WHERE it.reference_number = ? AND it.transaction_type = 'dispense'`,
@@ -239,14 +216,37 @@ router.post('/dispense', authenticate, authorize('pharmacist'), asyncHandler(asy
       if (Number(replayRows[0].medicine_id) !== Number(item.medicine_id) || Number(replayRows[0].quantity) !== quantity) {
         throw new ApiError(409, 'request_id has already been used for a different dispense request');
       }
-      const [currentItem] = await connection.query(
-        'SELECT quantity, dispensed_quantity FROM prescription_items WHERE id = ? AND prescription_id = ?',
-        [prescriptionItemId, item.prescription_id]
-      );
-      const currentRemaining = currentItem.length
-        ? Number(currentItem[0].quantity) - Number(currentItem[0].dispensed_quantity || 0)
-        : 0;
-      return { replay: true, quantity: Number(replayRows[0].quantity), remaining: currentRemaining };
+      return {
+        replay: true,
+        safety: null,
+        quantity: Number(replayRows[0].quantity),
+        remaining: Number(item.quantity) - Number(item.dispensed_quantity || 0),
+      };
+    }
+
+    if (item.prescription_status !== 'active') throw new ApiError(409, 'This prescription is not active');
+    if (!item.medicine_active) throw new ApiError(409, 'This medicine is inactive');
+    if (item.expiry_date && item.expiry_date < new Date().toISOString().slice(0, 10)) {
+      throw new ApiError(409, 'This medicine has expired');
+    }
+
+    const dispensedQuantity = Number(item.dispensed_quantity || 0);
+    const prescriptionQuantity = Number(item.quantity);
+    const remaining = prescriptionQuantity - dispensedQuantity;
+    if (remaining <= 0) throw new ApiError(409, 'This prescription item has already been fully dispensed');
+    if (quantity > remaining) throw new ApiError(400, `Only ${remaining} unit(s) remain to be dispensed`);
+
+    const [activeMedicines] = await connection.query(
+      `SELECT DISTINCT pi2.medicine_id
+       FROM prescription_items pi2
+       JOIN prescriptions pr2 ON pi2.prescription_id = pr2.id
+       WHERE pr2.patient_id = ? AND pr2.status = 'active' AND pi2.dispensed_quantity < pi2.quantity`,
+      [item.patient_id]
+    );
+    const medicineIds = [...new Set([...activeMedicines.map(row => row.medicine_id), item.medicine_id])];
+    const safety = await evaluateSafety(item.patient_id, medicineIds, connection);
+    if (safety.blocking && req.body.acknowledge_warnings !== true) {
+      return { safety_blocked: true, safety };
     }
 
     const [stockUpdate] = await connection.query(
@@ -260,7 +260,7 @@ router.post('/dispense', authenticate, authorize('pharmacist'), asyncHandler(asy
       `UPDATE prescription_items
        SET dispensed_quantity = ?, dispensed = ?, dispensed_date = CASE WHEN ? >= quantity THEN datetime('now') ELSE dispensed_date END
        WHERE id = ? AND prescription_id = ? AND dispensed_quantity = ?`,
-      [newDispensedQuantity, newDispensedQuantity >= item.quantity ? 1 : 0, newDispensedQuantity, prescriptionItemId, item.prescription_id, dispensedQuantity]
+      [newDispensedQuantity, newDispensedQuantity >= prescriptionQuantity ? 1 : 0, newDispensedQuantity, prescriptionItemId, item.prescription_id, dispensedQuantity]
     );
     if (itemUpdate.affectedRows !== 1) throw new ApiError(409, 'The prescription item changed while dispensing; reload and try again');
 
@@ -278,12 +278,20 @@ router.post('/dispense', authenticate, authorize('pharmacist'), asyncHandler(asy
     if (pending[0].count === 0) {
       await connection.query("UPDATE prescriptions SET status = 'completed' WHERE id = ?", [item.prescription_id]);
     }
-    return { replay: false, quantity, remaining: item.quantity - newDispensedQuantity };
+    return { replay: false, safety, quantity, remaining: prescriptionQuantity - newDispensedQuantity };
   });
+
+  if (result.safety_blocked) {
+    return res.status(409).json({
+      message: 'Safety alert: dispensing this medicine conflicts with a recorded allergy or a contraindicated interaction.',
+      warnings: result.safety.warnings,
+      requires_acknowledgement: true,
+    });
+  }
 
   res.json({
     message: 'Medicine dispensed successfully',
-    warnings: safety.warnings,
+    warnings: result.safety?.warnings || [],
     acknowledged: req.body.acknowledge_warnings === true,
     replay: result.replay,
     quantity: result.quantity,

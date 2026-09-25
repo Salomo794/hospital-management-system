@@ -133,6 +133,17 @@ router.post('/', authenticate, authorize(...ADMISSION_ROLES), asyncHandler(async
   if (doctor.length === 0) throw new ApiError(400, 'Doctor not found or inactive');
 
   const created = await withTransaction(pool, async connection => {
+    const [activeAdmissions] = await connection.query(
+      "SELECT id, admission_number FROM admissions WHERE patient_id = ? AND status = 'admitted' LIMIT 1",
+      [patientId]
+    );
+    if (activeAdmissions.length > 0) {
+      const admissionNumber = activeAdmissions[0].admission_number
+        ? ` (${activeAdmissions[0].admission_number})`
+        : '';
+      throw new ApiError(409, `Patient already has an active admission${admissionNumber}.`);
+    }
+
     const capacity = wardCapacity(ward);
     const requestedBed = parseBedNumber(bed_number, capacity);
     if (requestedBed === undefined) throw new ApiError(400, `Bed must be a number from 01 to ${pad(capacity)}.`);

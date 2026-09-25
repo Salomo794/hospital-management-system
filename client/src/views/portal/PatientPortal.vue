@@ -16,7 +16,7 @@
           <label>MRN or access code<input v-model.trim="loginForm.identifier" autocomplete="username" required /></label>
           <label>Portal PIN<input v-model="loginForm.portal_pin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="current-password" required /></label>
           <div v-if="error" class="error-message">{{ error }}</div>
-          <button class="btn btn-primary btn-block" :disabled="loading">{{ loading ? 'Signing in…' : 'Sign in' }}</button>
+          <button class="btn btn-primary btn-block" :disabled="loggingIn">{{ loggingIn ? 'Signing in…' : 'Sign in' }}</button>
         </form>
       </section>
 
@@ -39,6 +39,12 @@
         </nav>
 
         <div v-if="loading" class="loading-state"><div class="spinner" /> Loading your health information…</div>
+
+        <section v-else-if="error" class="portal-card load-error-card">
+          <h2>Unable to load your information</h2>
+          <p>{{ error }}</p>
+          <button class="btn btn-primary" :disabled="loading" @click="loadPortalData">Retry</button>
+        </section>
 
         <section v-else-if="activeTab === 'appointments'" class="portal-card">
           <h2>Appointments</h2>
@@ -81,15 +87,25 @@
                 <strong>{{ bill.bill_number }}</strong>
                 <span>Total {{ formatCurrency(bill.net_amount) }} · Paid {{ formatCurrency(bill.paid_amount) }}</span>
               </div>
-              <div v-if="outstanding(bill) > 0" class="payment-controls">
-                <input v-model.number="paymentAmounts[bill.id]" type="number" min="0.01" :max="outstanding(bill)" step="0.01" aria-label="Payment amount" />
-                <button class="btn btn-primary btn-sm" :disabled="payingBillId === bill.id" @click="payBill(bill)">Pay</button>
+              <div v-if="canPayBill(bill)" class="payment-controls">
+                <input v-model.number="paymentAmounts[bill.id]" type="number" min="0.01" :max="outstanding(bill)" step="0.01" :disabled="isPayingBill(bill.id)" aria-label="Payment amount" />
+                <button class="btn btn-primary btn-sm" :disabled="isPayingBill(bill.id)" @click="payBill(bill)">
+                  {{ isPayingBill(bill.id) ? 'Paying…' : 'Pay' }}
+                </button>
               </div>
+              <span v-else-if="isBillCancelled(bill)" class="badge badge-gray">Cancelled</span>
+              <span v-else-if="!paymentsEnabled" class="badge badge-gray">Payment unavailable</span>
               <span v-else class="badge badge-success">Paid</span>
+              <div
+                v-if="paymentMessages[bill.id]"
+                :class="paymentMessageTypes[bill.id] === 'error' ? 'error-message' : 'success-message'"
+              >
+                {{ paymentMessages[bill.id] }}
+              </div>
             </article>
           </div>
           <p v-else class="empty-copy">No bills are available.</p>
-          <div v-if="paymentMessage" class="success-message">{{ paymentMessage }}</div>
+          <p v-if="!paymentsEnabled" class="payment-disabled-note">Online payments are currently unavailable. Please contact reception.</p>
         </section>
       </template>
 
@@ -111,7 +127,7 @@
 </template>
 
 <script>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { formatCurrency, formatDate, getStatusColor } from '../../utils/helpers'
 import { getStoredItem, getStoredJson, removeStoredItem, setStoredItem, setStoredJson } from '../../utils/storage'
@@ -128,9 +144,8 @@ export default {
     const loading = ref(false)
     const loggingIn = ref(false)
     const checkingIn = ref(false)
-    const payingBillId = ref(null)
     const error = ref('')
-    const paymentMessage = ref('')
+    const paymentsEnabled = ref(true)
     const checkinResult = ref(null)
     const checkin = ref(null)
     const aheadInQueue = ref(0)
@@ -139,59 +154,189 @@ export default {
     const prescriptions = ref([])
     const bills = ref([])
     const paymentAmounts = reactive({})
+    const paymentPending = reactive({})
+    const paymentMessages = reactive({})
+    const paymentMessageTypes = reactive({})
     const paymentRequestIds = new Map()
+    const paymentControllers = new Map()
     const tabs = [
       { id: 'appointments', label: 'Appointments' },
       { id: 'results', label: 'Lab Results' },
       { id: 'prescriptions', label: 'Prescriptions' },
       { id: 'bills', label: 'Bills' }
     ]
-    const authorization = computed(() => ({ Authorization: `Bearer ${token.value}` }))
+
+    let sessionGeneration = 0
+    let loadGeneration = 0
+    let checkinGeneration = 0
+    let loadController = null
+    let loginController = null
+    let checkinController = null
+    let componentUnmounted = false
+
+    const requestHeaders = requestToken => ({ Authorization: `Bearer ${requestToken}` })
+    const clearObject = target => Object.keys(target).forEach(key => { delete target[key] })
+
+    const clearPortalData = () => {
+      patient.value = null
+      checkin.value = null
+      checkinResult.value = null
+      aheadInQueue.value = 0
+      appointments.value = []
+      labResults.value = []
+      prescriptions.value = []
+      bills.value = []
+      clearObject(paymentAmounts)
+      clearObject(paymentPending)
+      clearObject(paymentMessages)
+      clearObject(paymentMessageTypes)
+      paymentRequestIds.clear()
+      paymentsEnabled.value = true
+      error.value = ''
+    }
+
+    const abortPortalData = () => {
+      loadGeneration += 1
+      if (loadController) {
+        loadController.abort()
+        loadController = null
+      }
+    }
+
+    const abortPortalRequests = () => {
+      abortPortalData()
+      checkinGeneration += 1
+      if (checkinController) {
+        checkinController.abort()
+        checkinController = null
+      }
+      paymentControllers.forEach(controller => controller.abort())
+      paymentControllers.clear()
+      if (loginController) {
+        loginController.abort()
+        loginController = null
+      }
+    }
+
+    const invalidatePortalSession = () => {
+      sessionGeneration += 1
+      abortPortalRequests()
+    }
+
+    const outstanding = bill => Math.max(Number(bill.net_amount || 0) - Number(bill.paid_amount || 0), 0)
+    const isBillCancelled = bill => String(bill.payment_status || '').toLowerCase() === 'cancelled'
+    const canPayBill = bill => paymentsEnabled.value && !isBillCancelled(bill) && outstanding(bill) > 0
+    const isPayingBill = billId => !!paymentPending[billId]
+    const setPaymentMessage = (billId, message, type = 'success') => {
+      paymentMessages[billId] = message
+      paymentMessageTypes[billId] = type
+    }
+    const newRequestId = () => globalThis.crypto?.randomUUID?.() || `portal-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
     const logout = () => {
+      invalidatePortalSession()
       token.value = null
-      patient.value = null
+      clearPortalData()
       removeStoredItem('portal-token')
       removeStoredItem('portal-patient')
+      loginForm.identifier = ''
+      loginForm.portal_pin = ''
+      checkinForm.identifier = ''
+      checkinForm.purpose = ''
+      activeTab.value = 'appointments'
+      loading.value = false
+      loggingIn.value = false
+      checkingIn.value = false
       window.location.assign('/portal')
     }
 
     const loadPortalData = async () => {
-      if (!token.value) return
+      const requestToken = token.value
+      if (!requestToken || componentUnmounted) return
+
+      abortPortalData()
+      const requestSession = sessionGeneration
+      const requestGeneration = loadGeneration
+      const controller = new AbortController()
+      loadController = controller
       loading.value = true
       error.value = ''
+      const config = () => ({ headers: requestHeaders(requestToken), signal: controller.signal })
+
       try {
         const [profile, appointmentData, labData, prescriptionData, billData] = await Promise.all([
-          portalApi.get('/portal/me', { headers: authorization.value }),
-          portalApi.get('/portal/appointments', { headers: authorization.value }),
-          portalApi.get('/portal/lab-results', { headers: authorization.value }),
-          portalApi.get('/portal/prescriptions', { headers: authorization.value }),
-          portalApi.get('/portal/bills', { headers: authorization.value })
+          portalApi.get('/portal/me', config()),
+          portalApi.get('/portal/appointments', config()),
+          portalApi.get('/portal/lab-results', config()),
+          portalApi.get('/portal/prescriptions', config()),
+          portalApi.get('/portal/bills', config())
         ])
-        patient.value = profile.data.patient
-        checkin.value = profile.data.checkin
-        aheadInQueue.value = profile.data.ahead_in_queue || 0
-        appointments.value = appointmentData.data.appointments || []
-        labResults.value = labData.data.results || []
-        prescriptions.value = prescriptionData.data.prescriptions || []
-        bills.value = billData.data.bills || []
+        if (
+          componentUnmounted ||
+          requestSession !== sessionGeneration ||
+          requestGeneration !== loadGeneration ||
+          controller.signal.aborted ||
+          requestToken !== token.value
+        ) return
+
+        const profileData = profile.data || {}
+        const billPayload = billData.data || {}
+        patient.value = profileData.patient
+        checkin.value = profileData.checkin
+        aheadInQueue.value = profileData.ahead_in_queue || 0
+        appointments.value = appointmentData.data?.appointments || []
+        labResults.value = labData.data?.results || []
+        prescriptions.value = prescriptionData.data?.prescriptions || []
+        bills.value = billPayload.bills || []
+        if (typeof billPayload.payments_enabled === 'boolean') {
+          paymentsEnabled.value = billPayload.payments_enabled
+        } else if (typeof profileData.payments_enabled === 'boolean') {
+          paymentsEnabled.value = profileData.payments_enabled
+        }
+        clearObject(paymentAmounts)
         bills.value.forEach(bill => { paymentAmounts[bill.id] = outstanding(bill) })
         setStoredJson('portal-patient', patient.value)
       } catch (requestError) {
+        if (
+          componentUnmounted ||
+          requestSession !== sessionGeneration ||
+          requestGeneration !== loadGeneration ||
+          controller.signal.aborted ||
+          axios.isCancel(requestError)
+        ) return
         if (requestError.response?.status === 401) logout()
         else error.value = requestError.response?.data?.message || 'Unable to load your portal information.'
       } finally {
-        loading.value = false
+        if (
+          !componentUnmounted &&
+          requestSession === sessionGeneration &&
+          requestGeneration === loadGeneration &&
+          loadController === controller
+        ) {
+          loading.value = false
+          loadController = null
+        }
       }
     }
 
     const login = async () => {
+      invalidatePortalSession()
+      clearPortalData()
+      token.value = null
+      removeStoredItem('portal-token')
+      removeStoredItem('portal-patient')
+      const requestSession = sessionGeneration
+      const controller = new AbortController()
+      loginController = controller
+      const credentials = { ...loginForm }
       loggingIn.value = true
-      error.value = ''
+
       try {
-        const { data } = await portalApi.post('/portal/login', loginForm)
+        const { data } = await portalApi.post('/portal/login', credentials, { signal: controller.signal })
+        if (componentUnmounted || controller.signal.aborted || requestSession !== sessionGeneration) return
         token.value = data.token
         patient.value = data.patient
+        if (typeof data.payments_enabled === 'boolean') paymentsEnabled.value = data.payments_enabled
         setStoredItem('portal-token', data.token)
         setStoredJson('portal-patient', data.patient)
         loginForm.identifier = ''
@@ -199,49 +344,97 @@ export default {
         checkinForm.identifier = data.patient.mrn
         await loadPortalData()
       } catch (requestError) {
+        if (componentUnmounted || controller.signal.aborted || requestSession !== sessionGeneration || axios.isCancel(requestError)) return
         error.value = requestError.response?.data?.message || 'Invalid patient credentials.'
       } finally {
-        loggingIn.value = false
+        if (loginController === controller) loginController = null
+        if (!componentUnmounted && requestSession === sessionGeneration) loggingIn.value = false
       }
     }
 
     const checkIn = async () => {
+      const requestSession = sessionGeneration
+      const requestToken = token.value
+      const requestGeneration = ++checkinGeneration
+      checkinController?.abort()
+      const controller = new AbortController()
+      checkinController = controller
       checkingIn.value = true
       try {
-        const { data } = await portalApi.post('/portal/checkin', checkinForm)
+        const { data } = await portalApi.post('/portal/checkin', { ...checkinForm }, { signal: controller.signal })
+        if (
+          componentUnmounted ||
+          controller.signal.aborted ||
+          requestSession !== sessionGeneration ||
+          requestGeneration !== checkinGeneration ||
+          (requestToken && requestToken !== token.value)
+        ) return
         checkinResult.value = data
         if (token.value) await loadPortalData()
       } catch (requestError) {
+        if (
+          componentUnmounted ||
+          controller.signal.aborted ||
+          requestSession !== sessionGeneration ||
+          requestGeneration !== checkinGeneration ||
+          axios.isCancel(requestError)
+        ) return
         checkinResult.value = { message: requestError.response?.data?.message || 'Unable to check in.' }
       } finally {
-        checkingIn.value = false
+        if (checkinController === controller) checkinController = null
+        if (!componentUnmounted && requestSession === sessionGeneration && requestGeneration === checkinGeneration) {
+          checkingIn.value = false
+        }
       }
     }
 
-    const outstanding = bill => Math.max(Number(bill.net_amount || 0) - Number(bill.paid_amount || 0), 0)
-    const newRequestId = () => globalThis.crypto?.randomUUID?.() || `portal-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const payBill = async bill => {
-      const amount = Number(paymentAmounts[bill.id])
+      const billId = bill.id
+      const requestSession = sessionGeneration
+      const requestToken = token.value
+      if (!requestToken || paymentPending[billId] || !canPayBill(bill)) return
+
+      const amount = Number(paymentAmounts[billId])
       if (!Number.isFinite(amount) || amount <= 0 || amount > outstanding(bill)) {
-        paymentMessage.value = 'Enter a positive amount within the outstanding balance.'
+        setPaymentMessage(billId, 'Enter a positive amount within the outstanding balance.', 'error')
         return
       }
-      if (!paymentRequestIds.has(bill.id)) paymentRequestIds.set(bill.id, newRequestId())
-      payingBillId.value = bill.id
-      paymentMessage.value = ''
+      if (!paymentRequestIds.has(billId)) paymentRequestIds.set(billId, newRequestId())
+      const controller = new AbortController()
+      paymentControllers.set(billId, controller)
+      paymentPending[billId] = true
+      delete paymentMessages[billId]
+      delete paymentMessageTypes[billId]
+
       try {
-        const { data } = await portalApi.post(`/portal/bills/${bill.id}/pay`, {
+        const { data } = await portalApi.post(`/portal/bills/${billId}/pay`, {
           amount,
           payment_method: 'card',
-          request_id: paymentRequestIds.get(bill.id)
-        }, { headers: authorization.value })
-        paymentMessage.value = data.message
-        paymentRequestIds.delete(bill.id)
+          request_id: paymentRequestIds.get(billId)
+        }, { headers: requestHeaders(requestToken), signal: controller.signal })
+        if (
+          componentUnmounted ||
+          controller.signal.aborted ||
+          requestSession !== sessionGeneration ||
+          requestToken !== token.value
+        ) return
+        setPaymentMessage(billId, data.message || 'Payment recorded successfully.', 'success')
+        paymentRequestIds.delete(billId)
         await loadPortalData()
       } catch (requestError) {
-        paymentMessage.value = requestError.response?.data?.message || 'Payment could not be recorded.'
+        if (
+          componentUnmounted ||
+          controller.signal.aborted ||
+          requestSession !== sessionGeneration ||
+          requestToken !== token.value ||
+          axios.isCancel(requestError)
+        ) return
+        setPaymentMessage(billId, requestError.response?.data?.message || 'Payment could not be recorded.', 'error')
       } finally {
-        payingBillId.value = null
+        if (paymentControllers.get(billId) === controller) paymentControllers.delete(billId)
+        if (!componentUnmounted && requestSession === sessionGeneration && requestToken === token.value) {
+          paymentPending[billId] = false
+        }
       }
     }
 
@@ -253,12 +446,22 @@ export default {
       if (token.value) await loadPortalData()
     })
 
+    onUnmounted(() => {
+      componentUnmounted = true
+      invalidatePortalSession()
+      clearPortalData()
+      loginForm.identifier = ''
+      loginForm.portal_pin = ''
+      checkinForm.identifier = ''
+      checkinForm.purpose = ''
+    })
+
     return {
       token, patient, loginForm, checkinForm, activeTab, tabs, loading, loggingIn,
-      checkingIn, payingBillId, error, paymentMessage, checkinResult, checkin,
+      checkingIn, error, paymentsEnabled, paymentMessages, paymentMessageTypes, checkinResult, checkin,
       aheadInQueue, appointments, labResults, prescriptions, bills, paymentAmounts,
-      login, logout, loadPortalData, checkIn, payBill, outstanding,
-      formatCurrency, formatDate, formatTime, formatLabel, getStatusColor
+      canPayBill, isBillCancelled, isPayingBill, login, logout, loadPortalData, checkIn, payBill,
+      outstanding, formatCurrency, formatDate, formatTime, formatLabel, getStatusColor
     }
   }
 }

@@ -21,6 +21,10 @@ const CHECKIN_TRANSITIONS = {
 const portalLoginLimiter = new FixedWindowRateLimiter({ windowMs: 15 * 60 * 1000, max: 8 });
 const checkinLimiter = new FixedWindowRateLimiter({ windowMs: 5 * 60 * 1000, max: 20 });
 
+function paymentsEnabled() {
+  return process.env.NODE_ENV !== 'production' || process.env.ALLOW_SIMULATED_PAYMENTS === 'true';
+}
+
 async function findPatientByIdentifier(identifier) {
   const value = String(identifier || '').trim();
   if (!value) return [];
@@ -66,6 +70,7 @@ router.post('/login', asyncHandler(async (req, res) => {
   );
   res.json({
     token,
+    payments_enabled: paymentsEnabled(),
     patient: {
       id: patient.id,
       uuid: patient.uuid,
@@ -97,52 +102,64 @@ router.post('/checkin', asyncHandler(async (req, res) => {
   if (!patient) throw new ApiError(404, 'Patient not found. Please check your MRN or QR code.');
   if (patient.status !== 'active') throw new ApiError(403, 'This patient record is inactive.');
 
-  const today = new Date().toISOString().slice(0, 10);
-  const [todayAppointments] = await pool.query(
-    `SELECT id, appointment_time, type, reason FROM appointments
-     WHERE patient_id = ? AND appointment_date = ? AND status = 'scheduled'
-     ORDER BY appointment_time ASC LIMIT 1`,
-    [patient.id, today]
-  );
-  const [recentCheckins] = await pool.query(
-    "SELECT * FROM checkins WHERE patient_id = ? AND date(checkin_time) = ? ORDER BY id DESC LIMIT 1",
-    [patient.id, today]
-  );
-  if (recentCheckins.length > 0) {
-    const existing = recentCheckins[0];
-    if (!['waiting', 'in_consultation'].includes(existing.status)) {
-      throw new ApiError(409, `Today's check-in is already ${existing.status.replace('_', ' ')}. Please contact reception.`);
-    }
-    if (purpose) {
-      await pool.query('UPDATE checkins SET purpose = ? WHERE id = ?', [purpose, existing.id]);
-      existing.purpose = purpose;
-    }
-  }
-
-  let checkin = recentCheckins[0];
-  if (!checkin) {
-    const [result] = await pool.query(
-      `INSERT INTO checkins
-       (uuid, patient_id, appointment_id, checkin_time, purpose, status, qr_token)
-       VALUES (?, ?, ?, datetime('now'), ?, 'waiting', ?)`,
-      [
-        randomUUID(), patient.id, todayAppointments[0]?.id || null,
-        purpose || todayAppointments[0]?.type || 'visit', identifier,
-      ]
+  const result = await withTransaction(pool, async connection => {
+    const [clockRows] = await connection.query(
+      "SELECT datetime('now') AS checkin_time, date('now') AS today"
     );
-    const [created] = await pool.query('SELECT * FROM checkins WHERE id = ?', [result.insertId]);
-    checkin = created[0];
-  }
+    const { checkin_time: checkinTime, today } = clockRows[0];
+    const [todayAppointments] = await connection.query(
+      `SELECT id, appointment_time, type, reason FROM appointments
+       WHERE patient_id = ? AND appointment_date = ? AND status = 'scheduled'
+       ORDER BY appointment_time ASC LIMIT 1`,
+      [patient.id, today]
+    );
+    const [recentCheckins] = await connection.query(
+      `SELECT * FROM checkins
+       WHERE patient_id = ? AND checkin_date = ?
+       ORDER BY id DESC LIMIT 1`,
+      [patient.id, today]
+    );
 
-  const [positionRows] = await pool.query(
-    `SELECT COUNT(*) AS count FROM checkins
-     WHERE date(checkin_time) = ? AND status IN ('waiting','in_consultation') AND id <= ?`,
-    [today, checkin.id]
-  );
+    let checkin = recentCheckins[0];
+    if (checkin) {
+      if (!['waiting', 'in_consultation'].includes(checkin.status)) {
+        throw new ApiError(409, `Today's check-in is already ${checkin.status.replace('_', ' ')}. Please contact reception.`);
+      }
+      if (purpose) {
+        await connection.query('UPDATE checkins SET purpose = ? WHERE id = ?', [purpose, checkin.id]);
+        checkin.purpose = purpose;
+      }
+    } else {
+      const [insertResult] = await connection.query(
+        `INSERT INTO checkins
+         (uuid, patient_id, appointment_id, checkin_time, checkin_date, purpose, status, qr_token)
+         VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?)`,
+        [
+          randomUUID(), patient.id, todayAppointments[0]?.id || null, checkinTime, today,
+          purpose || todayAppointments[0]?.type || 'visit', identifier,
+        ]
+      );
+      const [created] = await connection.query('SELECT * FROM checkins WHERE id = ?', [insertResult.insertId]);
+      checkin = created[0];
+    }
+
+    const [positionRows] = await connection.query(
+      `SELECT COUNT(*) AS count FROM checkins
+       WHERE checkin_date = ? AND status IN ('waiting', 'in_consultation') AND id <= ?`,
+      [today, checkin.id]
+    );
+    return {
+      checkin,
+      todayAppointments,
+      queuePosition: Number(positionRows[0].count),
+    };
+  });
+
+  const { checkin, todayAppointments, queuePosition } = result;
   res.json({
     success: true,
     checked_in: true,
-    queue_position: positionRows[0].count,
+    queue_position: queuePosition,
     status: checkin.status,
     patient: {
       id: patient.id,
@@ -187,15 +204,20 @@ router.get('/me', authenticatePortal, asyncHandler(async (req, res) => {
     [req.patient.id]
   );
   const [todayCheckins] = await pool.query(
-    "SELECT * FROM checkins WHERE patient_id = ? AND date(checkin_time) = date('now') ORDER BY id DESC LIMIT 1",
+    "SELECT * FROM checkins WHERE patient_id = ? AND checkin_date = date('now') ORDER BY id DESC LIMIT 1",
     [req.patient.id]
   );
   const [aheadRows] = await pool.query(
     `SELECT COUNT(*) as count FROM checkins
-     WHERE date(checkin_time) = date('now') AND status IN ('waiting','in_consultation') AND id < ?`,
+     WHERE checkin_date = date('now') AND status IN ('waiting','in_consultation') AND id < ?`,
     [todayCheckins[0]?.id || 0]
   );
-  res.json({ patient: rows[0], checkin: todayCheckins[0] || null, ahead_in_queue: aheadRows[0].count });
+  res.json({
+    patient: rows[0],
+    checkin: todayCheckins[0] || null,
+    ahead_in_queue: aheadRows[0].count,
+    payments_enabled: paymentsEnabled(),
+  });
 }));
 
 router.get('/appointments', authenticatePortal, asyncHandler(async (req, res) => {
@@ -254,16 +276,22 @@ router.get('/bills', authenticatePortal, asyncHandler(async (req, res) => {
 }));
 
 router.post('/bills/:id/pay', authenticatePortal, asyncHandler(async (req, res) => {
-  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_SIMULATED_PAYMENTS !== 'true') {
+  if (!paymentsEnabled()) {
     throw new ApiError(503, 'Online payments are not enabled. Please contact reception.');
   }
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const amount = Math.round((parseFiniteNumber(req.body?.amount, 'amount', { min: 0.01 }) + Number.EPSILON) * 100) / 100;
   const paymentMethod = req.body?.payment_method || 'card';
   if (!PAYMENT_METHODS.includes(paymentMethod)) throw new ApiError(400, 'Invalid payment method');
-  const requestId = typeof req.body?.request_id === 'string'
-    ? req.body.request_id.trim()
-    : (req.get('X-Request-ID') || randomUUID());
+  const suppliedRequestId = req.body?.request_id;
+  let requestId;
+  if (suppliedRequestId !== undefined) {
+    if (typeof suppliedRequestId !== 'string') throw new ApiError(400, 'request_id must be a string');
+    requestId = suppliedRequestId.trim();
+    if (!requestId) throw new ApiError(400, 'request_id cannot be blank');
+  } else {
+    requestId = (req.get('X-Request-ID') || '').trim() || randomUUID();
+  }
   if (requestId.length > 100) throw new ApiError(400, 'request_id is too long');
   const referenceNumber = `portal:${requestId}`;
 

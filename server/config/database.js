@@ -33,6 +33,70 @@ function createIndexIfPossible(sql) {
   }
 }
 
+function createRequiredIndex(sql, invariant) {
+  try {
+    sqlite.exec(sql);
+  } catch (error) {
+    throw new Error(`[database] Could not enforce ${invariant}: ${error.message}`);
+  }
+}
+
+function assertNoActiveCheckinDuplicates() {
+  const duplicates = sqlite.prepare(`
+    SELECT patient_id, checkin_date, COUNT(*) AS duplicate_count
+    FROM checkins
+    WHERE status IN ('waiting', 'in_consultation')
+    GROUP BY patient_id, checkin_date
+    HAVING COUNT(*) > 1
+    ORDER BY patient_id, checkin_date
+    LIMIT 10
+  `).all();
+  if (duplicates.length > 0) {
+    const summary = duplicates
+      .map(row => `patient ${row.patient_id} on ${row.checkin_date || 'an unknown date'} (${row.duplicate_count} rows)`)
+      .join('; ');
+    throw new Error(
+      `[database] Cannot enforce one active check-in per patient per day. `
+      + `Resolve duplicate legacy check-ins (${summary}) and restart.`
+    );
+  }
+
+  const undated = sqlite.prepare(`
+    SELECT id
+    FROM checkins
+    WHERE status IN ('waiting', 'in_consultation') AND checkin_date IS NULL
+    ORDER BY id
+    LIMIT 10
+  `).all();
+  if (undated.length > 0) {
+    throw new Error(
+      '[database] Cannot enforce active check-in dates because legacy check-ins have no valid checkin_date '
+      + `(check-in IDs: ${undated.map(row => row.id).join(', ')}). Repair those rows and restart.`
+    );
+  }
+}
+
+function assertNoActiveAdmissionDuplicates() {
+  const duplicates = sqlite.prepare(`
+    SELECT patient_id, COUNT(*) AS duplicate_count
+    FROM admissions
+    WHERE status = 'admitted'
+    GROUP BY patient_id
+    HAVING COUNT(*) > 1
+    ORDER BY patient_id
+    LIMIT 10
+  `).all();
+  if (duplicates.length > 0) {
+    const summary = duplicates
+      .map(row => `patient ${row.patient_id} (${row.duplicate_count} rows)`)
+      .join('; ');
+    throw new Error(
+      '[database] Cannot enforce one active admission per patient. '
+      + `Resolve duplicate legacy admissions (${summary}) and restart.`
+    );
+  }
+}
+
 function migrate() {
   // These tables are also declared by setup.js. Keeping their lightweight
   // migrations here allows the API to be inspected before a full setup run.
@@ -54,6 +118,7 @@ function migrate() {
     patient_id INTEGER NOT NULL,
     appointment_id INTEGER,
     checkin_time TEXT DEFAULT (datetime('now')),
+    checkin_date TEXT DEFAULT (date('now')),
     purpose TEXT,
     status TEXT DEFAULT 'waiting' CHECK(status IN ('waiting','in_consultation','completed','no_show','cancelled')),
     qr_token TEXT,
@@ -61,6 +126,25 @@ function migrate() {
     FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
     FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL
   )`);
+
+  const migrateCheckinDate = sqlite.transaction(() => {
+    if (!columnExists('checkins', 'checkin_date')) {
+      sqlite.exec('ALTER TABLE checkins ADD COLUMN checkin_date TEXT');
+    }
+    sqlite.exec(`
+      UPDATE checkins
+      SET checkin_date = date(checkin_time)
+      WHERE checkin_date IS NULL OR TRIM(checkin_date) = ''
+    `);
+    assertNoActiveCheckinDuplicates();
+    createRequiredIndex(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_active_checkin_patient_date
+       ON checkins(patient_id, checkin_date)
+       WHERE status IN ('waiting', 'in_consultation')`,
+      'one active check-in per patient per day'
+    );
+  });
+  migrateCheckinDate();
 
   if (tableExists('patients')) {
     if (!columnExists('patients', 'portal_pin')) {
@@ -122,6 +206,13 @@ function migrate() {
       WHERE status IN ('scheduled','in_progress','completed')`);
   }
   if (tableExists('admissions')) {
+    assertNoActiveAdmissionDuplicates();
+    createRequiredIndex(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_active_admission_patient
+       ON admissions(patient_id)
+       WHERE status = 'admitted'`,
+      'one active admission per patient'
+    );
     createIndexIfPossible(`CREATE UNIQUE INDEX IF NOT EXISTS idx_active_admission_bed
       ON admissions(ward, bed_number)
       WHERE status = 'admitted' AND ward IS NOT NULL AND bed_number IS NOT NULL`);

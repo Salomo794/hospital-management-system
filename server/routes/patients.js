@@ -14,7 +14,10 @@ const PATIENT_STATUSES = ['active', 'inactive', 'deceased'];
 
 function withoutPortalPin(patient) {
   const { portal_pin, ...safePatient } = patient;
-  return safePatient;
+  return {
+    ...safePatient,
+    portal_pin_provisioned: !!portal_pin,
+  };
 }
 
 function validatePatientUpdates(body, currentRole) {

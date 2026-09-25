@@ -100,16 +100,19 @@ router.post('/prescriptions', authenticate, authorize('doctor', 'admin'), asyncH
   );
   if (medicines.length !== medicineIds.length) throw new ApiError(400, 'One or more medicines do not exist or are inactive');
 
-  const safety = await evaluateSafety(patientId, medicineIds);
-  if (safety.blocking && acknowledge_warnings !== true) {
-    return res.status(409).json({
-      message: 'Safety alert: this prescription conflicts with a recorded allergy or a contraindicated interaction.',
-      warnings: safety.warnings,
-      requires_acknowledgement: true,
-    });
-  }
+  const outcome = await withTransaction(pool, async connection => {
+    const safety = await evaluateSafety(patientId, medicineIds, connection);
+    if (safety.blocking && acknowledge_warnings !== true) {
+      return {
+        status: 409,
+        body: {
+          message: 'Safety alert: this prescription conflicts with a recorded allergy or a contraindicated interaction.',
+          warnings: safety.warnings,
+          requires_acknowledgement: true,
+        },
+      };
+    }
 
-  const prescription = await withTransaction(pool, async connection => {
     const uuid = randomUUID();
     const prescriptionNumber = generateRecordNumber('RX');
     const [result] = await connection.query(
@@ -127,18 +130,29 @@ router.post('/prescriptions', authenticate, authorize('doctor', 'admin'), asyncH
       );
     }
     const [created] = await connection.query('SELECT * FROM prescriptions WHERE id = ?', [result.insertId]);
-    return created[0];
+    return { status: 201, prescription: created[0], safety };
   });
-  res.status(201).json({ ...prescription, warnings: safety.warnings, acknowledged: acknowledge_warnings === true });
+
+  if (outcome.status === 409) return res.status(409).json(outcome.body);
+  res.status(201).json({
+    ...outcome.prescription,
+    warnings: outcome.safety.warnings,
+    acknowledged: acknowledge_warnings === true,
+  });
 }));
 
 router.get('/:id', authenticate, authorize(...EMR_ROLES), asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const [rows] = await pool.query(
     `SELECT mr.*, u.first_name as doctor_first_name, u.last_name as doctor_last_name,
+            s.name as specialty_name,
             p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn,
             p.allergies as patient_allergies
-     FROM medical_records mr JOIN users u ON mr.doctor_id = u.id JOIN patients p ON mr.patient_id = p.id
+     FROM medical_records mr
+     JOIN users u ON mr.doctor_id = u.id
+     JOIN patients p ON mr.patient_id = p.id
+     LEFT JOIN doctor_profiles dp ON dp.user_id = u.id
+     LEFT JOIN specialties s ON s.id = dp.specialty_id
      WHERE mr.id = ?`,
     [id]
   );
@@ -146,19 +160,75 @@ router.get('/:id', authenticate, authorize(...EMR_ROLES), asyncHandler(async (re
   if (req.user.role === 'doctor' && rows[0].doctor_id !== req.user.id) {
     throw new ApiError(403, 'You may only view your own medical records.');
   }
-  const [prescriptions] = await pool.query(
-    `SELECT pr.*, GROUP_CONCAT(pi.dosage || ' ' || pi.frequency || ' for ' || pi.duration, '; ') AS medication_summary
-     FROM prescriptions pr LEFT JOIN prescription_items pi ON pr.id = pi.prescription_id
-     WHERE pr.medical_record_id = ? GROUP BY pr.id`,
+
+  const [prescriptionRows] = await pool.query(
+    `SELECT pr.*
+     FROM prescriptions pr
+     WHERE pr.medical_record_id = ?
+     ORDER BY pr.created_at DESC, pr.id DESC`,
     [id]
   );
-  const [labOrders] = await pool.query(
+  const [prescriptionItemRows] = await pool.query(
+    `SELECT pi.id, pi.prescription_id, pi.medicine_id,
+            m.name as medicine_name, m.generic_name as medicine_generic_name,
+            pi.dosage, pi.frequency, pi.duration, pi.instructions, pi.quantity,
+            pi.dispensed_quantity, pi.dispensed, pi.dispensed_date
+     FROM prescription_items pi
+     JOIN prescriptions pr ON pr.id = pi.prescription_id
+     JOIN medicines m ON m.id = pi.medicine_id
+     WHERE pr.medical_record_id = ?
+     ORDER BY pi.id`,
+    [id]
+  );
+  const prescriptionItems = new Map(prescriptionRows.map(prescription => [prescription.id, []]));
+  for (const item of prescriptionItemRows) {
+    if (!prescriptionItems.has(item.prescription_id)) continue;
+    prescriptionItems.get(item.prescription_id).push(item);
+  }
+  const prescriptions = prescriptionRows.map(prescription => {
+    const items = prescriptionItems.get(prescription.id) || [];
+    const medicationSummary = items.map(item => [
+      item.medicine_name,
+      item.dosage,
+      item.frequency,
+      item.duration ? `for ${item.duration}` : null,
+      `x${item.quantity}`,
+    ].filter(Boolean).join(' ')).join('; ');
+    return { ...prescription, medication_summary: medicationSummary || null, items };
+  });
+
+  const [labOrderRows] = await pool.query(
     `SELECT lo.*, GROUP_CONCAT(lt.name, ', ') AS test_names
-     FROM lab_orders lo LEFT JOIN lab_order_items loi ON lo.id = loi.lab_order_id
+     FROM lab_orders lo
+     LEFT JOIN lab_order_items loi ON lo.id = loi.lab_order_id
      LEFT JOIN lab_tests lt ON loi.lab_test_id = lt.id
-     WHERE lo.medical_record_id = ? GROUP BY lo.id`,
+     WHERE lo.medical_record_id = ?
+     GROUP BY lo.id
+     ORDER BY lo.created_at DESC, lo.id DESC`,
     [id]
   );
+  const [labTestRows] = await pool.query(
+    `SELECT lt.id, loi.id as order_item_id, loi.lab_order_id, loi.lab_test_id,
+            lt.name, lt.category, lo.status,
+            loi.result_value, loi.result_value as result, loi.result_unit,
+            loi.reference_range, loi.is_abnormal, loi.result_date, loi.notes
+     FROM lab_orders lo
+     JOIN lab_order_items loi ON loi.lab_order_id = lo.id
+     JOIN lab_tests lt ON lt.id = loi.lab_test_id
+     WHERE lo.medical_record_id = ?
+     ORDER BY loi.id`,
+    [id]
+  );
+  const labTests = new Map(labOrderRows.map(order => [order.id, []]));
+  for (const test of labTestRows) {
+    if (!labTests.has(test.lab_order_id)) continue;
+    labTests.get(test.lab_order_id).push(test);
+  }
+  const labOrders = labOrderRows.map(order => ({
+    ...order,
+    tests: labTests.get(order.id) || [],
+  }));
+
   res.json({ ...rows[0], prescriptions, lab_orders: labOrders });
 }));
 
