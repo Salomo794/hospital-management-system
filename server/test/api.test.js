@@ -733,6 +733,81 @@ test('mobile money is unavailable unless a provider is configured, and never moc
   }
 });
 
+test('only networks the configured market can actually charge are offered', async () => {
+  const token = await login();
+  const bill = await createBillWithBalance(token, 45);
+  const key = process.env.PAYSTACK_SECRET_KEY;
+  const currency = process.env.PAYSTACK_CURRENCY;
+  const enabled = process.env.MOBILE_MONEY_ENABLED;
+  const mock = process.env.MOBILE_MONEY_MOCK;
+  const nodeEnv = process.env.NODE_ENV;
+  try {
+    // Real provider, no mock, so the market drives the network list.
+    process.env.NODE_ENV = 'production';
+    process.env.MOBILE_MONEY_ENABLED = 'true';
+    process.env.MOBILE_MONEY_MOCK = 'false';
+    process.env.PAYSTACK_SECRET_KEY = 'sk_test_fake_key_for_coverage_checks';
+
+    // Ghana: MTN, AirtelTigo and Telecel are the documented chargeable codes.
+    process.env.PAYSTACK_CURRENCY = 'GHS';
+    const ghana = await request(app)
+      .get('/api/billing/mobile-money/config')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    assert.equal(ghana.body.enabled, true);
+    assert.equal(ghana.body.market, 'ghana');
+    assert.deepEqual(ghana.body.networks.map(n => n.value), ['mtn', 'atl', 'vod']);
+    assert.equal(ghana.body.reason, null);
+
+    // The market follows the currency, so a deployment only has to set the
+    // currency it already bills in.
+    process.env.PAYSTACK_CURRENCY = 'KES';
+    const kenya = await request(app)
+      .get('/api/billing/mobile-money/config')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    assert.equal(kenya.body.market, 'kenya');
+    assert.deepEqual(kenya.body.networks.map(n => n.value), ['mpesa', 'atl']);
+
+    // Rwanda: Paystack is licensed there but does not sell the mobile money
+    // channel, so the rail must stay off and say so rather than advertising
+    // MTN or Airtel and failing on the first real charge.
+    process.env.PAYSTACK_CURRENCY = 'RWF';
+    const rwanda = await request(app)
+      .get('/api/billing/mobile-money/config')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    assert.equal(rwanda.body.enabled, false);
+    assert.deepEqual(rwanda.body.networks, []);
+    assert.match(rwanda.body.reason, /does not offer the mobile money channel in rwanda/i);
+
+    const refused = await request(app)
+      .post(`/api/billing/${bill.id}/mobile-money`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ phone: '0781234567', network: 'mtn', email: 'patient@example.com' })
+      .expect(503);
+    assert.match(refused.body.message, /mobile money channel in rwanda/i);
+    const [rows] = await pool.query('SELECT COUNT(*) AS count FROM payments WHERE bill_id = ?', [bill.id]);
+    assert.equal(rows[0].count, 0, 'a refused charge must not leave a pending row behind');
+
+    // A currency Paystack has no mobile money market for is a configuration
+    // error, and is reported as one instead of silently offering nothing.
+    process.env.PAYSTACK_CURRENCY = 'ZAR';
+    const unknown = await request(app)
+      .get('/api/billing/mobile-money/config')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    assert.equal(unknown.body.enabled, false);
+    assert.match(unknown.body.reason, /not recognised/i);
+  } finally {
+    process.env.NODE_ENV = nodeEnv;
+    if (key === undefined) delete process.env.PAYSTACK_SECRET_KEY; else process.env.PAYSTACK_SECRET_KEY = key;
+    if (currency === undefined) delete process.env.PAYSTACK_CURRENCY; else process.env.PAYSTACK_CURRENCY = currency;
+    if (enabled === undefined) delete process.env.MOBILE_MONEY_ENABLED; else process.env.MOBILE_MONEY_ENABLED = enabled;
+    if (mock === undefined) delete process.env.MOBILE_MONEY_MOCK; else process.env.MOBILE_MONEY_MOCK = mock;
+  }
+});
+
 test('portal payments are idempotent and PIN resets revoke existing sessions', async () => {
   const adminToken = await login();
   const unique = `${Date.now()}@example.com`;
@@ -1136,4 +1211,3 @@ test('dashboard returns role-filtered data and seven weekly buckets', async () =
   assert.equal(pharmacistDashboard.body.stats.pendingLabOrders, null);
   assert.deepEqual(pharmacistDashboard.body.weeklyStats, []);
 });
-   
