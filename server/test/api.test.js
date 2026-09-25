@@ -12,12 +12,54 @@ process.env.DB_PATH = dbPath;
 process.env.JWT_SECRET = 'test-secret-that-is-at-least-32-characters-long';
 process.env.NODE_ENV = 'test';
 process.env.ALLOW_SIMULATED_PAYMENTS = 'true';
+// The mock rail exercises the real pending -> settled lifecycle without a
+// Paystack account. It is refused in production by config/mobileMoney.js.
+process.env.MOBILE_MONEY_ENABLED = 'true';
+process.env.MOBILE_MONEY_MOCK = 'true';
 
 const setupDatabase = require('../config/setup');
 const seedDatabase = require('../config/seed');
 const app = require('../index');
 const pool = require('../config/database');
 const { evaluateSafety } = require('../utils/safety');
+const { settleMockCharge, getMockCharge, mockWebhookSignature } = require('../services/mobileMoney');
+
+// Signs and posts exactly these bytes. Supertest re-serialises an object, so the
+// signature has to be computed over the literal string that goes on the wire.
+function signedWebhook(payload) {
+  const body = JSON.stringify(payload);
+  return request(app)
+    .post('/api/billing/mobile-money/webhook')
+    .set('Content-Type', 'application/json')
+    .set('x-paystack-signature', mockWebhookSignature(body))
+    .send(body);
+}
+
+async function createBillWithBalance(adminToken, unitPrice, patientId) {
+  const patient = patientId
+    ? { body: { patient: { id: patientId } } }
+    : await request(app)
+      .post('/api/patients')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        first_name: 'Mobile',
+        last_name: 'Money',
+        date_of_birth: '1990-04-05',
+        gender: 'female',
+        email: `mm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`,
+      })
+      .expect(201);
+  const bill = await request(app)
+    .post('/api/billing')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({
+      patient_id: patient.body.patient.id,
+      items: [{ description: 'Mobile money test', category: 'other', quantity: 1, unit_price: unitPrice }],
+      tax: 0,
+    })
+    .expect(201);
+  return bill.body;
+}
 
 const tokenCache = new Map();
 
@@ -233,7 +275,7 @@ test('payment methods are published to the client and accepted when recorded', a
     assert.equal(typeof method.label, 'string');
   }
   const values = published.map(method => method.value);
-  for (const expected of ['cash', 'card', 'credit_card', 'mobile_wallet', 'upi', 'bank_transfer', 'cheque']) {
+  for (const expected of ['cash', 'card', 'credit_card', 'mobile_wallet', 'mobile_money', 'upi', 'bank_transfer', 'cheque']) {
     assert.ok(values.includes(expected), `expected "${expected}" to be an available payment method`);
   }
   assert.equal(new Set(values).size, values.length, 'payment method values must be unique');
@@ -297,6 +339,398 @@ test('payment methods are published to the client and accepted when recorded', a
       .run(randomUUID(), `PAY-BAD-${Date.now()}`, bill.body.id, patient.body.patient.id),
     /CHECK constraint failed/i
   );
+});
+
+test('mobile money publishes a signed-in config for the payment form', async () => {
+  const token = await login();
+  const config = await request(app)
+    .get('/api/billing/mobile-money/config')
+    .set('Authorization', `Bearer ${token}`)
+    .expect(200);
+  assert.equal(config.body.enabled, true);
+  assert.equal(config.body.provider, 'mock');
+  assert.ok(Array.isArray(config.body.networks) && config.body.networks.length > 0);
+  for (const network of config.body.networks) {
+    assert.equal(typeof network.value, 'string');
+    assert.equal(typeof network.label, 'string');
+  }
+  // No credential may ever be published to the browser.
+  const serialized = JSON.stringify(config.body);
+  assert.ok(!/secret/i.test(serialized), 'the mobile money config must not expose a secret');
+});
+
+test('an unapproved mobile money charge does not settle the bill, and the provider does', async () => {
+  const token = await login();
+  const bill = await createBillWithBalance(token, 100);
+  assert.equal(bill.net_amount, 100);
+
+  const initiated = await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ phone: '0551234567', network: 'mtn', email: 'patient@example.com' })
+    .expect(202);
+  assert.equal(initiated.body.payment.status, 'pending');
+
+  // The provider must actually have been asked to charge the right number and
+  // network, in the right currency and for the right amount. Asserting the
+  // response alone would pass even if those fields never left the server.
+  const charge = getMockCharge(initiated.body.payment.payment_number);
+  assert.ok(charge, 'the provider was never asked to send a prompt');
+  assert.equal(charge.phone, '0551234567');
+  assert.equal(charge.network, 'mtn');
+  assert.equal(charge.email, 'patient@example.com');
+  assert.equal(charge.amount, 10000, 'the charge must be sent in the minor currency unit');
+  assert.equal(charge.currency, 'NGN');
+
+  // The patient has not entered their PIN yet, so the money has not moved.
+  // This is the assertion the whole feature rests on: a pending charge must
+  // not make the hospital believe it is paid.
+  const midway = await request(app)
+    .get(`/api/billing/${bill.id}`)
+    .set('Authorization', `Bearer ${token}`)
+    .expect(200);
+  assert.equal(midway.body.paid_amount, 0);
+  assert.equal(midway.body.payment_status, 'pending');
+  const pendingRow = midway.body.payments.find(p => p.payment_number === initiated.body.payment.payment_number);
+  assert.equal(pendingRow.status, 'pending');
+
+  // The customer approves on their handset; the provider says so.
+  settleMockCharge(initiated.body.payment.payment_number, { success: true });
+  const settled = await signedWebhook({
+    event: 'charge.success',
+    data: { reference: initiated.body.payment.payment_number, status: 'success', amount: 10000, currency: 'NGN' },
+  }).expect(200);
+  assert.equal(settled.body.handled, true);
+  assert.equal(settled.body.status, 'completed');
+
+  const afterWebhook = await request(app)
+    .get(`/api/billing/${bill.id}`)
+    .set('Authorization', `Bearer ${token}`)
+    .expect(200);
+  assert.equal(afterWebhook.body.paid_amount, 100);
+  assert.equal(afterWebhook.body.payment_status, 'paid');
+  const settledRow = afterWebhook.body.payments.find(p => p.payment_number === initiated.body.payment.payment_number);
+  assert.equal(settledRow.status, 'completed');
+  assert.ok(settledRow.completed_at, 'a settled charge must record when it completed');
+  assert.equal(settledRow.failure_reason, null);
+});
+
+test('a redelivered mobile money webhook does not double count the payment', async () => {
+  const token = await login();
+  const bill = await createBillWithBalance(token, 50);
+  const initiated = await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ phone: '0271234567', network: 'atl', email: 'patient@example.com' })
+    .expect(202);
+  const reference = initiated.body.payment.payment_number;
+
+  settleMockCharge(reference, { success: true });
+  const payload = { event: 'charge.success', data: { reference, status: 'success', amount: 5000, currency: 'NGN' } };
+  await signedWebhook(payload).expect(200);
+  // Providers retry until they get a 2xx, so the same delivery will arrive again.
+  const replay = await signedWebhook(payload).expect(200);
+  assert.equal(replay.body.replay, true);
+
+  const afterReplay = await request(app)
+    .get(`/api/billing/${bill.id}`)
+    .set('Authorization', `Bearer ${token}`)
+    .expect(200);
+  assert.equal(afterReplay.body.paid_amount, 50, 'a replayed webhook must not add a second payment');
+  assert.equal(afterReplay.body.payment_status, 'paid');
+});
+
+test('a declined mobile money charge leaves the bill unpaid and records why', async () => {
+  const token = await login();
+  const bill = await createBillWithBalance(token, 75);
+  const initiated = await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ phone: '0771234567', network: 'vod', email: 'patient@example.com' })
+    .expect(202);
+  const reference = initiated.body.payment.payment_number;
+
+  settleMockCharge(reference, { success: false, reason: 'Insufficient balance' });
+  // Staff notice the prompt was declined and ask the provider directly.
+  const synced = await request(app)
+    .get(`/api/billing/mobile-money/payments/${initiated.body.payment.id}?sync=1`)
+    .set('Authorization', `Bearer ${token}`)
+    .expect(200);
+  assert.equal(synced.body.payment.status, 'failed');
+  assert.equal(synced.body.synced, true);
+
+  const afterFailure = await request(app)
+    .get(`/api/billing/${bill.id}`)
+    .set('Authorization', `Bearer ${token}`)
+    .expect(200);
+  assert.equal(afterFailure.body.paid_amount, 0, 'a failed charge must not settle the bill');
+  assert.equal(afterFailure.body.payment_status, 'pending');
+  const failedRow = afterFailure.body.payments.find(p => p.payment_number === reference);
+  assert.equal(failedRow.failure_reason, 'Insufficient balance');
+
+  // Having failed, the balance is still fully outstanding and still chargeable.
+  const retry = await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ phone: '0771234567', network: 'vod', email: 'patient@example.com' })
+    .expect(202);
+  assert.equal(retry.body.payment.status, 'pending');
+});
+
+test('mobile money rejects partial amounts, unknown networks, and duplicate in-flight requests', async () => {
+  const token = await login();
+  const bill = await createBillWithBalance(token, 120);
+
+  await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ amount: 50, phone: '0551234567', network: 'mtn', email: 'patient@example.com' })
+    .expect(400);
+  await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ phone: '0551234567', network: 'paypal', email: 'patient@example.com' })
+    .expect(400);
+  await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ phone: 'abc', network: 'mtn', email: 'patient@example.com' })
+    .expect(400);
+  await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ phone: '0551234567', network: 'mtn', email: 'not-an-email' })
+    .expect(400);
+
+  const initiated = await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ phone: '0551234567', network: 'mtn', email: 'patient@example.com' })
+    .expect(202);
+  // A second tap would send a second prompt for a balance already in flight,
+  // which a patient approving twice would turn into an overpayment.
+  await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ phone: '0551234567', network: 'mtn', email: 'patient@example.com' })
+    .expect(409);
+
+  // Cancelling frees the balance up again.
+  const cancelled = await request(app)
+    .post(`/api/billing/mobile-money/payments/${initiated.body.payment.id}/cancel`)
+    .set('Authorization', `Bearer ${token}`)
+    .expect(200);
+  assert.equal(cancelled.body.payment.status, 'cancelled');
+  await request(app)
+    .post(`/api/billing/mobile-money/payments/${initiated.body.payment.id}/cancel`)
+    .set('Authorization', `Bearer ${token}`)
+    .expect(409);
+  await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ phone: '0551234567', network: 'mtn', email: 'patient@example.com' })
+    .expect(202);
+});
+
+test('mobile money webhooks without a valid signature are refused', async () => {
+  const payload = JSON.stringify({
+    event: 'charge.success',
+    data: { reference: 'PAY-NOT-REAL', status: 'success', amount: 100, currency: 'NGN' },
+  });
+  await request(app)
+    .post('/api/billing/mobile-money/webhook')
+    .set('Content-Type', 'application/json')
+    .set('x-paystack-signature', 'deadbeef')
+    .send(payload)
+    .expect(401);
+  await request(app)
+    .post('/api/billing/mobile-money/webhook')
+    .set('Content-Type', 'application/json')
+    .send(payload)
+    .expect(401);
+  // A correctly signed callback for a reference this hospital never issued is
+  // acknowledged so the provider stops retrying, but settles nothing.
+  const unknown = await signedWebhook(JSON.parse(payload)).expect(200);
+  assert.equal(unknown.body.handled, false);
+  assert.equal(unknown.body.reason, 'unknown reference');
+});
+
+test('a pending mobile money charge cannot be refunded', async () => {
+  const token = await login();
+  const bill = await createBillWithBalance(token, 30);
+  const initiated = await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ phone: '0271234567', network: 'atl', email: 'patient@example.com' })
+    .expect(202);
+  const response = await request(app)
+    .post(`/api/billing/payments/${initiated.body.payment.id}/refund`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ reason: 'Attempting to refund an unapproved charge' })
+    .expect(409);
+  assert.match(response.body.message, /nothing to refund/i);
+});
+
+test('a settled mobile money charge is refundable like any other payment', async () => {
+  const token = await login();
+  const bill = await createBillWithBalance(token, 40);
+  const initiated = await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ phone: '0551234567', network: 'vod', email: 'patient@example.com' })
+    .expect(202);
+  const reference = initiated.body.payment.payment_number;
+  settleMockCharge(reference, { success: true });
+  await signedWebhook({ event: 'charge.success', data: { reference, status: 'success', amount: 4000, currency: 'NGN' } }).expect(200);
+
+  // The default refund method follows the money back out the way it came in.
+  const refund = await request(app)
+    .post(`/api/billing/payments/${initiated.body.payment.id}/refund`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ reason: 'Service not rendered' })
+    .expect(201);
+  assert.equal(refund.body.refund.payment_method, 'mobile_money');
+  assert.equal(refund.body.bill.paid_amount, 0);
+  assert.equal(refund.body.bill.payment_status, 'pending');
+});
+
+test('a patient can start and track a mobile money payment from the portal', async () => {
+  const adminToken = await login();
+  const unique = `portal-mm-${Date.now()}@example.com`;
+  const created = await request(app)
+    .post('/api/patients')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({
+      first_name: 'Portal',
+      last_name: 'MobileMoney',
+      date_of_birth: '1988-07-07',
+      gender: 'male',
+      email: unique,
+      phone: '0551234567',
+    })
+    .expect(201);
+  const patientId = created.body.patient.id;
+  const bill = await request(app)
+    .post('/api/billing')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({
+      patient_id: patientId,
+      items: [{ description: 'Portal mobile money', category: 'other', quantity: 1, unit_price: 60 }],
+      tax: 0,
+    })
+    .expect(201);
+
+  const portalLogin = await request(app)
+    .post('/api/portal/login')
+    .send({ identifier: unique, portal_pin: created.body.plain_pin })
+    .expect(200);
+  const auth = { Authorization: `Bearer ${portalLogin.body.token}` };
+
+  // A request without a phone number cannot be sent, and is not a 500.
+  await request(app)
+    .post(`/api/portal/bills/${bill.body.id}/pay`)
+    .set(auth)
+    .send({ payment_method: 'mobile_money', network: 'mtn', request_id: 'portal-mm-missing-phone' })
+    .expect(400);
+
+  const requestId = `portal-mm-${Date.now()}`;
+  const initiated = await request(app)
+    .post(`/api/portal/bills/${bill.body.id}/pay`)
+    .set(auth)
+    .send({ payment_method: 'mobile_money', phone: '0551234567', network: 'mtn', request_id: requestId })
+    .expect(202);
+  assert.equal(initiated.body.replay, false);
+  assert.equal(initiated.body.status, 'pending');
+  assert.equal(initiated.body.amount, 60);
+  assert.equal(initiated.body.balance_remaining, 60, 'the bill is not settled until the customer approves');
+
+  // Resubmitting the same request id returns the charge in flight rather than
+  // opening a second one.
+  const resubmit = await request(app)
+    .post(`/api/portal/bills/${bill.body.id}/pay`)
+    .set(auth)
+    .send({ payment_method: 'mobile_money', phone: '0551234567', network: 'mtn', request_id: requestId })
+    .expect(200);
+  assert.equal(resubmit.body.replay, true);
+
+  const [pendingRows] = await pool.query(
+    'SELECT transaction_reference, status FROM payments WHERE transaction_reference = ?',
+    [`portal-mm:${requestId}`]
+  );
+  assert.equal(pendingRows.length, 1, 'the resubmitted request must not have opened a second charge');
+  assert.equal(pendingRows[0].status, 'pending');
+
+  settleMockCharge(`portal-mm:${requestId}`, { success: true });
+  const status = await request(app)
+    .get(`/api/portal/bills/${bill.body.id}/mobile-money/${initiated.body.payment_id}?sync=1`)
+    .set(auth)
+    .expect(200);
+  assert.equal(status.body.status, 'completed');
+  assert.equal(status.body.synced, true);
+
+  const bills = await request(app).get('/api/portal/bills').set(auth).expect(200);
+  const settledBill = bills.body.bills.find(row => row.id === bill.body.id);
+  assert.equal(settledBill.paid_amount, 60);
+  assert.equal(settledBill.payment_status, 'paid');
+
+  // A charge belonging to another bill must not be readable through this one.
+  const otherBill = await createBillWithBalance(adminToken, 10, patientId);
+  await request(app)
+    .get(`/api/portal/bills/${otherBill.id}/mobile-money/${initiated.body.payment_id}`)
+    .set(auth)
+    .expect(404);
+});
+
+test('mobile money is unavailable unless a provider is configured, and never mocked in production', async () => {
+  const token = await login();
+  const bill = await createBillWithBalance(token, 20);
+  const charge = { phone: '0551234567', network: 'mtn', email: 'patient@example.com' };
+
+  const enabled = process.env.MOBILE_MONEY_ENABLED;
+  const mock = process.env.MOBILE_MONEY_MOCK;
+  const nodeEnv = process.env.NODE_ENV;
+  try {
+    // Switched off: the form is not advertised and the endpoint refuses.
+    delete process.env.MOBILE_MONEY_ENABLED;
+    const config = await request(app)
+      .get('/api/billing/mobile-money/config')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    assert.equal(config.body.enabled, false);
+    assert.deepEqual(config.body.networks, []);
+
+    await request(app)
+      .post(`/api/billing/${bill.id}/mobile-money`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(charge)
+      .expect(503);
+    // A disabled rail must not have left a pending charge behind.
+    const [rows] = await pool.query('SELECT COUNT(*) AS count FROM payments WHERE bill_id = ?', [bill.id]);
+    assert.equal(rows[0].count, 0);
+
+    // Mocking is a development affordance. In production it is refused even
+    // when it is explicitly selected, because a simulated charge that settles
+    // a real bill is a revenue hole rather than a feature.
+    process.env.MOBILE_MONEY_ENABLED = 'true';
+    process.env.MOBILE_MONEY_MOCK = 'true';
+    process.env.NODE_ENV = 'production';
+    const productionConfig = await request(app)
+      .get('/api/billing/mobile-money/config')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    assert.equal(productionConfig.body.enabled, false);
+    await request(app)
+      .post(`/api/billing/${bill.id}/mobile-money`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(charge)
+      .expect(503);
+  } finally {
+    process.env.NODE_ENV = nodeEnv;
+    if (enabled === undefined) delete process.env.MOBILE_MONEY_ENABLED;
+    else process.env.MOBILE_MONEY_ENABLED = enabled;
+    if (mock === undefined) delete process.env.MOBILE_MONEY_MOCK;
+    else process.env.MOBILE_MONEY_MOCK = mock;
+  }
 });
 
 test('portal payments are idempotent and PIN resets revoke existing sessions', async () => {
@@ -702,3 +1136,4 @@ test('dashboard returns role-filtered data and seven weekly buckets', async () =
   assert.equal(pharmacistDashboard.body.stats.pendingLabOrders, null);
   assert.deepEqual(pharmacistDashboard.body.weeklyStats, []);
 });
+   

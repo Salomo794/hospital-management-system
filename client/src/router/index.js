@@ -35,7 +35,8 @@ const routes = [
       { path: 'billing/:id', name: 'BillDetail', component: () => import('../views/billing/BillDetail.vue'), meta: { title: 'Bill details', roles: ['admin', 'receptionist'] } },
       { path: 'reports', name: 'Reports', component: () => import('../views/reports/Reports.vue'), meta: { title: 'Reports', roles: ['admin', 'receptionist', 'doctor', 'nurse'] } },
       { path: 'ai-assistant', name: 'AI Assistant', component: () => import('../views/ai/AIAssistant.vue'), meta: { title: 'AI Assistant' } },
-      { path: 'users', name: 'Users', component: () => import('../views/dashboard/Users.vue'), meta: { title: 'Users', roles: ['admin'] } }
+      { path: 'users', name: 'Users', component: () => import('../views/dashboard/Users.vue'), meta: { title: 'Users', roles: ['admin'] } },
+      { path: 'audit-log', name: 'AuditLog', component: () => import('../views/admin/AuditLog.vue'), meta: { title: 'Audit Log', roles: ['admin'] } }
     ]
   },
   {

@@ -6,6 +6,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { validatePatient } = require('../middleware/validation');
 const { ApiError, asyncHandler, getPagination, isDateOnly, parseInteger } = require('../utils/http');
 const { randomUUID, generateMrn, generateAccessCode, generatePortalPin } = require('../utils/ids');
+const { recordAudit, pick } = require('../utils/audit');
 
 const CLINICAL_ROLES = ['admin', 'receptionist', 'doctor', 'nurse'];
 const GENDERS = ['male', 'female', 'other'];
@@ -131,6 +132,14 @@ router.post('/', authenticate, authorize(...CLINICAL_ROLES), validatePatient, as
     ]
   );
   const [newPatient] = await pool.query('SELECT * FROM patients WHERE id = ?', [result.insertId]);
+  await recordAudit({
+    req,
+    action: 'patient.created',
+    table: 'patients',
+    recordId: result.insertId,
+    summary: `Registered ${newPatient[0].mrn}`,
+    after: pick(newPatient[0], ['mrn', 'first_name', 'last_name', 'date_of_birth', 'gender', 'status']),
+  });
   res.status(201).json({ patient: withoutPortalPin(newPatient[0]), plain_pin: plainPin });
 }));
 
@@ -146,6 +155,15 @@ router.post('/:id/portal-pin', authenticate, authorize('admin', 'receptionist'),
      WHERE id = ?`,
     [hashedPin, id]
   );
+  // The new PIN is deliberately excluded: it is a live credential and must not
+  // be written to the audit log, which admins can read.
+  await recordAudit({
+    req,
+    action: 'patient.portal_pin.reset',
+    table: 'patients',
+    recordId: id,
+    summary: 'Portal PIN reset; existing portal sessions revoked',
+  });
   res.json({ message: 'Portal PIN reset successfully', plain_pin: plainPin });
 }));
 
@@ -159,13 +177,33 @@ router.put('/:id', authenticate, authorize(...CLINICAL_ROLES), asyncHandler(asyn
   values.push(id);
   await pool.query(`UPDATE patients SET ${fields.map(field => `${field} = ?`).join(', ')} WHERE id = ?`, values);
   const [updated] = await pool.query('SELECT * FROM patients WHERE id = ?', [id]);
+  await recordAudit({
+    req,
+    action: 'patient.updated',
+    table: 'patients',
+    recordId: id,
+    summary: `Updated ${fields.join(', ')}`,
+    before: pick(existing[0], fields),
+    after: pick(updated[0], fields),
+  });
   res.json(withoutPortalPin(updated[0]));
 }));
 
 router.delete('/:id', authenticate, authorize('admin', 'receptionist'), asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
+  const [existing] = await pool.query('SELECT id, status FROM patients WHERE id = ?', [id]);
+  if (existing.length === 0) throw new ApiError(404, 'Patient not found');
   const [result] = await pool.query("UPDATE patients SET status = 'inactive' WHERE id = ?", [id]);
   if (result.affectedRows === 0) throw new ApiError(404, 'Patient not found');
+  await recordAudit({
+    req,
+    action: 'patient.deactivated',
+    table: 'patients',
+    recordId: id,
+    summary: `Patient deactivated (was ${existing[0].status})`,
+    before: pick(existing[0], ['status']),
+    after: { status: 'inactive' },
+  });
   res.json({ message: 'Patient deactivated' });
 }));
 

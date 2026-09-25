@@ -8,6 +8,7 @@ const { validateRegistration } = require('../middleware/validation');
 const { ApiError, asyncHandler } = require('../utils/http');
 const { randomUUID } = require('../utils/ids');
 const { FixedWindowRateLimiter } = require('../utils/rateLimiter');
+const { recordAudit } = require('../utils/audit');
 
 const loginByIdentifier = new FixedWindowRateLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
 const loginByIp = new FixedWindowRateLimiter({ windowMs: 15 * 60 * 1000, max: 30 });
@@ -26,6 +27,15 @@ router.post('/register', authenticate, authorize('admin'), validateRegistration,
     'INSERT INTO users (uuid, email, password, role, first_name, last_name, phone) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [uuid, normalizedEmail, hashedPassword, role, first_name.trim(), last_name.trim(), phone || null]
   );
+
+  await recordAudit({
+    req,
+    action: 'user.registered',
+    table: 'users',
+    recordId: result.insertId,
+    summary: `Registered ${normalizedEmail} as ${role}`,
+    after: { email: normalizedEmail, role, first_name: first_name.trim(), last_name: last_name.trim() },
+  });
 
   res.status(201).json({
     user: { id: result.insertId, uuid, email: normalizedEmail, role, first_name, last_name },
@@ -52,12 +62,36 @@ router.post('/login', asyncHandler(async (req, res) => {
   const user = rows[0];
   const passwordMatches = user ? await bcrypt.compare(password, user.password) : false;
   if (!user || !passwordMatches || !user.is_active) {
+    // Recorded so repeated attempts against a valid account are visible, even
+    // though the response is deliberately identical for unknown and wrong
+    // credentials. No password is stored.
+    await recordAudit({
+      req,
+      action: 'auth.login.failed',
+      table: 'users',
+      recordId: user ? user.id : null,
+      summary: `Failed login for ${email}`,
+      after: { email, known_account: Boolean(user), account_active: user ? Boolean(user.is_active) : null },
+      // Attributed only when the account actually exists; an unknown email
+      // leaves the actor anonymous so the entry does not imply a real user.
+      actor: user ? { userId: user.id, type: 'staff', label: user.email } : undefined,
+    });
     throw new ApiError(user && !user.is_active ? 403 : 401, user && !user.is_active ? 'Account deactivated' : 'Invalid credentials');
   }
 
   loginByIdentifier.reset(identifierKey);
   loginByIp.reset(ipKey);
   await pool.query("UPDATE users SET last_login = datetime('now') WHERE id = ?", [user.id]);
+  await recordAudit({
+    req,
+    action: 'auth.login.succeeded',
+    table: 'users',
+    recordId: user.id,
+    summary: `${user.email} signed in`,
+    // The authenticate middleware has not run on this route, so name the actor
+    // explicitly rather than leaving the entry unattributed.
+    actor: { userId: user.id, type: 'staff', label: user.email },
+  });
   const token = jwt.sign(
     { id: user.id, role: user.role },
     process.env.JWT_SECRET,
@@ -102,6 +136,13 @@ router.put('/change-password', authenticate, asyncHandler(async (req, res) => {
 
   const hashedPassword = await bcrypt.hash(newPassword, 12);
   await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, req.user.id]);
+  await recordAudit({
+    req,
+    action: 'auth.password.changed',
+    table: 'users',
+    recordId: req.user.id,
+    summary: `${req.user.email} changed their password`,
+  });
   res.json({ message: 'Password updated successfully' });
 }));
 

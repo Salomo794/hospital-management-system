@@ -89,12 +89,43 @@
               </div>
               <div v-if="canPayBill(bill)" class="payment-controls">
                 <input v-model.number="paymentAmounts[bill.id]" type="number" min="0.01" :max="outstanding(bill)" step="0.01" :disabled="isPayingBill(bill.id)" aria-label="Payment amount" />
+                <!-- Mobile money is offered alongside the card rail, and only
+                     when the hospital actually has a provider configured. -->
+                <select
+                  v-if="paymentMethodOptions.length > 1"
+                  v-model="paymentMethods[bill.id]"
+                  :disabled="isPayingBill(bill.id)"
+                  aria-label="Payment method"
+                >
+                  <option v-for="option in paymentMethodOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+                <template v-if="paymentMethods[bill.id] === 'mobile_money'">
+                  <input
+                    v-model.trim="mobileMoneyPhones[bill.id]"
+                    type="tel"
+                    placeholder="Mobile money number"
+                    :disabled="isPayingBill(bill.id)"
+                    aria-label="Mobile money number"
+                  />
+                  <select
+                    v-model="mobileMoneyNetworks[bill.id]"
+                    :disabled="isPayingBill(bill.id)"
+                    aria-label="Mobile money network"
+                  >
+                    <option value="" disabled>Network</option>
+                    <option v-for="network in mobileMoneyConfig.networks" :key="network.value" :value="network.value">
+                      {{ network.label }}
+                    </option>
+                  </select>
+                </template>
                 <button class="btn btn-primary btn-sm" :disabled="isPayingBill(bill.id)" @click="payBill(bill)">
-                  {{ isPayingBill(bill.id) ? 'Paying…' : 'Pay' }}
+                  {{ isPayingBill(bill.id) ? 'Paying…' : (paymentMethods[bill.id] === 'mobile_money' ? 'Send Request' : 'Pay') }}
                 </button>
               </div>
               <span v-else-if="isBillCancelled(bill)" class="badge badge-gray">Cancelled</span>
-              <span v-else-if="!paymentsEnabled && outstanding(bill) > 0" class="badge badge-gray">Payment unavailable</span>
+              <span v-else-if="!canPayAnything && outstanding(bill) > 0" class="badge badge-gray">Payment unavailable</span>
               <span v-else class="badge badge-success">Paid</span>
               <div
                 v-if="paymentMessages[bill.id]"
@@ -107,7 +138,7 @@
             </article>
           </div>
           <p v-else class="empty-copy">No bills are available.</p>
-          <p v-if="!paymentsEnabled" class="payment-disabled-note">Online payments are currently unavailable. Please contact reception.</p>
+          <p v-if="!canPayAnything" class="payment-disabled-note">Online payments are currently unavailable. Please contact reception.</p>
         </section>
       </template>
 
@@ -129,7 +160,7 @@
 </template>
 
 <script>
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { formatCurrency, formatDate, getStatusColor } from '../../utils/helpers'
 import { getStoredItem, getStoredJson, removeStoredItem, setStoredItem, setStoredJson } from '../../utils/storage'
@@ -156,6 +187,11 @@ export default {
     const prescriptions = ref([])
     const bills = ref([])
     const paymentAmounts = reactive({})
+    const paymentMethods = reactive({})
+    const mobileMoneyPhones = reactive({})
+    const mobileMoneyNetworks = reactive({})
+    const mobileMoneyConfig = ref({ enabled: false, provider: null, networks: [] })
+    const mobileMoneyPaymentIds = reactive({})
     const paymentPending = reactive({})
     const paymentMessages = reactive({})
     const paymentMessageTypes = reactive({})
@@ -241,7 +277,17 @@ export default {
       }
     }
     const isBillCancelled = bill => String(bill.payment_status || '').toLowerCase() === 'cancelled'
-    const canPayBill = bill => paymentsEnabled.value && !isBillCancelled(bill) && outstanding(bill) > 0
+    // Either rail can be available on its own: the card rail is a dev/test
+    // stand-in, while mobile money needs a real provider. A bill is payable if
+    // at least one of them is switched on.
+    const canPayAnything = computed(() => paymentsEnabled.value || mobileMoneyConfig.value.enabled)
+    const paymentMethodOptions = computed(() => {
+      const options = []
+      if (paymentsEnabled.value) options.push({ value: 'card', label: 'Card' })
+      if (mobileMoneyConfig.value.enabled) options.push({ value: 'mobile_money', label: 'Mobile Money' })
+      return options
+    })
+    const canPayBill = bill => canPayAnything.value && !isBillCancelled(bill) && outstanding(bill) > 0
     const isPayingBill = billId => !!paymentPending[billId]
     const setPaymentMessage = (billId, message, type = 'success') => {
       paymentMessages[billId] = message
@@ -310,7 +356,26 @@ export default {
           paymentsEnabled.value = profileData.payments_enabled
         }
         clearObject(paymentAmounts)
-        bills.value.forEach(bill => { paymentAmounts[bill.id] = outstanding(bill) })
+        clearObject(paymentMethods)
+        clearObject(mobileMoneyPhones)
+        clearObject(mobileMoneyNetworks)
+        if (profileData.mobile_money) {
+          mobileMoneyConfig.value = {
+            enabled: !!profileData.mobile_money.enabled,
+            provider: profileData.mobile_money.provider || null,
+            networks: Array.isArray(profileData.mobile_money.networks) ? profileData.mobile_money.networks : []
+          }
+        }
+        const defaultMethod = paymentMethodOptions.value[0]?.value || ''
+        bills.value.forEach(bill => {
+          paymentAmounts[bill.id] = outstanding(bill)
+          // Never leave a bill on mobile money once the rail is switched off.
+          if (paymentMethods[bill.id] !== 'card' || !mobileMoneyConfig.value.enabled) {
+            paymentMethods[bill.id] = defaultMethod
+          }
+          if (!mobileMoneyPhones[bill.id]) mobileMoneyPhones[bill.id] = patient.value?.phone || ''
+          if (!mobileMoneyNetworks[bill.id]) mobileMoneyNetworks[bill.id] = mobileMoneyConfig.value.networks[0]?.value || ''
+        })
         paymentRefreshState.forEach((_refreshState, billId) => clearConfirmedPaymentKey(billId))
         setStoredJson('portal-patient', patient.value)
         return true
@@ -407,11 +472,54 @@ export default {
       }
     }
 
+    // Mobile money is settled on the patient's handset, so the bill is still
+    // outstanding when this returns. The webhook is what normally settles it;
+    // this poll is the patient being told, and lets a stuck charge be rechecked
+    // against the provider rather than left showing "pending" forever.
+    const MOBILE_MONEY_POLL_INTERVAL_MS = 4000
+    const MOBILE_MONEY_POLL_ATTEMPTS = 30
+    const pollMobileMoneyPayment = async (billId, paymentId, requestToken, requestSession) => {
+      for (let attempt = 0; attempt < MOBILE_MONEY_POLL_ATTEMPTS; attempt += 1) {
+        if (componentUnmounted || requestSession !== sessionGeneration || requestToken !== token.value) return
+        try {
+          const { data } = await portalApi.get(
+            `/portal/bills/${billId}/mobile-money/${paymentId}${attempt > 0 ? '?sync=1' : ''}`,
+            { headers: requestHeaders(requestToken) }
+          )
+          if (data.status === 'completed') {
+            setPaymentMessage(billId, 'Payment approved. Thank you!', 'success')
+            await loadPortalData()
+            return
+          }
+          if (data.status === 'failed') {
+            setPaymentMessage(billId, 'That payment was not approved. You can try again.', 'error')
+            await loadPortalData()
+            return
+          }
+        } catch (requestError) {
+          if (axios.isCancel(requestError)) return
+          if (requestError.response?.status === 401) { logout(); return }
+        }
+        await new Promise(resolve => setTimeout(resolve, MOBILE_MONEY_POLL_INTERVAL_MS))
+      }
+      setPaymentMessage(billId, 'Still waiting for approval on your phone. It will update here once you approve.', 'error')
+    }
+
     const payBill = async bill => {
       const billId = bill.id
       const requestSession = sessionGeneration
       const requestToken = token.value
       if (!requestToken || paymentPending[billId] || !canPayBill(bill)) return
+
+      const isMobileMoney = paymentMethods[billId] === 'mobile_money'
+      if (isMobileMoney) {
+        const phone = String(mobileMoneyPhones[billId] || '').trim()
+        const network = String(mobileMoneyNetworks[billId] || '').trim()
+        if (!phone || !network) {
+          setPaymentMessage(billId, 'Enter your mobile money number and choose a network.', 'error')
+          return
+        }
+      }
 
       const amount = Number(paymentAmounts[billId])
       const previousOutstanding = outstanding(bill)
@@ -427,17 +535,30 @@ export default {
       delete paymentMessageTypes[billId]
 
       try {
-        const { data } = await portalApi.post(`/portal/bills/${billId}/pay`, {
+        const payload = {
           amount,
-          payment_method: 'card',
+          payment_method: isMobileMoney ? 'mobile_money' : 'card',
           request_id: paymentRequestIds.get(billId)
-        }, { headers: requestHeaders(requestToken), signal: controller.signal })
+        }
+        if (isMobileMoney) {
+          payload.phone = String(mobileMoneyPhones[billId]).trim()
+          payload.network = mobileMoneyNetworks[billId]
+        }
+        const { data } = await portalApi.post(`/portal/bills/${billId}/pay`, payload, { headers: requestHeaders(requestToken), signal: controller.signal })
         if (
           componentUnmounted ||
           controller.signal.aborted ||
           requestSession !== sessionGeneration ||
           requestToken !== token.value
         ) return
+        if (isMobileMoney) {
+          // The money has not moved yet, so the bill is not refreshed and no
+          // amount is treated as collected. Polling takes over from here.
+          mobileMoneyPaymentIds[billId] = data.payment_id
+          setPaymentMessage(billId, data.message || 'Approve the payment on your phone to complete it.', 'success')
+          void pollMobileMoneyPayment(billId, data.payment_id, requestToken, requestSession)
+          return
+        }
         setPaymentMessage(billId, data.message || 'Payment recorded successfully.', 'success')
         paymentRefreshState.set(billId, { previousOutstanding, amount })
         await loadPortalData()
@@ -484,6 +605,8 @@ export default {
       token, patient, loginForm, checkinForm, activeTab, tabs, loading, loggingIn,
       checkingIn, error, paymentsEnabled, paymentMessages, paymentMessageTypes, checkinResult, checkin,
       aheadInQueue, appointments, labResults, prescriptions, bills, paymentAmounts,
+      paymentMethods, mobileMoneyPhones, mobileMoneyNetworks, mobileMoneyConfig, mobileMoneyPaymentIds,
+      canPayAnything, paymentMethodOptions,
       canPayBill, isBillCancelled, isPayingBill, login, logout, loadPortalData, checkIn, payBill,
       outstanding, formatCurrency, formatDate, formatTime, formatLabel, getStatusColor
     }

@@ -2,7 +2,7 @@ const { loadEnvironment } = require('./environment');
 loadEnvironment();
 
 const pool = require('./database');
-const { paymentMethodConstraint } = require('./paymentMethods');
+const { paymentMethodConstraint, paymentStatusConstraint } = require('./paymentMethods');
 
 async function setup() {
   const conn = await pool.getConnection();
@@ -264,14 +264,38 @@ async function setup() {
       patient_id INTEGER NOT NULL,
       amount REAL NOT NULL CHECK(amount > 0),
       payment_method TEXT NOT NULL ${paymentMethodConstraint()},
+      status TEXT NOT NULL DEFAULT 'completed' ${paymentStatusConstraint()},
       transaction_reference TEXT,
+      provider TEXT,
+      provider_reference TEXT,
+      failure_reason TEXT,
       received_by INTEGER,
       payment_date TEXT DEFAULT (datetime('now')),
+      completed_at TEXT,
       notes TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
       FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
       FOREIGN KEY (received_by) REFERENCES users(id)
+    )`);
+
+    await conn.query(`CREATE TABLE IF NOT EXISTS payment_refunds (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uuid TEXT UNIQUE NOT NULL,
+      refund_number TEXT UNIQUE NOT NULL,
+      payment_id INTEGER NOT NULL,
+      bill_id INTEGER NOT NULL,
+      patient_id INTEGER NOT NULL,
+      amount REAL NOT NULL CHECK(amount > 0),
+      payment_method TEXT NOT NULL ${paymentMethodConstraint()},
+      reason TEXT NOT NULL,
+      refunded_by INTEGER NOT NULL,
+      refund_date TEXT DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE,
+      FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
+      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
+      FOREIGN KEY (refunded_by) REFERENCES users(id)
     )`);
 
     await conn.query(`CREATE TABLE IF NOT EXISTS notifications (
@@ -289,7 +313,10 @@ async function setup() {
     await conn.query(`CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER,
+      actor_type TEXT NOT NULL DEFAULT 'staff',
+      actor_label TEXT,
       action TEXT NOT NULL,
+      summary TEXT,
       table_name TEXT,
       record_id INTEGER,
       old_values TEXT,
@@ -456,9 +483,20 @@ async function setup() {
     await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_transaction_reference
       ON payments(transaction_reference)
       WHERE transaction_reference IS NOT NULL AND transaction_reference != ''`);
+    // The reconciliation sweep and the bill view both need "which charges are
+    // still awaiting the customer" without scanning the whole table.
+    await conn.query(`CREATE INDEX IF NOT EXISTS idx_payments_pending
+      ON payments(bill_id, created_at)
+      WHERE status = 'pending'`);
     await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_reference_number
       ON inventory_transactions(reference_number)
       WHERE reference_number IS NOT NULL AND reference_number != ''`);
+    await conn.query('CREATE INDEX IF NOT EXISTS idx_refunds_payment ON payment_refunds(payment_id)');
+    await conn.query('CREATE INDEX IF NOT EXISTS idx_refunds_bill ON payment_refunds(bill_id)');
+    await conn.query('CREATE INDEX IF NOT EXISTS idx_refunds_date ON payment_refunds(refund_date)');
+    await conn.query('CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at)');
+    await conn.query('CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id)');
+    await conn.query('CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action)');
     await conn.query('CREATE INDEX IF NOT EXISTS idx_appointments_patient ON appointments(patient_id)');
     await conn.query('CREATE INDEX IF NOT EXISTS idx_appointments_doctor_date ON appointments(doctor_id, appointment_date)');
     await conn.query('CREATE INDEX IF NOT EXISTS idx_medical_records_patient ON medical_records(patient_id)');

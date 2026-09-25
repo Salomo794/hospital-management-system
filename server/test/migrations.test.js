@@ -172,10 +172,21 @@ test('widening the payment method constraint preserves existing payments', () =>
       if (!methods.includes("'upi'") || !methods.includes("'cheque'")) {
         throw new Error('payment method constraint was not widened');
       }
-      const rows = sqlite.prepare('SELECT payment_number, payment_method, transaction_reference FROM payments ORDER BY id').all();
+      if (!methods.includes("'mobile_money'")) {
+        throw new Error('mobile_money was not added to the payment method constraint');
+      }
+      const columns = sqlite.prepare('PRAGMA table_info(payments)').all().map(column => column.name);
+      for (const expected of ['status', 'provider', 'provider_reference', 'failure_reason', 'completed_at']) {
+        if (!columns.includes(expected)) throw new Error('missing payments column: ' + expected);
+      }
+      const rows = sqlite.prepare('SELECT payment_number, payment_method, transaction_reference, status FROM payments ORDER BY id').all();
       const indexes = sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_payment_transaction_reference'").all();
       if (rows.length !== 2) throw new Error('expected 2 preserved payments, got ' + rows.length);
       if (rows[0].transaction_reference !== 'legacy-ref-1') throw new Error('payment rows were not copied verbatim');
+      // Money taken before settlement states existed was collected by hand, so
+      // it must be migrated as completed or every historical bill would read as
+      // unpaid.
+      if (rows.some(row => row.status !== 'completed')) throw new Error('legacy payments were not migrated as completed');
       if (indexes.length !== 1) throw new Error('the transaction reference index was not recreated');
       // The rebuilt table must still reject values outside the configured list.
       let rejected = false;
@@ -185,6 +196,13 @@ test('widening the payment method constraint preserves existing payments', () =>
         rejected = /CHECK constraint failed/i.test(error.message);
       }
       if (!rejected) throw new Error('the rebuilt table accepted an unknown payment method');
+      let badStatus = false;
+      try {
+        sqlite.prepare("INSERT INTO payments (uuid, payment_number, bill_id, patient_id, amount, payment_method, status) VALUES ('y', 'PAY-Y', 1, 1, 1, 'cash', 'maybe')").run();
+      } catch (error) {
+        badStatus = /CHECK constraint failed/i.test(error.message);
+      }
+      if (!badStatus) throw new Error('the rebuilt table accepted an unknown payment status');
       pool.close();
     `;
     const result = spawnSync(process.execPath, ['-e', script], {

@@ -69,7 +69,20 @@
                 <strong>{{ formatCurrency(p.amount) }}</strong>
                 <span>{{ paymentMethodLabel(p.payment_method) }} | {{ formatDate(p.payment_date) }}</span>
                 <span v-if="p.transaction_reference" class="text-muted">Ref: {{ p.transaction_reference }}</span>
+                <span v-if="Number(p.refunded_amount) > 0" class="badge badge-danger">
+                  Refunded {{ formatCurrency(p.refunded_amount) }}
+                </span>
+                <span v-if="p.status && p.status !== 'completed'" class="badge" :class="'badge-' + (p.status === 'failed' ? 'danger' : 'warning')">
+                  {{ p.status }}
+                </span>
               </div>
+              <button
+                v-if="refundableFor(p) > 0"
+                class="btn btn-sm btn-outline"
+                @click="openRefundModal(p)"
+              >
+                Refund
+              </button>
             </div>
           </div>
           <div v-else class="empty-state">
@@ -77,6 +90,25 @@
             <p>No payments recorded yet.</p>
           </div>
         </div>
+      </div>
+
+      <div class="card" style="margin-top:16px" v-if="bill.refunds && bill.refunds.length">
+        <div class="card-header"><h3>Refunds</h3></div>
+        <table class="data-table">
+          <thead>
+            <tr><th>Refund #</th><th>Amount</th><th>Method</th><th>Reason</th><th>By</th><th>Date</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in bill.refunds" :key="r.id">
+              <td>{{ r.refund_number }}</td>
+              <td class="text-danger">{{ formatCurrency(r.amount) }}</td>
+              <td>{{ paymentMethodLabel(r.payment_method) }}</td>
+              <td>{{ r.reason }}</td>
+              <td>{{ r.refunded_by_name }} {{ r.refunded_by_last_name }}</td>
+              <td>{{ formatDate(r.refund_date) }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div class="action-bar" v-if="outstandingBalance > 0 && bill.payment_status !== 'cancelled'">
@@ -99,19 +131,127 @@
               <div class="form-group">
                 <label>Payment Method *</label>
                 <select v-model="paymentForm.payment_method" required>
-                  <option v-for="method in paymentMethods" :key="method.value" :value="method.value">
+                  <option v-for="method in staffPaymentMethods" :key="method.value" :value="method.value">
                     {{ method.label }}
                   </option>
                 </select>
               </div>
-              <div class="form-group">
+              <div class="form-group" v-if="paymentForm.payment_method === MOBILE_MONEY_METHOD">
+                <!-- Mobile money is not collected here: the prompt goes to the
+                     patient's handset and the bill settles when they approve. -->
+                <div class="notice">
+                  Mobile money is charged on the patient's phone. This will send
+                  {{ formatCurrency(outstandingBalance) }} to the number below; the bill stays
+                  unpaid until they approve the prompt.
+                </div>
+                <div class="form-group">
+                  <label>Patient Mobile Money Number *</label>
+                  <input v-model.trim="mobileMoneyForm.phone" placeholder="e.g. 0551234567" required />
+                </div>
+                <div class="form-group">
+                  <label>Network *</label>
+                  <select v-model="mobileMoneyForm.network" required>
+                    <option value="" disabled>Select network</option>
+                    <option v-for="network in mobileMoneyConfig.networks" :key="network.value" :value="network.value">
+                      {{ network.label }}
+                    </option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Email for receipt</label>
+                  <input v-model.trim="mobileMoneyForm.email" type="email" :placeholder="bill.patient_email || 'Receipt address'" />
+                </div>
+              </div>
+              <div class="form-group" v-else>
                 <label>Transaction Reference</label>
                 <input v-model="paymentForm.transaction_reference" />
               </div>
               <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" @click="showPaymentModal = false">Cancel</button>
                 <button type="submit" class="btn btn-success" :disabled="recordingPayment">
-                  {{ recordingPayment ? 'Recording...' : 'Record Payment' }}
+                  {{ recordingPayment ? 'Sending...' : (paymentForm.payment_method === MOBILE_MONEY_METHOD ? 'Send Request' : 'Record Payment') }}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pending mobile money charge: shown while the patient approves -->
+      <div class="modal-overlay" v-if="pendingCharge">
+        <div class="modal">
+          <div class="modal-header">
+            <h3>Awaiting Patient Approval</h3>
+            <button class="modal-close" @click="dismissPending">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="notice">
+              {{ formatCurrency(pendingCharge.amount) }} was sent to
+              <strong>{{ mobileMoneyConfig.networks.find(n => n.value === pendingCharge.network)?.label || pendingCharge.network }}</strong>
+              number ending <strong>{{ pendingCharge.phone_tail }}</strong>.
+              The patient must approve the prompt on their phone. This bill is
+              <strong>not</strong> paid until that happens.
+            </div>
+            <div class="info-row"><label>Request:</label><span>{{ pendingCharge.payment_number }}</span></div>
+            <div class="info-row"><label>Status:</label><span>{{ pendingCharge.status }}</span></div>
+            <div class="info-row" v-if="pendingCharge.failure_reason">
+              <label>Reason:</label><span class="text-danger">{{ pendingCharge.failure_reason }}</span>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" @click="checkPendingCharge(false)">Check again</button>
+              <button type="button" class="btn btn-primary" :disabled="checkingPending" @click="checkPendingCharge(true)">
+                {{ checkingPending ? 'Checking...' : 'Patient says they approved' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Refund Modal -->
+      <div class="modal-overlay" v-if="showRefundModal" @click.self="closeRefundModal">
+        <div class="modal">
+          <div class="modal-header">
+            <h3>Refund Payment</h3>
+            <button class="modal-close" @click="closeRefundModal">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form @submit.prevent="submitRefund">
+              <p class="text-muted" style="margin-bottom:12px">
+                Reversing <strong>{{ refundTarget?.payment_number }}</strong> of
+                {{ formatCurrency(refundTarget?.amount) }} taken by
+                {{ paymentMethodLabel(refundTarget?.payment_method) }}.
+                The original payment is kept and a refund record is added.
+              </p>
+              <div class="form-group">
+                <label>Refund Amount *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  v-model.number="refundForm.amount"
+                  :max="refundTarget ? refundableFor(refundTarget) : 0"
+                  required
+                />
+                <small class="text-muted">Maximum refundable: {{ formatCurrency(refundTarget ? refundableFor(refundTarget) : 0) }}</small>
+              </div>
+              <div class="form-group">
+                <label>Reason *</label>
+                <textarea
+                  v-model="refundForm.reason"
+                  rows="2"
+                  maxlength="500"
+                  placeholder="Why is this being reversed? This is recorded in the audit log."
+                  required
+                ></textarea>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @click="closeRefundModal">Cancel</button>
+                <button
+                  type="submit"
+                  class="btn btn-danger"
+                  :disabled="processingRefund || refundForm.reason.trim().length < 3"
+                >
+                  {{ processingRefund ? 'Processing...' : 'Confirm Refund' }}
                 </button>
               </div>
             </form>
@@ -128,7 +268,7 @@ import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { formatDate, formatDateTime, formatCurrency, getStatusColor } from '../../utils/helpers'
-import { fetchPaymentMethods, paymentMethodLabel } from '../../utils/paymentMethods'
+import { fetchPaymentMethods, fetchMobileMoneyConfig, paymentMethodLabel, MOBILE_MONEY_METHOD, disabledMobileMoney } from '../../utils/paymentMethods'
 
 export default {
   name: 'BillDetail',
@@ -142,10 +282,31 @@ export default {
     const recordingPayment = ref(false)
     const paymentForm = ref({ amount: 0, payment_method: 'cash', transaction_reference: '' })
     const paymentMethods = ref([])
+    const showRefundModal = ref(false)
+    const processingRefund = ref(false)
+    const refundTarget = ref(null)
+    const refundForm = ref({ amount: 0, reason: '' })
+    const mobileMoneyConfig = ref(disabledMobileMoney)
+    const mobileMoneyForm = ref({ phone: '', network: '', email: '' })
+    const pendingCharge = ref(null)
+    const checkingPending = ref(false)
     const outstandingBalance = computed(() => Math.max(Number(bill.value?.net_amount || 0) - Number(bill.value?.paid_amount || 0), 0))
 
+    // Mobile money is hidden from the dropdown when no provider is configured,
+    // so staff are never offered a method that would fail on submit.
+    const staffPaymentMethods = computed(() => (
+      mobileMoneyConfig.value.enabled
+        ? paymentMethods.value
+        : paymentMethods.value.filter(method => method.value !== MOBILE_MONEY_METHOD)
+    ))
+
     const loadPaymentMethods = async () => {
-      paymentMethods.value = await fetchPaymentMethods()
+      const [methods, mobileMoney] = await Promise.all([
+        fetchPaymentMethods(),
+        fetchMobileMoneyConfig()
+      ])
+      paymentMethods.value = methods
+      mobileMoneyConfig.value = mobileMoney
     }
 
     const loadBill = async () => {
@@ -169,10 +330,52 @@ export default {
         payment_method: 'cash',
         transaction_reference: ''
       }
+      // Prefill what the hospital already knows about the patient so reception
+      // is not retyping a number that is on file.
+      mobileMoneyForm.value = {
+        phone: bill.value?.patient_phone || '',
+        network: '',
+        email: bill.value?.patient_email || ''
+      }
       showPaymentModal.value = true
     }
 
+    const requestMobileMoney = async () => {
+      const { phone, network } = mobileMoneyForm.value
+      if (!phone || !network) {
+        toast.warning('A mobile money number and network are required.')
+        return
+      }
+      recordingPayment.value = true
+      try {
+        const { data } = await axios.post(`/api/billing/${route.params.id}/mobile-money`, {
+          phone,
+          network,
+          email: mobileMoneyForm.value.email || undefined
+        })
+        showPaymentModal.value = false
+        pendingCharge.value = {
+          id: data.payment.id,
+          payment_number: data.payment.payment_number,
+          amount: data.payment.amount,
+          network,
+          phone_tail: String(phone).slice(-4),
+          status: data.payment.status
+        }
+        toast.info(data.message || 'Request sent. Waiting for the patient to approve.')
+        loadBill()
+      } catch (e) {
+        toast.error(e.response?.data?.message || 'Could not send the mobile money request')
+      } finally {
+        recordingPayment.value = false
+      }
+    }
+
     const recordPayment = async () => {
+      if (paymentForm.value.payment_method === MOBILE_MONEY_METHOD) {
+        await requestMobileMoney()
+        return
+      }
       const amount = Number(paymentForm.value.amount)
       if (!Number.isFinite(amount) || amount <= 0 || amount > outstandingBalance.value) {
         toast.warning('Enter a positive amount within the outstanding balance.')
@@ -192,8 +395,89 @@ export default {
       }
     }
 
+    // `sync` asks the provider directly. Webhooks are the normal path, so this
+    // exists for when a patient insists they approved and nothing has landed.
+    const checkPendingCharge = async (sync = false) => {
+      if (!pendingCharge.value) return
+      checkingPending.value = true
+      try {
+        const { data } = await axios.get(
+          `/api/billing/mobile-money/payments/${pendingCharge.value.id}${sync ? '?sync=1' : ''}`
+        )
+        pendingCharge.value = { ...pendingCharge.value, ...data.payment, status: data.payment.status }
+        if (data.payment.status === 'completed') {
+          toast.success(`Payment ${data.payment.payment_number} approved.`)
+          dismissPending()
+          loadBill()
+        } else if (data.payment.status === 'failed') {
+          toast.error(data.payment.failure_reason || 'The patient did not approve this payment.')
+          loadBill()
+        } else {
+          toast.info('Still waiting for the patient to approve on their phone.')
+        }
+      } catch (e) {
+        toast.error(e.response?.data?.message || 'Could not check this payment')
+      } finally {
+        checkingPending.value = false
+      }
+    }
+
+    const dismissPending = () => {
+      pendingCharge.value = null
+    }
+
     const printBill = () => {
       window.print()
+    }
+
+    // Only settled money can be given back, and only what is left of it. A
+    // pending mobile money charge never reached the hospital, and a fully
+    // refunded payment has nothing left to reverse.
+    const refundableFor = (payment) => {
+      if (!payment) return 0
+      if (payment.status && payment.status !== 'completed') return 0
+      const amount = Number(payment.amount || 0)
+      const refunded = Number(payment.refunded_amount || 0)
+      return Math.max(Number((amount - refunded).toFixed(2)), 0)
+    }
+
+    const openRefundModal = (payment) => {
+      refundTarget.value = payment
+      refundForm.value = { amount: refundableFor(payment), reason: '' }
+      showRefundModal.value = true
+    }
+
+    const closeRefundModal = () => {
+      showRefundModal.value = false
+      refundTarget.value = null
+      refundForm.value = { amount: 0, reason: '' }
+    }
+
+    const submitRefund = async () => {
+      const amount = Number(refundForm.value.amount)
+      const max = refundableFor(refundTarget.value)
+      if (!Number.isFinite(amount) || amount <= 0 || amount > max) {
+        toast.warning(`Enter an amount between 0.01 and ${max}.`)
+        return
+      }
+      if (refundForm.value.reason.trim().length < 3) {
+        toast.warning('A reason is required so the reversal can be explained later.')
+        return
+      }
+      processingRefund.value = true
+      try {
+        const { data } = await axios.post(
+          `/api/billing/payments/${refundTarget.value.id}/refund`,
+          { amount, reason: refundForm.value.reason.trim() }
+        )
+        toast.success(`Refund ${data.refund.refund_number} recorded.`)
+        closeRefundModal()
+        loadBill()
+      } catch (e) {
+        toast.error(e.response?.data?.message || 'Error recording refund')
+      } finally {
+        processingRefund.value = false
+      }
     }
 
     onMounted(() => {
@@ -203,7 +487,11 @@ export default {
     watch(() => route.params.id, loadBill)
     return {
       bill, loading, error, showPaymentModal, recordingPayment, paymentForm, paymentMethods,
+      staffPaymentMethods, mobileMoneyConfig, mobileMoneyForm, pendingCharge, checkingPending,
       outstandingBalance, loadBill, openPaymentModal, recordPayment, printBill, paymentMethodLabel,
+      checkPendingCharge, dismissPending, MOBILE_MONEY_METHOD,
+      showRefundModal, processingRefund, refundTarget, refundForm,
+      refundableFor, openRefundModal, closeRefundModal, submitRefund,
       formatDate, formatDateTime, formatCurrency, getStatusColor
     }
   }
@@ -229,6 +517,20 @@ export default {
 
 .empty-state { text-align: center; padding: 32px 16px; color: var(--gray-400); }
 .empty-icon { font-size: 32px; display: block; margin-bottom: 8px; }
+
+/* Explains that the money has not arrived yet, so it is never mistaken for a
+   confirmation that it has. */
+.notice {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-left: 4px solid #f59e0b;
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: #78350f;
+  line-height: 1.5;
+}
 
 .loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: var(--gray-500); }
 .spinner { width: 40px; height: 40px; border: 4px solid var(--gray-200); border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }

@@ -228,6 +228,7 @@ const icons = {
   reports:      s('<path d="M3.5 3.5v17h17"/><path d="M7.5 17v-4.5M12 17V8M16.5 17v-6.5"/>'),
   ai:           s('<path d="M12 3l2 5.5 5.5 2-5.5 2L12 18l-2-5.5L4.5 10.5l5.5-2L12 3Z"/><path d="M18.6 16.4l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8.8-1.9Z"/>'),
   users:        s('<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>'),
+  audit:        s('<path d="M9 4h9a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1z"/><path d="M17 5h1a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1"/><path d="M8 11h8M8 15h5"/>'),
 }
 
 const routeMeta = [
@@ -243,6 +244,7 @@ const routeMeta = [
   { prefix: '/reports',      label: 'Reports & Analytics',      section: 'Insights' },
   { prefix: '/ai-assistant', label: 'AI Assistant',             section: 'Insights' },
   { prefix: '/users',        label: 'User Management',          section: 'Administration' },
+  { prefix: '/audit-log',    label: 'Audit Log',                section: 'Administration' },
 ]
 
 export default {
@@ -290,7 +292,8 @@ export default {
           { to: '/ai-assistant', label: 'AI Assistant', icon: icons.ai }
         ]},
         { title: 'Admin', items: [
-          { to: '/users', label: 'Users', icon: icons.users, exact: true, roles: ['admin'] }
+          { to: '/users', label: 'Users', icon: icons.users, exact: true, roles: ['admin'] },
+          { to: '/audit-log', label: 'Audit Log', icon: icons.audit, roles: ['admin'] }
         ]}
       ]
       return sections

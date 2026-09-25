@@ -10,7 +10,18 @@ const {
 const { randomUUID, generateRecordNumber } = require('../utils/ids');
 const { getRequestId } = require('../utils/requestId');
 const { FixedWindowRateLimiter } = require('../utils/rateLimiter');
-const { isPaymentMethod } = require('../config/paymentMethods');
+const { isPaymentMethod, PENDING_PAYMENT_STATUS, MOBILE_MONEY_METHOD } = require('../config/paymentMethods');
+const { isMobileMoneyEnabled, publicConfig: mobileMoneyPublicConfig, paystackSettings } = require('../config/mobileMoney');
+const { getAdapter: getMobileMoneyAdapter } = require('../services/mobileMoney');
+const {
+  validateRequest: validateMobileMoneyRequest,
+  createPendingPayment,
+  requestChargeFromProvider,
+  attachProviderReference,
+  applyGatewayResult,
+} = require('../services/mobileMoneyPayments');
+const { recalculateBillPayment } = require('../utils/bills');
+const { recordAudit } = require('../utils/audit');
 
 const CHECKIN_TRANSITIONS = {
   waiting: new Set(['in_consultation', 'completed', 'no_show', 'cancelled']),
@@ -28,6 +39,149 @@ function paymentsEnabled() {
     && process.env.ALLOW_SIMULATED_PAYMENTS === 'true'
   );
 }
+
+// Lets a patient approve a bill from the portal. Gated on the provider being
+// configured rather than on ALLOW_SIMULATED_PAYMENTS, because this rail settles
+// against a real provider rather than a stand-in.
+function payBillByMobileMoney(req, res, id) {
+  if (!isMobileMoneyEnabled()) {
+    throw new ApiError(503, 'Mobile money payments are not enabled. Please contact reception.');
+  }
+  const adapter = getMobileMoneyAdapter();
+  const { phone, network, email } = validateMobileMoneyRequest(req.body || {});
+  const requestId = getRequestId(req, 'request_id', { required: true });
+  // Scoped to the request rather than the bill, so a patient paying two bills
+  // in one session does not have their second attempt mistaken for a replay.
+  const reference = `portal-mm:${requestId}`;
+
+  return (async () => {
+    const [existing] = await pool.query(
+      'SELECT id, amount, status FROM payments WHERE transaction_reference = ?',
+      [reference]
+    );
+    if (existing.length > 0) {
+      const [bills] = await pool.query('SELECT net_amount, paid_amount FROM bills WHERE id = ?', [id]);
+      const bill = bills[0] || { net_amount: 0, paid_amount: 0 };
+      return res.json({
+        success: true,
+        replay: true,
+        status: existing[0].status,
+        amount: Number(existing[0].amount),
+        balance_remaining: Math.max(Number(bill.net_amount) - Number(bill.paid_amount), 0),
+        message: 'This request is already in progress.',
+      });
+    }
+
+    const pending = await withTransaction(pool, async connection => {
+      const [billRows] = await connection.query(
+        'SELECT * FROM bills WHERE id = ? AND patient_id = ?',
+        [id, req.patient.id]
+      );
+      if (billRows.length === 0) throw new ApiError(404, 'Bill not found');
+      const bill = billRows[0];
+      if (bill.payment_status === 'cancelled') throw new ApiError(409, 'Payments cannot be recorded for a cancelled bill');
+      const outstanding = Math.round((Number(bill.net_amount) - Number(bill.paid_amount) + Number.EPSILON) * 100) / 100;
+      if (outstanding <= 0) throw new ApiError(400, 'This bill has no outstanding balance');
+      return createPendingPayment({
+        connection,
+        req,
+        bill: { ...bill, outstanding },
+        amount: outstanding,
+        phone,
+        network,
+        // Providers reject an unusable address, and the patient on the portal
+        // already has a verified one on file.
+        email: email || req.patient.email || null,
+        receivedBy: null,
+        notes: `Portal mobile money request to ${network} ending ${String(phone).slice(-4)}`,
+        prefix: 'PAY-MMPTL',
+        reference,
+      });
+    });
+
+    let charge;
+    try {
+      charge = await requestChargeFromProvider(pending, { callbackUrl: paystackSettings().callbackUrl });
+    } catch (error) {
+      await withTransaction(pool, async connection => applyGatewayResult({
+        connection,
+        req,
+        paymentId: pending.paymentId,
+        result: { status: 'failed', providerReference: null, failureReason: error.message.slice(0, 300) },
+      }));
+      throw error;
+    }
+
+    const bill = await withTransaction(pool, async connection => {
+      await attachProviderReference({
+        connection,
+        paymentId: pending.paymentId,
+        provider: charge.adapter.name,
+        providerReference: charge.result.providerReference,
+      });
+      await recordAudit({
+        req,
+        connection,
+        action: 'billing.portal_mobile_money.requested',
+        table: 'payments',
+        recordId: pending.paymentId,
+        summary: `${pending.paymentNumber} ${pending.amount} via ${network} for patient ${req.patient.id}`,
+        after: {
+          payment_number: pending.paymentNumber,
+          bill_id: id,
+          amount: pending.amount,
+          network,
+          provider: charge.adapter.name,
+          status: PENDING_PAYMENT_STATUS,
+        },
+      });
+      return recalculateBillPayment(connection, id);
+    });
+
+    res.status(202).json({
+      success: true,
+      replay: false,
+      payment_id: pending.paymentId,
+      status: PENDING_PAYMENT_STATUS,
+      amount: pending.amount,
+      balance_remaining: Math.max(Number(bill.net_amount) - Number(bill.paid_amount), 0),
+      message: 'Approve the payment on your phone to complete it.',
+    });
+  })();
+}
+
+// Polls a portal-initiated charge. `?sync=1` asks the provider directly, which
+// is what the browser does while the patient is still typing their PIN.
+router.get('/bills/:id/mobile-money/:paymentId', authenticatePortal, asyncHandler(async (req, res) => {
+  if (!isMobileMoneyEnabled()) {
+    throw new ApiError(503, 'Mobile money payments are not enabled. Please contact reception.');
+  }
+  const id = parseInteger(req.params.id, 'id', { min: 1 });
+  const paymentId = parseInteger(req.params.paymentId, 'paymentId', { min: 1 });
+  const [rows] = await pool.query(
+    'SELECT id, bill_id, patient_id, amount, status, failure_reason FROM payments WHERE id = ?',
+    [paymentId]
+  );
+  if (rows.length === 0) throw new ApiError(404, 'Payment not found');
+  const payment = rows[0];
+  // Scoped to the bill, which the route already scoped to this patient, so one
+  // patient cannot read another's charge state by guessing an id.
+  if (Number(payment.bill_id) !== id || Number(payment.patient_id) !== Number(req.patient.id)) {
+    throw new ApiError(404, 'Payment not found');
+  }
+
+  if (req.query.sync !== undefined && payment.status === PENDING_PAYMENT_STATUS) {
+    const adapter = getMobileMoneyAdapter();
+    const [full] = await pool.query('SELECT transaction_reference FROM payments WHERE id = ?', [paymentId]);
+    const result = await adapter.verifyCharge(full[0].transaction_reference);
+    const outcome = await withTransaction(pool, async connection => applyGatewayResult({
+      connection, req, paymentId, result,
+    }));
+    res.json({ status: outcome.payment.status, amount: Number(payment.amount), synced: true });
+    return;
+  }
+  res.json({ status: payment.status, amount: Number(payment.amount), synced: false });
+}));
 
 async function findPatientByIdentifier(identifier) {
   const value = String(identifier || '').trim();
@@ -232,6 +386,10 @@ router.get('/me', authenticatePortal, asyncHandler(async (req, res) => {
     checkin: todayCheckins[0] || null,
     ahead_in_queue: aheadRows[0].count,
     payments_enabled: paymentsEnabled(),
+    // Mobile money settles against a real provider rather than a stand-in, so
+    // it carries its own gate and is advertised separately. This is the same
+    // public config staff see: the provider name and network list, no secret.
+    mobile_money: mobileMoneyPublicConfig(),
   });
 }));
 
@@ -291,13 +449,22 @@ router.get('/bills', authenticatePortal, asyncHandler(async (req, res) => {
 }));
 
 router.post('/bills/:id/pay', authenticatePortal, asyncHandler(async (req, res) => {
+  const id = parseInteger(req.params.id, 'id', { min: 1 });
+  const paymentMethod = req.body?.payment_method || 'card';
+  if (!isPaymentMethod(paymentMethod)) throw new ApiError(400, 'Invalid payment method');
+
+  // Mobile money is a different shape of payment, not a different value for the
+  // same one: the patient approves on their handset, so it starts a pending
+  // charge instead of recording settled money straight away.
+  if (paymentMethod === MOBILE_MONEY_METHOD) {
+    await payBillByMobileMoney(req, res, id);
+    return;
+  }
   if (!paymentsEnabled()) {
     throw new ApiError(503, 'Online payments are not enabled. Please contact reception.');
   }
-  const id = parseInteger(req.params.id, 'id', { min: 1 });
+
   const amount = Math.round((parseFiniteNumber(req.body?.amount, 'amount', { min: 0.01 }) + Number.EPSILON) * 100) / 100;
-  const paymentMethod = req.body?.payment_method || 'card';
-  if (!isPaymentMethod(paymentMethod)) throw new ApiError(400, 'Invalid payment method');
   const requestId = getRequestId(req, 'request_id', { required: true });
   const referenceNumber = `portal:${requestId}`;
 
@@ -346,20 +513,29 @@ router.post('/bills/:id/pay', authenticatePortal, asyncHandler(async (req, res) 
        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
       [randomUUID(), paymentNumber, id, req.patient.id, amount, paymentMethod, referenceNumber, 'Portal self-service payment']
     );
-    await connection.query(
-      `UPDATE bills
-       SET paid_amount = paid_amount + ?,
-           payment_status = CASE WHEN paid_amount + ? >= net_amount THEN 'paid' ELSE 'partial' END,
-           payment_method = COALESCE(payment_method, ?)
-       WHERE id = ?`,
-      [amount, amount, paymentMethod, id]
-    );
-    const [updated] = await connection.query('SELECT net_amount, paid_amount FROM bills WHERE id = ?', [id]);
+    await connection.query('UPDATE bills SET payment_method = COALESCE(payment_method, ?) WHERE id = ?', [paymentMethod, id]);
+    const updatedBill = await recalculateBillPayment(connection, id);
+    await recordAudit({
+      req,
+      connection,
+      action: 'billing.portal_payment.recorded',
+      table: 'payments',
+      summary: `${paymentNumber} ${amount} by ${paymentMethod} for patient ${req.patient.id}`,
+      after: {
+        payment_number: paymentNumber,
+        bill_id: id,
+        amount,
+        payment_method: paymentMethod,
+        reference_number: referenceNumber,
+        bill_paid_amount: updatedBill.paid_amount,
+        bill_payment_status: updatedBill.payment_status,
+      },
+    });
     return {
       success: true,
       replay: false,
       amount,
-      balance_remaining: Math.max(updated[0].net_amount - updated[0].paid_amount, 0),
+      balance_remaining: Math.max(Number(updatedBill.net_amount) - Number(updatedBill.paid_amount), 0),
     };
   });
 

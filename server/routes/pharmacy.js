@@ -5,6 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { evaluateSafety } = require('../utils/safety');
 const { ApiError, asyncHandler, getPagination, isDateOnly, parseFiniteNumber, parseInteger, withTransaction } = require('../utils/http');
 const { getRequestId } = require('../utils/requestId');
+const { recordAudit } = require('../utils/audit');
 
 const PHARMACY_ROLES = ['admin', 'pharmacist'];
 const PHARMACY_READ_ROLES = ['admin', 'pharmacist', 'doctor', 'nurse'];
@@ -276,7 +277,15 @@ router.post('/dispense', authenticate, authorize('pharmacist'), asyncHandler(asy
     if (pending[0].count === 0) {
       await connection.query("UPDATE prescriptions SET status = 'completed' WHERE id = ?", [item.prescription_id]);
     }
-    return { replay: false, safety, quantity, remaining: prescriptionQuantity - newDispensedQuantity };
+    return {
+      replay: false,
+      safety,
+      quantity,
+      remaining: prescriptionQuantity - newDispensedQuantity,
+      medicine_id: item.medicine_id,
+      medicine_name: item.medicine_name,
+      patient_id: item.patient_id,
+    };
   });
 
   if (result.safety_blocked) {
@@ -284,6 +293,25 @@ router.post('/dispense', authenticate, authorize('pharmacist'), asyncHandler(asy
       message: 'Safety alert: dispensing this medicine conflicts with a recorded allergy or a contraindicated interaction.',
       warnings: result.safety.warnings,
       requires_acknowledgement: true,
+    });
+  }
+
+  // Audited after the transaction commits, and skipped for idempotent replays
+  // so a retried request does not appear as a second dispense.
+  if (!result.replay) {
+    await recordAudit({
+      req,
+      action: 'pharmacy.dispensed',
+      table: 'inventory_transactions',
+      summary: `${result.quantity} x ${result.medicine_name} for patient ${result.patient_id}`,
+      after: {
+        medicine_id: result.medicine_id,
+        medicine_name: result.medicine_name,
+        patient_id: result.patient_id,
+        quantity: result.quantity,
+        prescription_item_id: prescriptionItemId,
+        reference_number: referenceNumber,
+      },
     });
   }
 

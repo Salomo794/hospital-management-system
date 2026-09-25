@@ -93,9 +93,22 @@ router.get('/dashboard', authenticate, async (req, res) => {
     let monthlyRevenue = [{ total: 0 }];
     let pendingBills = [{ count: 0, amount: 0 }];
     if (canViewRevenue) {
+      // Revenue is reported net of refunds, so a reversed payment reduces the
+      // period it was originally collected in rather than being ignored.
       const [[todayRows], [monthRows], [billRows]] = await Promise.all([
-        pool.query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE DATE(payment_date) = ?", [today]),
-        pool.query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE CAST(strftime('%m', payment_date) AS INTEGER) = CAST(strftime('%m', 'now') AS INTEGER) AND CAST(strftime('%Y', payment_date) AS INTEGER) = CAST(strftime('%Y', 'now') AS INTEGER)"),
+        pool.query(
+          `SELECT COALESCE((SELECT SUM(amount) FROM payments WHERE DATE(payment_date) = ?), 0)
+                  - COALESCE((SELECT SUM(amount) FROM payment_refunds WHERE DATE(refund_date) = ?), 0) AS total`,
+          [today, today]
+        ),
+        pool.query(
+          `SELECT COALESCE((SELECT SUM(amount) FROM payments
+                    WHERE CAST(strftime('%m', payment_date) AS INTEGER) = CAST(strftime('%m', 'now') AS INTEGER)
+                      AND CAST(strftime('%Y', payment_date) AS INTEGER) = CAST(strftime('%Y', 'now') AS INTEGER)), 0)
+                  - COALESCE((SELECT SUM(amount) FROM payment_refunds
+                    WHERE CAST(strftime('%m', refund_date) AS INTEGER) = CAST(strftime('%m', 'now') AS INTEGER)
+                      AND CAST(strftime('%Y', refund_date) AS INTEGER) = CAST(strftime('%Y', 'now') AS INTEGER)), 0) AS total`
+        ),
         pool.query("SELECT COUNT(*) as count, COALESCE(SUM(net_amount - paid_amount), 0) as amount FROM bills WHERE payment_status IN ('pending','partial')"),
       ]);
       todayRevenue = todayRows;
@@ -308,8 +321,15 @@ router.get('/insights', authenticate, authorize('admin', 'receptionist', 'doctor
     // Revenue pulse (today vs yesterday)
     if (canViewBilling) {
       const [[todayRev], [yesterdayRev]] = await Promise.all([
-        pool.query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE DATE(payment_date) = ?", [today]),
-        pool.query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE DATE(payment_date) = date('now', '-1 day')"),
+        pool.query(
+          `SELECT COALESCE((SELECT SUM(amount) FROM payments WHERE DATE(payment_date) = ?), 0)
+                  - COALESCE((SELECT SUM(amount) FROM payment_refunds WHERE DATE(refund_date) = ?), 0) AS total`,
+          [today, today]
+        ),
+        pool.query(
+          `SELECT COALESCE((SELECT SUM(amount) FROM payments WHERE DATE(payment_date) = date('now', '-1 day')), 0)
+                  - COALESCE((SELECT SUM(amount) FROM payment_refunds WHERE DATE(refund_date) = date('now', '-1 day')), 0) AS total`
+        ),
       ]);
       const delta = yesterdayRev[0].total > 0
         ? Math.round(((todayRev[0].total - yesterdayRev[0].total) / yesterdayRev[0].total) * 100)
@@ -352,11 +372,21 @@ router.get('/financial', authenticate, authorize('admin'), async (req, res) => {
       dateFormat = '%Y-%m';
     }
     const expenseGroupBy = groupBy.replace(/payment_date/g, 'it.created_at');
+    // Payments and refunds are unioned into one signed cash stream so a refund
+    // nets off the period the money was originally collected in.
+    const cashGroupBy = groupBy.replace(/payment_date/g, 'event_date');
     const [revenue] = await pool.query(
-      `SELECT ${groupBy} as period, SUM(amount) as revenue, payment_method,
-        COUNT(*) as transaction_count
-        FROM payments WHERE CAST(strftime('%Y', payment_date) AS INTEGER) = ?
-        GROUP BY ${groupBy}, payment_method ORDER BY period`,
+      `SELECT ${cashGroupBy} as period, SUM(movement) as revenue, payment_method,
+        SUM(direction) as transaction_count
+        FROM (
+          SELECT payment_date AS event_date, payment_method, amount AS movement, 1 AS direction
+            FROM payments
+          UNION ALL
+          SELECT refund_date AS event_date, payment_method, -amount AS movement, -1 AS direction
+            FROM payment_refunds
+        )
+        WHERE CAST(strftime('%Y', event_date) AS INTEGER) = ?
+        GROUP BY ${cashGroupBy}, payment_method ORDER BY period`,
       [reportYear]
     );
     const [expenses] = await pool.query(

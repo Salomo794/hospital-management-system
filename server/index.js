@@ -19,6 +19,7 @@ const prescriptionRoutes = require('./routes/prescriptions');
 const pharmacyRoutes = require('./routes/pharmacy');
 const laboratoryRoutes = require('./routes/laboratory');
 const billingRoutes = require('./routes/billing');
+const auditRoutes = require('./routes/audit');
 const reportRoutes = require('./routes/reports');
 const notificationRoutes = require('./routes/notifications');
 const admissionRoutes = require('./routes/admissions');
@@ -60,7 +61,17 @@ morgan.token('safe-url', req => req.path);
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan(':method :safe-url :status :res[content-length] - :response-time ms'));
 }
-app.use(express.json({ limit: process.env.JSON_LIMIT || '1mb' }));
+// Paystack signs webhooks with an HMAC over the exact bytes it sent, so the
+// body has to be kept before the JSON parser re-serialises it. Only this one
+// path is captured; buffering every request body would waste memory for no gain.
+const RAW_BODY_PATHS = new Set(['/api/billing/mobile-money/webhook']);
+
+app.use(express.json({
+  limit: process.env.JSON_LIMIT || '1mb',
+  verify(req, res, buffer) {
+    if (RAW_BODY_PATHS.has(req.path)) req.rawBody = Buffer.from(buffer);
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: process.env.JSON_LIMIT || '1mb' }));
 app.use((req, res, next) => {
   req.requestId = req.header('X-Request-ID') || crypto.randomUUID();
@@ -78,6 +89,7 @@ app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/pharmacy', pharmacyRoutes);
 app.use('/api/laboratory', laboratoryRoutes);
 app.use('/api/billing', billingRoutes);
+app.use('/api/audit', auditRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/admissions', admissionRoutes);

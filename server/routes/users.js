@@ -3,8 +3,10 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { ApiError, asyncHandler, getPagination, parseInteger } = require('../utils/http');
+const { recordAudit, pick } = require('../utils/audit');
 
 const ROLES = ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab_technician'];
+const AUDITED_FIELDS = ['email', 'role', 'first_name', 'last_name', 'phone', 'is_active'];
 
 router.get('/', authenticate, authorize('admin'), asyncHandler(async (req, res) => {
   const { page, limit, offset } = getPagination(req.query);
@@ -68,17 +70,42 @@ router.put('/:id', authenticate, authorize('admin'), asyncHandler(async (req, re
     }
   }
   if (updates.length === 0) throw new ApiError(400, 'No fields to update');
+  const [existing] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
+  if (existing.length === 0) throw new ApiError(404, 'User not found');
   values.push(id);
   const [result] = await pool.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, values);
   if (result.affectedRows === 0) throw new ApiError(404, 'User not found');
+  const [updated] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
+  const before = pick(existing[0], AUDITED_FIELDS);
+  const after = pick(updated[0], AUDITED_FIELDS);
+  await recordAudit({
+    req,
+    action: 'user.updated',
+    table: 'users',
+    recordId: id,
+    summary: `Changed ${Object.keys(after).filter(field => String(before?.[field]) !== String(after[field])).join(', ') || 'no fields'}`,
+    before,
+    after,
+  });
   res.json({ message: 'User updated successfully' });
 }));
 
 router.delete('/:id', authenticate, authorize('admin'), asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   if (id === req.user.id) throw new ApiError(400, 'You cannot deactivate your own account');
+  const [existing] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
+  if (existing.length === 0) throw new ApiError(404, 'User not found');
   const [result] = await pool.query('UPDATE users SET is_active = FALSE WHERE id = ?', [id]);
   if (result.affectedRows === 0) throw new ApiError(404, 'User not found');
+  await recordAudit({
+    req,
+    action: 'user.deactivated',
+    table: 'users',
+    recordId: id,
+    summary: `Deactivated ${existing[0].email}`,
+    before: pick(existing[0], AUDITED_FIELDS),
+    after: pick({ ...existing[0], is_active: 0 }, AUDITED_FIELDS),
+  });
   res.json({ message: 'User deactivated' });
 }));
 

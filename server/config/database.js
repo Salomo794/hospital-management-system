@@ -3,10 +3,12 @@ loadEnvironment();
 
 const {
   PAYMENT_METHOD_VALUES,
+  PAYMENT_STATUSES,
   PAYMENTS_TABLE_COLUMNS,
   isPaymentMethod,
   paymentMethodConstraint,
   paymentMethodValueList,
+  paymentStatusConstraint,
 } = require('./paymentMethods');
 
 const Database = require('better-sqlite3');
@@ -110,16 +112,20 @@ function assertNoActiveAdmissionDuplicates() {
   }
 }
 
-// SQLite cannot ALTER a CHECK constraint in place, so widening the accepted
-// payment methods means rebuilding the payments table. The rebuild is driven
-// by the canonical column list so rows are never lost, and it is a no-op once
-// the stored constraint already accepts every configured method.
-function paymentMethodConstraintIsCurrent() {
+// SQLite cannot ALTER a CHECK constraint in place, and the status column is
+// part of one, so widening the accepted payment methods means rebuilding the
+// payments table. The rebuild is driven by the canonical column list so rows
+// are never lost, and it is a no-op once the stored table already matches.
+function paymentsTableIsCurrent() {
   const table = sqlite
     .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'payments'")
     .get();
   if (!table || typeof table.sql !== 'string') return true;
-  return PAYMENT_METHOD_VALUES.every(value => table.sql.includes(`'${value}'`));
+  if (!PAYMENT_METHOD_VALUES.every(value => table.sql.includes(`'${value}'`))) return false;
+  // A table predating settlement states has no way to tell an approved charge
+  // from an abandoned one, so it counts as stale even when its methods match.
+  if (!columnExists('payments', 'status')) return false;
+  return PAYMENT_STATUSES.every(value => table.sql.includes(`'${value}'`));
 }
 
 function rebuildPaymentsTable() {
@@ -148,10 +154,19 @@ function rebuildPaymentsTable() {
     );
   }
 
+  // Money recorded before settlement states existed was taken in hand, so it
+  // counts as collected. Any status the new constraint rejects is likewise
+  // folded into a settled state rather than silently dropped from the bill.
   const selectList = copied
-    .map(column => (column === 'payment_method'
-      ? `CASE WHEN payment_method IN (${paymentMethodValueList()}) THEN payment_method ELSE 'other' END`
-      : column))
+    .map(column => {
+      if (column === 'payment_method') {
+        return `CASE WHEN payment_method IN (${paymentMethodValueList()}) THEN payment_method ELSE 'other' END`;
+      }
+      if (column === 'status') {
+        return `CASE WHEN status IN (${PAYMENT_STATUSES.map(value => `'${value}'`).join(',')}) THEN status ELSE 'completed' END`;
+      }
+      return column;
+    })
     .join(', ');
 
   // foreign_keys is a no-op inside a transaction, so toggle it around the rebuild.
@@ -168,9 +183,14 @@ function rebuildPaymentsTable() {
         patient_id INTEGER NOT NULL,
         amount REAL NOT NULL CHECK(amount > 0),
         payment_method TEXT NOT NULL ${paymentMethodConstraint()},
+        status TEXT NOT NULL DEFAULT 'completed' ${paymentStatusConstraint()},
         transaction_reference TEXT,
+        provider TEXT,
+        provider_reference TEXT,
+        failure_reason TEXT,
         received_by INTEGER,
         payment_date TEXT DEFAULT (datetime('now')),
+        completed_at TEXT,
         notes TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
@@ -332,13 +352,61 @@ function migrate() {
       WHERE status = 'admitted' AND ward IS NOT NULL AND bed_number IS NOT NULL`);
   }
   if (tableExists('payments')) {
-    // Dropping the table removes its indexes, so widen the constraint first
-    // and then re-create idx_payment_transaction_reference.
-    if (!paymentMethodConstraintIsCurrent()) rebuildPaymentsTable();
+    // Dropping the table removes its indexes, so settle the table shape first
+    // and then re-create them.
+    if (!paymentsTableIsCurrent()) rebuildPaymentsTable();
     createIndexIfPossible(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_transaction_reference
       ON payments(transaction_reference)
       WHERE transaction_reference IS NOT NULL AND transaction_reference != ''`);
+    createIndexIfPossible(`CREATE INDEX IF NOT EXISTS idx_payments_pending
+      ON payments(bill_id, created_at)
+      WHERE status = 'pending'`);
   }
+  if (tableExists('audit_log')) {
+    // audit_log shipped in the schema but was never written to. These columns
+    // distinguish a staff actor from a patient-portal actor; patient ids share
+    // a namespace with user ids, so they are kept out of user_id entirely.
+    if (!columnExists('audit_log', 'actor_type')) {
+      sqlite.exec("ALTER TABLE audit_log ADD COLUMN actor_type TEXT NOT NULL DEFAULT 'staff'");
+    }
+    if (!columnExists('audit_log', 'actor_label')) {
+      sqlite.exec('ALTER TABLE audit_log ADD COLUMN actor_label TEXT');
+    }
+    // Kept separate from `action` so actions stay a clean, filterable set.
+    if (!columnExists('audit_log', 'summary')) {
+      sqlite.exec('ALTER TABLE audit_log ADD COLUMN summary TEXT');
+    }
+    createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at)');
+    createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id)');
+    createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action)');
+  }
+
+  // Created here as well as in setup.js so an existing deployment keeps working
+  // across a restart before anyone reruns `npm run db:setup`.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS payment_refunds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT UNIQUE NOT NULL,
+    refund_number TEXT UNIQUE NOT NULL,
+    payment_id INTEGER NOT NULL,
+    bill_id INTEGER NOT NULL,
+    patient_id INTEGER NOT NULL,
+    amount REAL NOT NULL CHECK(amount > 0),
+    payment_method TEXT NOT NULL ${paymentMethodConstraint()},
+    reason TEXT NOT NULL,
+    refunded_by INTEGER NOT NULL,
+    refund_date TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE,
+    FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
+    FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
+    FOREIGN KEY (refunded_by) REFERENCES users(id)
+  )`);
+  if (tableExists('payment_refunds')) {
+    createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_refunds_payment ON payment_refunds(payment_id)');
+    createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_refunds_bill ON payment_refunds(bill_id)');
+    createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_refunds_date ON payment_refunds(refund_date)');
+  }
+
   if (tableExists('inventory_transactions')) {
     if (!columnExists('inventory_transactions', 'prescription_item_id')) {
       sqlite.exec('ALTER TABLE inventory_transactions ADD COLUMN prescription_item_id INTEGER');

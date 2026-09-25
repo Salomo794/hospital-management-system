@@ -9,6 +9,7 @@ const FALLBACK_PAYMENT_METHODS = [
   { value: 'card', label: 'Card' },
   { value: 'credit_card', label: 'Credit Card' },
   { value: 'mobile_wallet', label: 'Mobile Wallet' },
+  { value: 'mobile_money', label: 'Mobile Money' },
   { value: 'upi', label: 'UPI / QR' },
   { value: 'online', label: 'Online' },
   { value: 'bank_transfer', label: 'Bank Transfer' },
@@ -18,6 +19,31 @@ const FALLBACK_PAYMENT_METHODS = [
 ]
 
 let cache = null
+
+// Mobile money is a different shape of payment, not just another dropdown
+// value: the customer approves a prompt on their own handset, so the bill is
+// not settled when the request is sent. The server decides whether the rail is
+// available at all, and the payment forms use this to decide whether to offer
+// it. A disabled rail is the normal case and must not look like an error.
+const MOBILE_MONEY_METHOD = 'mobile_money'
+const disabledMobileMoney = { enabled: false, provider: null, networks: [] }
+
+export async function fetchMobileMoneyConfig() {
+  try {
+    const { data } = await axios.get('/api/billing/mobile-money/config')
+    if (!data?.enabled) return disabledMobileMoney
+    return {
+      enabled: true,
+      provider: data.provider,
+      currency: data.currency || 'NGN',
+      networks: Array.isArray(data.networks) ? data.networks : []
+    }
+  } catch {
+    return disabledMobileMoney
+  }
+}
+
+export { MOBILE_MONEY_METHOD, disabledMobileMoney }
 
 export function paymentMethodLabel(value) {
   const match = FALLBACK_PAYMENT_METHODS.find(method => method.value === value)
