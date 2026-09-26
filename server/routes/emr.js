@@ -6,6 +6,7 @@ const { evaluateSafety } = require('../utils/safety');
 const { ApiError, asyncHandler, parseInteger, withTransaction } = require('../utils/http');
 const { randomUUID, generateRecordNumber } = require('../utils/ids');
 const { recordAudit } = require('../utils/audit');
+const { readPatientData, readPatientDataInBulk, writePatientData } = require('../middleware/rateLimit');
 
 const EMR_ROLES = ['admin', 'doctor', 'nurse'];
 const RECORD_STATUSES = ['draft', 'final', 'amended'];
@@ -31,7 +32,7 @@ function canModifyRecord(req, record) {
   return req.user.role === 'admin' || record.doctor_id === req.user.id;
 }
 
-router.get('/patient/:patientId', authenticate, authorize(...EMR_ROLES), asyncHandler(async (req, res) => {
+router.get('/patient/:patientId', authenticate, authorize(...EMR_ROLES), readPatientDataInBulk, asyncHandler(async (req, res) => {
   const patientId = parseInteger(req.params.patientId, 'patientId', { min: 1 });
   const [rows] = await pool.query(
     `SELECT mr.*, u.first_name as doctor_first_name, u.last_name as doctor_last_name, s.name as specialty_name
@@ -47,7 +48,7 @@ router.get('/patient/:patientId', authenticate, authorize(...EMR_ROLES), asyncHa
   res.json(visibleRows);
 }));
 
-router.get('/prescriptions/:medicalRecordId', authenticate, authorize(...EMR_ROLES), asyncHandler(async (req, res) => {
+router.get('/prescriptions/:medicalRecordId', authenticate, authorize(...EMR_ROLES), readPatientData, asyncHandler(async (req, res) => {
   const recordId = parseInteger(req.params.medicalRecordId, 'medicalRecordId', { min: 1 });
   const [recordRows] = await pool.query('SELECT id, doctor_id FROM medical_records WHERE id = ?', [recordId]);
   if (recordRows.length === 0) throw new ApiError(404, 'Medical record not found');
@@ -66,7 +67,7 @@ router.get('/prescriptions/:medicalRecordId', authenticate, authorize(...EMR_ROL
   res.json(rows);
 }));
 
-router.post('/prescriptions', authenticate, authorize('doctor', 'admin'), asyncHandler(async (req, res) => {
+router.post('/prescriptions', authenticate, authorize('doctor', 'admin'), writePatientData, asyncHandler(async (req, res) => {
   const { medical_record_id, patient_id, items, notes, acknowledge_warnings } = req.body;
   const recordId = parseInteger(medical_record_id, 'medical_record_id', { min: 1 });
   const patientId = parseInteger(patient_id, 'patient_id', { min: 1 });
@@ -142,7 +143,7 @@ router.post('/prescriptions', authenticate, authorize('doctor', 'admin'), asyncH
   });
 }));
 
-router.get('/:id', authenticate, authorize(...EMR_ROLES), asyncHandler(async (req, res) => {
+router.get('/:id', authenticate, authorize(...EMR_ROLES), readPatientData, asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const [rows] = await pool.query(
     `SELECT mr.*, u.first_name as doctor_first_name, u.last_name as doctor_last_name,
@@ -244,7 +245,7 @@ router.get('/:id', authenticate, authorize(...EMR_ROLES), asyncHandler(async (re
   res.json({ ...rows[0], prescriptions, lab_orders: labOrders });
 }));
 
-router.post('/', authenticate, authorize('doctor', 'admin'), asyncHandler(async (req, res) => {
+router.post('/', authenticate, authorize('doctor', 'admin'), writePatientData, asyncHandler(async (req, res) => {
   const {
     patient_id, appointment_id, chief_complaint, history_of_present_illness,
     vital_signs, physical_examination, diagnosis, treatment_plan, notes,
@@ -300,7 +301,7 @@ router.post('/', authenticate, authorize('doctor', 'admin'), asyncHandler(async 
   res.status(201).json(record);
 }));
 
-router.put('/:id', authenticate, authorize('doctor', 'admin'), asyncHandler(async (req, res) => {
+router.put('/:id', authenticate, authorize('doctor', 'admin'), writePatientData, asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const [existingRows] = await pool.query('SELECT * FROM medical_records WHERE id = ?', [id]);
   if (existingRows.length === 0) throw new ApiError(404, 'Record not found');

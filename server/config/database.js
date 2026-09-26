@@ -220,10 +220,30 @@ function migrate() {
     severity TEXT NOT NULL CHECK(severity IN ('mild','moderate','severe','contraindicated')),
     description TEXT,
     clinical_management TEXT,
+    source TEXT NOT NULL DEFAULT 'demo',
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (medicine_a_id) REFERENCES medicines(id) ON DELETE CASCADE,
     FOREIGN KEY (medicine_b_id) REFERENCES medicines(id) ON DELETE CASCADE
   )`);
+
+  // Which dataset the safety checks are actually running against. The seeded
+  // interaction list is a handful of well-known pairs, not a clinical reference,
+  // and a check that silently misses an interaction is worse than no check at
+  // all because it is trusted. This table makes the provenance inspectable.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS safety_reference (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    source TEXT NOT NULL,
+    description TEXT,
+    reference_name TEXT,
+    reference_version TEXT,
+    loaded_at TEXT,
+    loaded_by INTEGER,
+    interaction_count INTEGER NOT NULL DEFAULT 0
+  )`);
+
+  if (tableExists('drug_interactions') && !columnExists('drug_interactions', 'source')) {
+    sqlite.exec("ALTER TABLE drug_interactions ADD COLUMN source TEXT NOT NULL DEFAULT 'demo'");
+  }
 
   sqlite.exec(`CREATE TABLE IF NOT EXISTS checkins (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

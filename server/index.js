@@ -21,6 +21,7 @@ const procurementRoutes = require('./routes/procurement');
 const laboratoryRoutes = require('./routes/laboratory');
 const billingRoutes = require('./routes/billing');
 const auditRoutes = require('./routes/audit');
+const { readProvenance, startupWarning } = require('./utils/safetyProvenance');
 const reportRoutes = require('./routes/reports');
 const notificationRoutes = require('./routes/notifications');
 const admissionRoutes = require('./routes/admissions');
@@ -125,6 +126,14 @@ app.use(errorHandler);
 function startServer({ port = process.env.PORT || DEFAULT_PORT } = {}) {
   const server = app.listen(port, () => {
     console.log(`Hospital Management System API running on port ${port}`);
+    // Said out loud on every start, not buried in a settings page. A deployment
+    // running on the demonstration interaction data has to be impossible to miss.
+    readProvenance(pool)
+      .then(startupWarning)
+      .catch(() => {
+        // A failure to read the provenance must not stop the server coming up:
+        // refusing to start would take patient-facing systems offline.
+      });
   });
 
   server.on('error', error => {

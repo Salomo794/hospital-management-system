@@ -5,6 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { ApiError, asyncHandler, getPagination, parseFiniteNumber, parseInteger, withTransaction } = require('../utils/http');
 const { randomUUID, generateRecordNumber } = require('../utils/ids');
 const { recordAudit } = require('../utils/audit');
+const { readPatientData, readPatientDataInBulk, writePatientData } = require('../middleware/rateLimit');
 
 const LAB_ROLES = ['admin', 'doctor', 'nurse', 'lab_technician'];
 const ORDER_STATUSES = ['ordered', 'in_progress', 'completed', 'cancelled'];
@@ -94,7 +95,7 @@ router.post('/tests', authenticate, authorize('admin'), asyncHandler(async (req,
   res.status(201).json(newTest[0]);
 }));
 
-router.get('/orders', authenticate, authorize(...LAB_ROLES), asyncHandler(async (req, res) => {
+router.get('/orders', authenticate, authorize(...LAB_ROLES), readPatientDataInBulk, asyncHandler(async (req, res) => {
   const { page, limit, offset } = getPagination(req.query);
   const { status, patient_id } = req.query;
   if (status && !ORDER_STATUSES.includes(status)) throw new ApiError(400, 'Invalid lab order status');
@@ -131,7 +132,7 @@ router.get('/orders', authenticate, authorize(...LAB_ROLES), asyncHandler(async 
   res.json({ orders: rows, total: countRows[0].total, page, limit });
 }));
 
-router.post('/orders', authenticate, authorize('doctor', 'admin', 'nurse'), asyncHandler(async (req, res) => {
+router.post('/orders', authenticate, authorize('doctor', 'admin', 'nurse'), writePatientData, asyncHandler(async (req, res) => {
   const { patient_id, medical_record_id, test_ids, priority = 'routine', clinical_notes, doctor_id } = req.body;
   const patientId = parseInteger(patient_id, 'patient_id', { min: 1 });
   if (!Array.isArray(test_ids) || test_ids.length === 0) {
@@ -197,7 +198,7 @@ router.post('/orders', authenticate, authorize('doctor', 'admin', 'nurse'), asyn
   res.status(201).json(order);
 }));
 
-router.get('/orders/:id', authenticate, authorize(...LAB_ROLES), asyncHandler(async (req, res) => {
+router.get('/orders/:id', authenticate, authorize(...LAB_ROLES), readPatientData, asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const [order] = await pool.query(
     `SELECT lo.*, p.first_name as patient_first_name, p.last_name as patient_last_name,
@@ -236,7 +237,7 @@ router.get('/orders/:id', authenticate, authorize(...LAB_ROLES), asyncHandler(as
   res.json({ ...order[0], items });
 }));
 
-router.put('/orders/:id/results', authenticate, authorize('lab_technician', 'admin'), asyncHandler(async (req, res) => {
+router.put('/orders/:id/results', authenticate, authorize('lab_technician', 'admin'), writePatientData, asyncHandler(async (req, res) => {
   const orderId = parseInteger(req.params.id, 'id', { min: 1 });
   const { items } = req.body;
   if (!Array.isArray(items) || items.length === 0) throw new ApiError(400, 'At least one lab result is required');

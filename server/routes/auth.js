@@ -284,7 +284,13 @@ router.post('/login', asyncHandler(async (req, res) => {
     // Carried so the middleware can tell a session issued before the current
     // password from one issued after it. `0` for an account that has never
     // changed its password, which is every account predating this field.
-    { id: user.id, role: user.role, pwd: user.password_changed_at || '0' },
+    //
+    // jti is what makes two sign-ins two sessions. Without it every claim here is
+    // derived from the account and the clock, so signing in twice inside the same
+    // second produced byte-identical tokens: the same bearer credential on two
+    // devices, indistinguishable and individually unrevocable. It costs 36
+    // characters and makes a session addressable.
+    { id: user.id, role: user.role, pwd: user.password_changed_at || '0', jti: randomUUID() },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRE || '7d' }
   );

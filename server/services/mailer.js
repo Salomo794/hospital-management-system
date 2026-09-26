@@ -78,6 +78,23 @@ const SUBJECTS = {
   passwordReset: 'Reset your Hospital Management System password',
 };
 
+// Reset links are credentials. Logging one is equivalent to handing the account
+// to whoever can read the log file, and logs get shipped, indexed and kept far
+// longer than a message should live. So the body is only written out when an
+// operator explicitly asks for it, and never in production.
+function tokenLoggingAllowed() {
+  if (isProduction()) return false;
+  return setting('MAIL_LOG_TOKENS') === 'true';
+}
+
+function describeMessage({ to, subject, text }) {
+  const header = `[mail] SMTP is not configured; logging message instead.\n[mail] to: ${to}\n[mail] subject: ${subject}`;
+  if (tokenLoggingAllowed()) return `${header}\n[mail] body:\n${text}`;
+  // Enough to confirm the flow ran and where it was addressed, without leaving
+  // a usable credential in the log.
+  return `${header}\n[mail] body: withheld. Set MAIL_LOG_TOKENS=true to include it, or configure SMTP.`;
+}
+
 /**
  * Sends a message. Returns { delivered: boolean, transport: 'smtp'|'log' }.
  * Throws only when delivery was expected and could not happen.
@@ -92,7 +109,7 @@ async function send({ to, subject, text, html }) {
       throw new Error('Email is not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS and PUBLIC_URL to enable password resets.');
     }
     // Development and test: logged so the flow can be exercised end to end.
-    console.warn(`[mail] SMTP is not configured; logging message instead.\n[mail] to: ${to}\n[mail] subject: ${subject}\n[mail] body:\n${text}`);
+    console.warn(describeMessage({ to, subject, text }));
     return { delivered: false, transport: 'log' };
   }
 

@@ -1,4 +1,5 @@
 const pool = require('../config/database');
+const { readProvenance } = require('./safetyProvenance');
 
 // Allergy strings are free-text, comma/semicolon separated (e.g. "Penicillin, Morphine").
 const IGNORED_ALLERGY_TOKENS = ['none', 'n/a', 'na', 'nil', 'nkda', 'no known allergies', 'no known drug allergies'];
@@ -126,6 +127,11 @@ async function evaluateSafety(patientId, medicineIds, queryExecutor = pool) {
       : null,
     warnings,
     blocking,
+    // Travels with the result so a caller cannot render a clean screen without
+    // also being told what the check was actually run against. Allergy matching
+    // is done against the patient's own record and is always meaningful;
+    // interaction coverage is what the caveat is about.
+    provenance: await readProvenance(queryExecutor),
   };
 }
 

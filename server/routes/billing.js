@@ -28,6 +28,7 @@ const {
 } = require('../services/mobileMoneyPayments');
 const { recordAudit, pick } = require('../utils/audit');
 const { money, recalculateBillPayment } = require('../utils/bills');
+const { readPatientData, readPatientDataInBulk, writePatientData } = require('../middleware/rateLimit');
 const { zonedDate, zonedDayRange } = require('../config/time');
 
 const BILLING_ROLES = ['admin', 'receptionist'];
@@ -42,7 +43,7 @@ function requireMobileMoney() {
   return getMobileMoneyAdapter();
 }
 
-router.get('/', authenticate, authorize(...BILLING_ROLES), asyncHandler(async (req, res) => {
+router.get('/', authenticate, authorize(...BILLING_ROLES), readPatientDataInBulk, asyncHandler(async (req, res) => {
   const { page, limit, offset } = getPagination(req.query);
   const { status, patient_id, from_date, to_date } = req.query;
   if (status && !BILL_STATUSES.includes(status)) throw new ApiError(400, 'Invalid bill status');
@@ -190,7 +191,7 @@ router.post('/mobile-money/payments/:paymentId/cancel', authenticate, authorize(
 // Sends the approval prompt. The amount is always the full outstanding balance
 // and the customer approves it on their own handset, so this returns before the
 // money has moved and leaves a 'pending' row behind for the webhook to settle.
-router.post('/:id/mobile-money', authenticate, authorize(...BILLING_ROLES), asyncHandler(async (req, res) => {
+router.post('/:id/mobile-money', authenticate, authorize(...BILLING_ROLES), writePatientData, asyncHandler(async (req, res) => {
   const adapter = requireMobileMoney();
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const { phone, network, email } = validateMobileMoneyRequest(req.body || {});
@@ -274,7 +275,7 @@ router.post('/:id/mobile-money', authenticate, authorize(...BILLING_ROLES), asyn
   });
 }));
 
-router.get('/:id', authenticate, authorize(...BILLING_ROLES), asyncHandler(async (req, res) => {
+router.get('/:id', authenticate, authorize(...BILLING_ROLES), readPatientData, asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const [bill] = await pool.query(
     `SELECT b.*, p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn,
@@ -301,7 +302,7 @@ router.get('/:id', authenticate, authorize(...BILLING_ROLES), asyncHandler(async
   res.json({ ...bill[0], items, payments, refunds });
 }));
 
-router.post('/', authenticate, authorize(...BILLING_ROLES), asyncHandler(async (req, res) => {
+router.post('/', authenticate, authorize(...BILLING_ROLES), writePatientData, asyncHandler(async (req, res) => {
   const { patient_id, appointment_id, items, discount, tax, payment_method, due_date, notes } = req.body;
   const patientId = parseInteger(patient_id, 'patient_id', { min: 1 });
   if (!Array.isArray(items) || items.length === 0) throw new ApiError(400, 'At least one bill item is required');
@@ -392,7 +393,7 @@ router.post('/', authenticate, authorize(...BILLING_ROLES), asyncHandler(async (
   res.status(201).json(bill);
 }));
 
-router.post('/:id/payments', authenticate, authorize(...BILLING_ROLES), asyncHandler(async (req, res) => {
+router.post('/:id/payments', authenticate, authorize(...BILLING_ROLES), writePatientData, asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const amount = money(parseFiniteNumber(req.body?.amount, 'amount', { min: 0.01 }));
   const paymentMethod = req.body?.payment_method;
@@ -478,7 +479,7 @@ router.post('/:id/payments', authenticate, authorize(...BILLING_ROLES), asyncHan
 // Refunds are recorded as their own append-only rows rather than by deleting
 // or editing the original payment, so the money trail stays intact. The
 // original payment row is never destroyed and a reason is always required.
-router.post('/payments/:paymentId/refund', authenticate, authorize(...BILLING_ROLES), asyncHandler(async (req, res) => {
+router.post('/payments/:paymentId/refund', authenticate, authorize(...BILLING_ROLES), writePatientData, asyncHandler(async (req, res) => {
   const paymentId = parseInteger(req.params.paymentId, 'paymentId', { min: 1 });
   const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
   if (reason.length < 3) throw new ApiError(400, 'A refund reason of at least 3 characters is required');

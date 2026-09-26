@@ -7,6 +7,7 @@ const { validatePatient } = require('../middleware/validation');
 const { ApiError, asyncHandler, getPagination, isDateOnly, parseInteger } = require('../utils/http');
 const { randomUUID, generateMrn, generateAccessCode, generatePortalPin } = require('../utils/ids');
 const { recordAudit, pick } = require('../utils/audit');
+const { readPatientData, readPatientDataInBulk, writePatientData } = require('../middleware/rateLimit');
 
 const CLINICAL_ROLES = ['admin', 'receptionist', 'doctor', 'nurse'];
 const GENDERS = ['male', 'female', 'other'];
@@ -54,7 +55,7 @@ function validatePatientUpdates(body, currentRole) {
   return updates;
 }
 
-router.get('/', authenticate, authorize(...CLINICAL_ROLES), asyncHandler(async (req, res) => {
+router.get('/', authenticate, authorize(...CLINICAL_ROLES), readPatientDataInBulk, asyncHandler(async (req, res) => {
   const { page, limit, offset } = getPagination(req.query);
   const { search, status } = req.query;
   if (status && !PATIENT_STATUSES.includes(status)) throw new ApiError(400, 'Invalid patient status');
@@ -84,7 +85,7 @@ router.get('/', authenticate, authorize(...CLINICAL_ROLES), asyncHandler(async (
   });
 }));
 
-router.get('/lookup/:code', authenticate, authorize(...CLINICAL_ROLES), asyncHandler(async (req, res) => {
+router.get('/lookup/:code', authenticate, authorize(...CLINICAL_ROLES), readPatientDataInBulk, asyncHandler(async (req, res) => {
   const code = String(req.params.code || '').trim().toUpperCase();
   if (!code || code.length > 40) throw new ApiError(400, 'A valid access code is required');
   const [rows] = await pool.query(
@@ -99,7 +100,7 @@ router.get('/lookup/:code', authenticate, authorize(...CLINICAL_ROLES), asyncHan
   res.json({ patient: withoutPortalPin(rows[0]) });
 }));
 
-router.get('/:id', authenticate, authorize(...CLINICAL_ROLES), asyncHandler(async (req, res) => {
+router.get('/:id', authenticate, authorize(...CLINICAL_ROLES), readPatientData, asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const [rows] = await pool.query('SELECT * FROM patients WHERE id = ?', [id]);
   if (rows.length === 0) throw new ApiError(404, 'Patient not found');
@@ -117,7 +118,7 @@ router.get('/:id', authenticate, authorize(...CLINICAL_ROLES), asyncHandler(asyn
   res.json(withoutPortalPin(rows[0]));
 }));
 
-router.post('/', authenticate, authorize(...CLINICAL_ROLES), validatePatient, asyncHandler(async (req, res) => {
+router.post('/', authenticate, authorize(...CLINICAL_ROLES), writePatientData, validatePatient, asyncHandler(async (req, res) => {
   const {
     first_name, last_name, date_of_birth, gender, blood_type, phone, email, address,
     emergency_contact_name, emergency_contact_phone, insurance_provider, insurance_number,
@@ -154,7 +155,7 @@ router.post('/', authenticate, authorize(...CLINICAL_ROLES), validatePatient, as
   res.status(201).json({ patient: withoutPortalPin(newPatient[0]), plain_pin: plainPin });
 }));
 
-router.post('/:id/portal-pin', authenticate, authorize('admin', 'receptionist'), asyncHandler(async (req, res) => {
+router.post('/:id/portal-pin', authenticate, authorize('admin', 'receptionist'), writePatientData, asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const [patient] = await pool.query('SELECT id FROM patients WHERE id = ? AND status = ?', [id, 'active']);
   if (patient.length === 0) throw new ApiError(404, 'Active patient not found');
@@ -178,7 +179,7 @@ router.post('/:id/portal-pin', authenticate, authorize('admin', 'receptionist'),
   res.json({ message: 'Portal PIN reset successfully', plain_pin: plainPin });
 }));
 
-router.put('/:id', authenticate, authorize(...CLINICAL_ROLES), asyncHandler(async (req, res) => {
+router.put('/:id', authenticate, authorize(...CLINICAL_ROLES), writePatientData, asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const [existing] = await pool.query('SELECT id FROM patients WHERE id = ?', [id]);
   if (existing.length === 0) throw new ApiError(404, 'Patient not found');
@@ -200,7 +201,7 @@ router.put('/:id', authenticate, authorize(...CLINICAL_ROLES), asyncHandler(asyn
   res.json(withoutPortalPin(updated[0]));
 }));
 
-router.delete('/:id', authenticate, authorize('admin', 'receptionist'), asyncHandler(async (req, res) => {
+router.delete('/:id', authenticate, authorize('admin', 'receptionist'), writePatientData, asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const [existing] = await pool.query('SELECT id, status FROM patients WHERE id = ?', [id]);
   if (existing.length === 0) throw new ApiError(404, 'Patient not found');
@@ -218,7 +219,7 @@ router.delete('/:id', authenticate, authorize('admin', 'receptionist'), asyncHan
   res.json({ message: 'Patient deactivated' });
 }));
 
-router.get('/:id/history', authenticate, authorize(...CLINICAL_ROLES), asyncHandler(async (req, res) => {
+router.get('/:id/history', authenticate, authorize(...CLINICAL_ROLES), readPatientDataInBulk, asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const [patient] = await pool.query('SELECT id FROM patients WHERE id = ?', [id]);
   if (patient.length === 0) throw new ApiError(404, 'Patient not found');

@@ -6,6 +6,7 @@ const { evaluateSafety } = require('../utils/safety');
 const { ApiError, asyncHandler, getPagination, isDateOnly, parseFiniteNumber, parseInteger, withTransaction } = require('../utils/http');
 const { getRequestId } = require('../utils/requestId');
 const { recordAudit } = require('../utils/audit');
+const { readProvenance } = require('../utils/safetyProvenance');
 
 const PHARMACY_ROLES = ['admin', 'pharmacist'];
 const PHARMACY_READ_ROLES = ['admin', 'pharmacist', 'doctor', 'nurse'];
@@ -61,14 +62,47 @@ router.post('/interactions/check', authenticate, authorize(...PHARMACY_READ_ROLE
         OR (di.medicine_b_id IN (${placeholders}) AND di.medicine_a_id IN (${placeholders}))`,
     [...uniqueIds, ...uniqueIds, ...uniqueIds, ...uniqueIds]
   );
-  res.json({ interactions: rows, checkedIds: uniqueIds });
+  // The provenance travels with the answer. A caller that renders "no
+  // interactions found" without also being told what was checked against is
+  // exactly the case this system has to make impossible.
+  res.json({
+    interactions: rows,
+    checkedIds: uniqueIds,
+    provenance: await readProvenance(pool)
+  });
+}));
+
+// What is the interaction check actually running against? A deployment that has
+// not loaded a clinical reference needs to be able to find that out, and the
+// client uses it to decide whether to show a standing caveat.
+router.get('/interactions/provenance', authenticate, authorize(...PHARMACY_READ_ROLES), asyncHandler(async (req, res) => {
+  const [counts] = await pool.query(
+    `SELECT COUNT(*) AS interactions,
+            COUNT(DISTINCT medicine_a_id) AS medicines_with_data
+     FROM drug_interactions`
+  );
+  const [medicines] = await pool.query('SELECT COUNT(*) AS total FROM medicines WHERE is_active = 1');
+  const provenance = await readProvenance(pool);
+  const total = medicines[0].total || 0;
+  res.json({
+    ...provenance,
+    interaction_count: counts[0].interactions,
+    medicines_in_catalogue: total,
+    // Coverage as a fraction of the catalogue that has any data at all. A real
+    // reference covers nearly all of it; a demo set covers a handful.
+    catalogue_coverage: total === 0 ? 0 : Number((counts[0].medicines_with_data / total).toFixed(3))
+  });
 }));
 
 router.get('/interactions/summary', authenticate, authorize(...PHARMACY_READ_ROLES), asyncHandler(async (req, res) => {
   const [rows] = await pool.query('SELECT severity, COUNT(*) as count FROM drug_interactions GROUP BY severity');
   const summary = { mild: 0, moderate: 0, severe: 0, contraindicated: 0 };
   rows.forEach(row => { summary[row.severity] = row.count; });
-  res.json({ summary, total: rows.reduce((sum, row) => sum + row.count, 0) });
+  res.json({
+    summary,
+    total: rows.reduce((sum, row) => sum + row.count, 0),
+    provenance: await readProvenance(pool)
+  });
 }));
 
 router.get('/interactions/:medicineId', authenticate, authorize(...PHARMACY_READ_ROLES), asyncHandler(async (req, res) => {

@@ -2,6 +2,9 @@
 const fs = require('fs');
 const path = require('path');
 const { loadEnvironment, serverDirectory } = require('./environment');
+const crypto = require('crypto');
+const os = require('os');
+const backupCrypto = require('../utils/backupCrypto');
 
 // A hospital database is the only copy of every patient record, so a backup
 // that has never been restored is not a backup. This script makes a consistent
@@ -128,18 +131,56 @@ function listBackups(options) {
   return files.map(name => path.join(directory, name));
 }
 
+// An encrypted backup cannot be opened as a database, so it is decrypted to a
+// scratch file first and that is what gets checked. The decrypted copy is removed
+// whatever happens: a temporary plaintext database of patient records is exactly
+// the thing this feature exists to avoid leaving behind.
+function withDecryptedCopy(file, action) {
+  if (!backupCrypto.looksEncrypted(file)) return action(file);
+
+  const scratch = path.join(
+    os.tmpdir(),
+    `hms-verify-${process.pid}-${crypto.randomBytes(6).toString('hex')}.db`
+  );
+  try {
+    try {
+      backupCrypto.decryptFile(file, scratch);
+    } catch (error) {
+      // A wrong key is an operator mistake, not a crash. Report it as one
+      // instead of letting a stack trace be the user interface.
+      console.error(`Could not open ${file}: ${error.message}`);
+      process.exit(1);
+    }
+    return action(scratch);
+  } finally {
+    // A temporary plaintext copy of every patient record is exactly the thing
+    // this feature exists to avoid leaving behind, so it goes either way.
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { fs.rmSync(`${scratch}${suffix}`, { force: true }); } catch { /* best effort */ }
+    }
+  }
+}
+
 function verify(file) {
   if (!fs.existsSync(file)) {
     console.error(`Backup not found: ${file}`);
     process.exit(1);
   }
+  if (backupCrypto.looksEncrypted(file) && !backupCrypto.isEnabled()) {
+    console.error(`${file} is encrypted, but BACKUP_ENCRYPTION_KEY is not set, so it cannot be checked.`);
+    process.exit(1);
+  }
+  withDecryptedCopy(file, decrypted => verifyDatabase(decrypted, file));
+}
+
+function verifyDatabase(target, original) {
   const Database = require('better-sqlite3');
-  const db = new Database(file, { readonly: true, fileMustExist: true });
+  const db = new Database(target, { readonly: true, fileMustExist: true });
   try {
     // integrity_check is the only way to know a copy is actually usable.
     const [result] = db.pragma('integrity_check');
     if (result.integrity_check !== 'ok') {
-      console.error(`Integrity check failed for ${file}: ${JSON.stringify(result)}`);
+      console.error(`Integrity check failed for ${original}: ${JSON.stringify(result)}`);
       process.exit(1);
     }
     const tableCount = db
@@ -154,8 +195,8 @@ function verify(file) {
       const { c } = db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get();
       rowCounts += `\n    ${table.padEnd(18)} ${c} rows`;
     }
-    console.log(`Backup is valid: ${file}`);
-    console.log(`  integrity_check  ok`);
+    console.log(`Backup is valid: ${original}`);
+    console.log('  integrity_check  ok');
     console.log(`  tables           ${tableCount}`);
     console.log(`  row counts:${rowCounts}`);
     return true;
@@ -225,11 +266,37 @@ function create(options) {
     size_bytes: fs.statSync(target).size,
     label: options.label || null,
     app_timezone: process.env.APP_TIMEZONE || 'Africa/Kigali',
+    // Recorded so an operator can tell at a glance whether a given archive was
+    // written with encryption, without having to open it.
+    encrypted: false,
   };
+
+  // Encrypt in place, then drop the plaintext copy immediately. If encryption
+  // fails the plaintext is removed rather than left behind, because leaving an
+  // unencrypted patient archive next to a failed attempt is the worst outcome.
+  if (backupCrypto.isEnabled()) {
+    try {
+      backupCrypto.encryptFile(target, `${target}.tmp`);
+      fs.rmSync(target, { force: true });
+      fs.renameSync(`${target}.tmp`, target);
+      manifest.encrypted = true;
+      manifest.size_bytes = fs.statSync(target).size;
+    } catch (error) {
+      fs.rmSync(`${target}.tmp`, { force: true });
+      fs.rmSync(target, { force: true });
+      console.error(`Backup failed during encryption, and the plaintext copy has been removed: ${error.message}`);
+      process.exit(1);
+    }
+  }
+
   fs.writeFileSync(`${target}.json`, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 
-  console.log(`Backup written: ${target}  (${sizeMb} MB)`);
+  const finalMb = (fs.statSync(target).size / (1024 * 1024)).toFixed(2);
+  console.log(`Backup written: ${target}  (${finalMb} MB${manifest.encrypted ? ', encrypted' : ''})`);
   if (options.label) console.log(`  label: ${options.label}`);
+  if (!manifest.encrypted) {
+    console.log('  note: BACKUP_ENCRYPTION_KEY is not set, so this archive is in plaintext.');
+  }
 
   // Never report success on a copy that cannot be read back.
   verify(target);
@@ -256,8 +323,21 @@ function restore(file) {
   for (const suffix of ['-wal', '-shm']) {
     fs.rmSync(`${databasePath}${suffix}`, { force: true });
   }
-  fs.copyFileSync(file, databasePath);
-  console.log(`Restored. Restart the API to pick up the restored data.`);
+
+  if (backupCrypto.looksEncrypted(file)) {
+    // Decrypt straight onto the database path: the plaintext never exists as a
+    // separate file that could be left behind by a failure partway through.
+    try {
+      backupCrypto.decryptFile(file, databasePath);
+    } catch (error) {
+      console.error(`Restore failed: ${error.message}`);
+      console.error(`The previous database is preserved at ${path.join(directory, 'pre-restore-' + timestamp() + '.db')}`);
+      process.exit(1);
+    }
+  } else {
+    fs.copyFileSync(file, databasePath);
+  }
+  console.log('Restored. Restart the API to pick up the restored data.');
 }
 
 function main() {

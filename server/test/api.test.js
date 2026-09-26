@@ -808,6 +808,59 @@ test('only networks the configured market can actually charge are offered', asyn
   }
 });
 
+test('Rwandan networks can be exercised locally, and the override cannot ship', async () => {
+  const token = await login();
+  const currency = process.env.PAYSTACK_CURRENCY;
+  const key = process.env.PAYSTACK_SECRET_KEY;
+  const enabled = process.env.MOBILE_MONEY_ENABLED;
+  const mock = process.env.MOBILE_MONEY_MOCK;
+  const nodeEnv = process.env.NODE_ENV;
+  const config = () => request(app)
+    .get('/api/billing/mobile-money/config')
+    .set('Authorization', `Bearer ${token}`)
+    .expect(200);
+  try {
+    process.env.MOBILE_MONEY_ENABLED = 'true';
+    process.env.MOBILE_MONEY_MOCK = 'false';
+    process.env.PAYSTACK_SECRET_KEY = 'sk_test_fake_key_for_coverage_checks';
+    process.env.PAYSTACK_CURRENCY = 'RWF';
+
+    // Outside production the operator can opt in, and MTN MoMo and Airtel Money
+    // are the networks a Rwandan build needs to see.
+    process.env.NODE_ENV = 'development';
+    process.env.PAYSTACK_ALLOW_UNSUPPORTED_MARKET = 'true';
+    const local = await config();
+    assert.equal(local.body.enabled, true);
+    assert.equal(local.body.market, 'rwanda');
+    assert.equal(local.body.currency, 'RWF');
+    assert.deepEqual(local.body.networks.map(n => n.value), ['mtn', 'atl']);
+    assert.match(local.body.networks[0].label, /MTN MoMo/);
+    assert.match(local.body.networks[1].label, /Airtel Money/);
+
+    // The same flag in production is refused, exactly like the mock. This is the
+    // whole point: a Rwandan build must not be able to advertise a channel that
+    // cannot take the money.
+    process.env.NODE_ENV = 'production';
+    const production = await config();
+    assert.equal(production.body.enabled, false);
+    assert.deepEqual(production.body.networks, []);
+    assert.match(production.body.reason, /does not offer the mobile money channel in rwanda/i);
+
+    // And with the flag off entirely, the default is still off.
+    delete process.env.PAYSTACK_ALLOW_UNSUPPORTED_MARKET;
+    const off = await config();
+    assert.equal(off.body.enabled, false);
+    assert.deepEqual(off.body.networks, []);
+  } finally {
+    process.env.NODE_ENV = nodeEnv;
+    delete process.env.PAYSTACK_ALLOW_UNSUPPORTED_MARKET;
+    if (key === undefined) delete process.env.PAYSTACK_SECRET_KEY; else process.env.PAYSTACK_SECRET_KEY = key;
+    if (currency === undefined) delete process.env.PAYSTACK_CURRENCY; else process.env.PAYSTACK_CURRENCY = currency;
+    if (enabled === undefined) delete process.env.MOBILE_MONEY_ENABLED; else process.env.MOBILE_MONEY_ENABLED = enabled;
+    if (mock === undefined) delete process.env.MOBILE_MONEY_MOCK; else process.env.MOBILE_MONEY_MOCK = mock;
+  }
+});
+
 test('selecting a provider this build has no adapter for is reported, not silently ignored', async () => {
   const token = await login();
   const provider = process.env.MOBILE_MONEY_PROVIDER;

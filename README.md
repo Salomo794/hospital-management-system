@@ -140,12 +140,37 @@ Refusing in production is the point. Silently not sending would leave a user wai
 | `npm run db:setup` | Create/apply database schema and indexes |
 | `npm run db:seed` | Load demo fixtures |
 | `npm run db:backup` | Take a verified backup of the database |
+| `npm run db:interactions` | Load a real drug-interaction dataset |
 | `npm run build` | Build the production client |
 | `npm run lint` | Lint the client |
 | `npm test` | Run API integration tests on an isolated database |
 | `npm run test:client` | Run client unit tests |
 | `npm run test:all` | Run both suites |
 | `npm run check` | Lint, build the client, and run both test suites |
+
+## Before this handles real patient data
+
+The application is in good shape. The deployment is not, and that difference matters more than any feature still missing. These are the outstanding items, in the order they should be dealt with.
+
+**1. Terminate TLS in front of the application.** There is no HTTPS anywhere in the server; the only `https` in the codebase is the Paystack API URL. Every record, login and session token currently crosses the network in clear text. Put a reverse proxy in front — Caddy is the shortest path, since it obtains and renews certificates itself — and set `PUBLIC_URL` to the `https://` origin so reset links point at it.
+
+**2. Load a real drug-interaction dataset.** This is the one item that can physically hurt someone rather than merely expose data. The bundled list is 16 well-known pairs across 20 demo medicines; a maintained reference covers thousands of medicines and tens of thousands of pairs. Until one is loaded the screening check will report most real interactions as absent, and silence from a check is read as safety.
+
+Because that failure is quiet, it is made loud in three places: the server prints a `DRUG-INTERACTION DATA IS NOT CLINICAL` block on every start, every safety evaluation carries `provenance` in its response, and `GET /api/pharmacy/interactions/provenance` reports the source, version and catalogue coverage. Load a dataset with:
+
+```bash
+npm run db:interactions -- --file data/interactions.csv --name "BNF Interaction Data" --version 2026.03
+```
+
+The CSV needs `medicine_a,medicine_b,severity,description,clinical_management`. Rows naming a medicine that is not in the catalogue are reported rather than dropped, because a dataset that silently matched nothing would look loaded without being so. The import is transactional and marks the reference authoritative only once it completes.
+
+**3. Configure SMTP.** Without it, password resets are refused in production — the right behaviour, but it does mean the feature is unavailable. The message body carries a single-use reset link, so it is withheld from the logs unless `MAIL_LOG_TOKENS=true`, and never in production.
+
+**4. Enable backup encryption and move one copy offsite.** `BACKUP_ENCRYPTION_KEY` encrypts every backup with AES-256-GCM, which is what makes a copy safe to move to a share or an object store. `server/backups` sits beside the database, so a disk failure currently takes both. Point `--dir` at a network location, or copy from there. Store the key away from the repository: a backup that cannot be opened is not a backup.
+
+**5. Enable multi-factor authentication.** Not implemented. Every role, including administrator, sits behind a password alone.
+
+**6. Decide on database encryption at rest.** Backups are encrypted; the live database is not. That needs SQLCipher and a native rebuild, which is a deliberate deployment decision rather than something to slip in silently.
 
 ## Tests
 
@@ -159,6 +184,9 @@ The API integration tests run against a throwaway SQLite database, so they never
 | `server/test/migrations.test.js` | Schema invariants and legacy-data migrations |
 | `server/test/time.test.js` | Hospital-timezone and daylight-saving handling |
 | `server/test/backup.test.js` | Backup contents, verification, rotation, collision, and a restore round trip |
+| `server/test/backup-crypto.test.js` | Backup encryption, wrong-key rejection, tamper and truncation detection |
+| `server/test/rate-limit.test.js` | Patient-data throttling, per-person budgets, and that clinical work stays under them |
+| `server/test/safety-provenance.test.js` | Interaction-data provenance, CSV import, and refusal of a bad dataset |
 | `server/test/password-reset.test.js` | Reset requests, enumeration resistance, token lifetime, session revocation, mail failure |
 | `server/test/password-policy.test.js` | Shared password rules and client/server policy parity |
 
@@ -223,6 +251,20 @@ Redelivered webhooks are harmless: a charge that has already reached a terminal 
 Configuration lives in `server/config/mobileMoney.js` and is documented in `server/.env.example`. The rail stays off until `MOBILE_MONEY_ENABLED=true` and a provider secret is present, and it is advertised to the client through `GET /api/billing/mobile-money/config` so the UI only offers a method that actually works. The `mock` provider exercises the full lifecycle without an account and is **refused when `NODE_ENV=production`** — a simulated charge that marks a real bill paid is a revenue hole.
 
 **Provider and market coverage matter.** Paystack sells the mobile money channel only in **Ghana, Kenya and Côte d'Ivoire**. It is licensed in Rwanda and settles in RWF, but does not offer mobile money there, so MTN MoMo and Airtel Money cannot be charged through it. The networks offered are therefore resolved from the market — inferred from `PAYSTACK_CURRENCY`, or set explicitly with `PAYSTACK_MARKET` — rather than hardcoded, and a market with no mobile money coverage leaves the rail switched off with a reason the operator can read instead of failing on the first real charge. A Rwandan deployment that wants automated collection needs a provider that supports MTN Rwanda and Airtel Rwanda; **Flutterwave** does, with published API documentation, a sandbox that auto-approves test charges, and pricing of 3.5% per mobile money transaction. Assisted collection needs none of this.
+
+**Rwandan networks are known, and separable from what Paystack can charge.** `PAYSTACK_MARKET_NETWORKS.rwanda` carries the real Rwandan networks — MTN MoMo and Airtel Money — while `PAYSTACK_CHARGEABLE_MARKETS` lists the markets this provider actually takes. Keeping those two lists apart is what stops a Rwandan build from showing a patient a mobile money button that would fail at the point of payment.
+
+So a Rwandan market is **off by default**, with a reason that names the country, the networks, and the way out. To exercise MTN MoMo and Airtel Money locally without a Rwandan provider account, set `PAYSTACK_ALLOW_UNSUPPORTED_MARKET=true`: outside production it offers that market's networks, and in production it is refused, the same guard the mock provider uses. It changes what is *offered*, not what Paystack *accepts* — a real charge in an unsupported market still fails, which is exactly why the override cannot ship.
+
+**Adding a provider for Rwanda: Mukuru.** Mukuru publishes no public developer API, OpenAPI specification or SDK — the documentation and sandbox access are supplied to a customer by their account manager during onboarding. No adapter is built for it, and `MOBILE_MONEY_PROVIDER=mukuru` is reported as unsupported rather than silently ignored. Writing one against a guessed endpoint contract would produce an integration that compiles, passes every check, and cannot take a patient's money, so the contract is required first. The pieces a provider adapter needs, matching the three operations every adapter implements here, are:
+
+| Operation | What to ask Mukuru for |
+| --- | --- |
+| `initializeCharge(details)` | The collections endpoint that raises a prompt on a handset, its auth header, and the request and response field names |
+| `verifyCharge(reference)` | The status endpoint, and which statuses mean collected, pending, and failed |
+| `verifyWebhook(raw, signature)` | The callback payload, the signing algorithm, and the header or field the signature arrives in |
+
+Also required: the sandbox base URL, the credential pair (plus an app id if one is issued), the country code, and the network codes for Rwanda — which are `mtn` and `atl` in this codebase, matching the two Rwandan networks already defined. Credentials belong in `server/.env`, which is gitignored; `server/.env.example` reserves the variable names.
 
 Provider access is behind a small adapter in `server/services/mobileMoney.js` (`initializeCharge`, `verifyCharge`, `verifyWebhook`), so adding another aggregator is a new adapter rather than a change to the billing routes.
 
