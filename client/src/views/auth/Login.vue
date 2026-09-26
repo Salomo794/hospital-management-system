@@ -59,6 +59,10 @@
             {{ loading ? 'Signing in...' : 'Sign In' }}
           </button>
 
+          <div class="form-links">
+            <router-link to="/forgot-password">Forgot password?</router-link>
+          </div>
+
           <div class="demo-accounts">
             <p>Demo Accounts:</p>
             <div class="demo-list">
@@ -285,6 +289,19 @@ export default {
 }
 .has-error input { border-color: #ef4444; }
 .field-error { font-size: 12px; color: #ef4444; margin-top: 4px; display: block; }
+.form-links {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  font-size: 13px;
+}
+.form-links a {
+  color: #0d9488;
+  text-decoration: none;
+  font-weight: 500;
+}
+.form-links a:hover { text-decoration: underline; }
+.form-links a:focus-visible { outline: 2px solid #0d9488; outline-offset: 2px; border-radius: 4px; }
 .demo-accounts { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
 .demo-accounts p { font-size: 12px; color: #64748b; margin-bottom: 8px; }
 .demo-list { display: flex; flex-wrap: wrap; gap: 6px; }

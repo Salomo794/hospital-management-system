@@ -22,11 +22,24 @@ const authenticate = async (req, res, next) => {
 
   try {
     const [rows] = await pool.query(
-      'SELECT id, uuid, email, role, first_name, last_name, is_active FROM users WHERE id = ?',
+      'SELECT id, uuid, email, role, first_name, last_name, is_active, password_changed_at FROM users WHERE id = ?',
       [decoded.id]
     );
     if (rows.length === 0 || !rows[0].is_active) {
       return res.status(401).json({ message: 'Invalid token or user deactivated.' });
+    }
+    // A token issued before the current password is no longer valid. This is
+    // what makes a password reset mean anything: without it, whoever prompted
+    // the reset keeps their session and never has to sign in again.
+    //
+    // Tokens minted before this claim existed carry no `pwd`, so they are
+    // accepted only while the account has still never changed its password.
+    const currentStamp = rows[0].password_changed_at || '0';
+    const tokenStamp = decoded.pwd || '0';
+    if (tokenStamp !== currentStamp) {
+      return res.status(401).json({
+        message: 'Your session has ended because your password changed. Please sign in again.',
+      });
     }
     req.user = rows[0];
     return next();

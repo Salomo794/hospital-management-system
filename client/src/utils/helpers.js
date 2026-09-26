@@ -2,6 +2,8 @@
 // UTC and sends them without a marker, so they have to be read as UTC and shown
 // in the hospital's timezone; doing that inline in every view is how the offset
 // bug spread in the first place.
+import { formatClockTime } from './datetime'
+
 export {
   formatDate,
   formatDateTime,

@@ -431,6 +431,29 @@ function migrate() {
     createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id)');
     createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action)');
   }
+  if (tableExists('users')) {
+    // Added with the forgot-password flow. A database predating it has no way
+    // to tell a session issued before a password change from one issued after,
+    // so existing accounts start with null and keep their current sessions.
+    if (!columnExists('users', 'password_changed_at')) {
+      sqlite.exec('ALTER TABLE users ADD COLUMN password_changed_at TEXT');
+    }
+  }
+  if (tableExists('users')) {
+    sqlite.exec(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uuid TEXT UNIQUE NOT NULL,
+      user_id INTEGER NOT NULL,
+      token_hash TEXT UNIQUE NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      ip_address TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`);
+    createIndexIfPossible('CREATE UNIQUE INDEX IF NOT EXISTS idx_password_reset_hash ON password_reset_tokens(token_hash)');
+    createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id, created_at)');
+  }
 
   // Created here as well as in setup.js so an existing deployment keeps working
   // across a restart before anyone reruns `npm run db:setup`.

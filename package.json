@@ -15,8 +15,12 @@
     "db:seed": "node server/config/seed.js",
     "db:backup": "node server/config/backup.js",
     "build": "npm run build --prefix client",
+    "lint": "npm run lint --prefix client",
+    "lint:fix": "npm run lint:fix --prefix client",
     "test": "npm test --prefix server",
-    "check": "npm run build && npm test",
+    "test:client": "npm test --prefix client",
+    "test:all": "npm test && npm run test:client",
+    "check": "npm run lint && npm run build && npm run test:all",
     "audit": "npm audit --omit=dev && npm audit --omit=dev --prefix server && npm audit --omit=dev --prefix client"
   },
   "dependencies": {

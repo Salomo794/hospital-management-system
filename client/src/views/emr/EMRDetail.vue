@@ -742,7 +742,7 @@ export default {
     }
 
     // Close dropdowns on outside click
-    function handleOutsideClick(e) {
+    function handleOutsideClick() {
       prescriptionForm.items.forEach(item => {
         if (item.showDropdown) {
           item.showDropdown = false

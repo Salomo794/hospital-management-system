@@ -241,7 +241,8 @@ test('the audit log records financial and security events and stays admin-only',
     .set('Authorization', `Bearer ${adminToken}`)
     .send({
       email: `audited-${Date.now()}@hospital.com`,
-      password: 'password123',
+      // Compliant with the password policy; 'password123' is now refused.
+      password: 'Thornbury!Ward2026',
       first_name: 'Audited',
       last_name: 'Staff',
       role: 'nurse',

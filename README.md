@@ -5,6 +5,7 @@ A full-stack Hospital Management System with a Vue 3 client and a Node.js/Expres
 ## Features
 
 - JWT authentication and role-based access for administrators, doctors, nurses, receptionists, pharmacists, and lab technicians
+- Self-service password reset by emailed single-use link, with session revocation on every password change
 - Patient registration, access cards, portal PIN provisioning, demographics, and medical history
 - Doctor profiles, weekly schedules, appointment availability, and booking
 - Electronic medical records, prescriptions, medication safety checks, and lab orders/results
@@ -56,6 +57,12 @@ Important optional settings:
 | `DB_PATH` | `server/hospital.db` | SQLite database path; relative paths resolve from `server/` |
 | `APP_TIMEZONE` | `Africa/Kigali` | IANA zone the hospital operates in; see [Timezones](#timezones) |
 | `ALLOW_SIMULATED_PAYMENTS` | `false` | Enables demo portal payments only when `NODE_ENV` is `development` or `test` |
+| `PUBLIC_URL` | `http://localhost:3000` | Public client address used to build password reset links |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | none / `587` / `false` | Outbound mail server; `SMTP_USER` and `SMTP_PASS` are also required |
+| `SMTP_FROM` | derived from `SMTP_HOST` | Optional `From` address for reset email |
+| `PASSWORD_RESET_MINUTES` | `30` | Lifetime of a reset link |
+| `PASSWORD_RESET_MAX_PER_EMAIL` | `3` | Reset requests per address per 15 minutes |
+| `PASSWORD_RESET_MAX_PER_IP` | `60` | Reset requests per IP per hour |
 
 To use a non-default API port during client development, create `client/.env.local`:
 
@@ -97,6 +104,31 @@ All generated demo staff accounts use password `password123`:
 
 Never run demo seeding against a real patient database.
 
+## Password reset
+
+Staff can recover a forgotten password from the `Forgot password?` link on the sign-in screen, and signed-in staff can change their password from the account menu.
+
+The flow is deliberately quiet about who exists:
+
+1. `POST /api/auth/forgot-password` always returns the same message, whether the address is unknown, inactive, or genuinely reset.
+2. A live account gets a link containing 32 random bytes. Only the SHA-256 of that token is stored, so a leaked backup yields nothing usable.
+3. The link is single-use and expires after `PASSWORD_RESET_MINUTES`. Requesting a new one retires any outstanding link for the account.
+4. `POST /api/auth/reset-password` applies the shared password policy, stamps `password_changed_at`, and retires every other link.
+
+Resetting a password ends all of that account's existing sessions, including the attacker's, because tokens carry the password stamp and `authenticate` rejects any token with an older one.
+
+Rate limits protect the endpoint from mail bombing and from address enumeration: `PASSWORD_RESET_MAX_PER_EMAIL` is the tight limit that matters, while the per-IP limit is looser on purpose because a hospital's staff share one egress address.
+
+Email delivery has three states rather than one:
+
+| State | Behaviour |
+| --- | --- |
+| `SMTP_HOST` and `SMTP_USER` set | The message is delivered |
+| No SMTP, outside production | The message is written to the server console, so the flow can be exercised locally |
+| No SMTP, in production | `POST /api/auth/forgot-password` returns HTTP 503 |
+
+Refusing in production is the point. Silently not sending would leave a user waiting for an email that was never going to arrive.
+
 ## Commands
 
 | Command | Description |
@@ -109,8 +141,11 @@ Never run demo seeding against a real patient database.
 | `npm run db:seed` | Load demo fixtures |
 | `npm run db:backup` | Take a verified backup of the database |
 | `npm run build` | Build the production client |
+| `npm run lint` | Lint the client |
 | `npm test` | Run API integration tests on an isolated database |
-| `npm run check` | Build the client and run API tests |
+| `npm run test:client` | Run client unit tests |
+| `npm run test:all` | Run both suites |
+| `npm run check` | Lint, build the client, and run both test suites |
 
 ## Tests
 
@@ -123,6 +158,19 @@ The API integration tests run against a throwaway SQLite database, so they never
 | `server/test/procurement.test.js` | Purchase-order workflow, separation of duties, partial receipts, stock-ledger consistency |
 | `server/test/migrations.test.js` | Schema invariants and legacy-data migrations |
 | `server/test/time.test.js` | Hospital-timezone and daylight-saving handling |
+| `server/test/password-reset.test.js` | Reset requests, enumeration resistance, token lifetime, session revocation, mail failure |
+| `server/test/password-policy.test.js` | Shared password rules and client/server policy parity |
+
+The client suite runs under Vitest in jsdom. It concentrates on the pure logic that a broken component would hide rather than on snapshot-heavy rendering:
+
+| File | Focus |
+| --- | --- |
+| `client/tests/datetime.spec.js` | UTC instants rendered in the hospital timezone; calendar dates never shifted; daylight saving |
+| `client/tests/password-policy.spec.js` | Live password feedback, the strength meter, and the rules the form applies |
+| `client/tests/helpers.spec.js` | The shared formatting helpers, including the wall-clock formatting used for appointment slots |
+
+| Command | Description |
+| --- | --- |
 | `npm run audit` | Audit production dependencies in all packages |
 
 ## API groups
@@ -176,6 +224,21 @@ Configuration lives in `server/config/mobileMoney.js` and is documented in `serv
 **Provider and market coverage matter.** Paystack sells the mobile money channel only in **Ghana, Kenya and Côte d'Ivoire**. It is licensed in Rwanda and settles in RWF, but does not offer mobile money there, so MTN MoMo and Airtel Money cannot be charged through it. The networks offered are therefore resolved from the market — inferred from `PAYSTACK_CURRENCY`, or set explicitly with `PAYSTACK_MARKET` — rather than hardcoded, and a market with no mobile money coverage leaves the rail switched off with a reason the operator can read instead of failing on the first real charge. A Rwandan deployment that wants automated collection needs a provider that supports MTN Rwanda and Airtel Rwanda; **Flutterwave** does, with published API documentation, a sandbox that auto-approves test charges, and pricing of 3.5% per mobile money transaction. Assisted collection needs none of this.
 
 Provider access is behind a small adapter in `server/services/mobileMoney.js` (`initializeCharge`, `verifyCharge`, `verifyWebhook`), so adding another aggregator is a new adapter rather than a change to the billing routes.
+
+### Passwords
+
+Staff accounts sit in front of protected health information, so a weak password is the cheapest way in. `server/utils/passwordPolicy.js` is the single source of truth and is applied when a password is *set* — registration and the change-password endpoint — never on sign-in, so tightening it cannot lock out an account that already exists.
+
+The rules are built around length and blocking the passwords that actually get guessed, rather than symbol counts that only push people towards `Password1!`:
+
+- At least 12 characters, and at most 200. bcrypt silently ignores anything past 72 bytes, so without an upper bound two different passwords could open the same account.
+- Known-leaked passwords are refused as substrings, so `password123`, `password1234` and `password123!` are all caught rather than only the exact string.
+- Length alone is not enough: repeated characters and ascending or descending runs are refused, so `aaaaaaaaaaaa` and `123456789012` do not pass.
+- The password may not contain the person's own name or email, nor words tied to this system.
+
+The create-user form and the change-password dialog in the header menu both apply `client/src/utils/passwordPolicy.js` so a problem is explained while it is being typed. That module mirrors the server rules, and a parity test runs a corpus through both implementations and requires identical answers, so the two cannot drift apart silently.
+
+Demo seeding still writes `password123` for the fixture accounts, because those are development credentials and the README says as much. The policy would refuse that password for a real account.
 
 ### Timezones
 

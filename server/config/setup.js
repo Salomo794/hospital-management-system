@@ -21,8 +21,27 @@ async function setup() {
       avatar TEXT,
       is_active INTEGER DEFAULT 1,
       last_login TEXT,
+      -- Stamped whenever the password changes. Session tokens carry the value
+      -- they were issued against, so a reset or a forced change can end every
+      -- session that predates it - including one held by whoever prompted the
+      -- reset. Without this a password reset would not actually lock anyone out.
+      password_changed_at TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
+    )`);
+
+    // Single-use, expiring reset links. Only the SHA-256 of the token is
+    // stored: a leaked database backup must not hand out working reset links.
+    await conn.query(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uuid TEXT UNIQUE NOT NULL,
+      user_id INTEGER NOT NULL,
+      token_hash TEXT UNIQUE NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      ip_address TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`);
 
     await conn.query(`CREATE TABLE IF NOT EXISTS patients (
@@ -548,6 +567,11 @@ async function setup() {
     await conn.query('CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at)');
     await conn.query('CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id)');
     await conn.query('CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action)');
+    // A reset link is looked up by its hash on every submission.
+    await conn.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_password_reset_hash ON password_reset_tokens(token_hash)');
+    // Lets issuing a new link retire the account's previous outstanding ones
+    // without scanning every token ever created.
+    await conn.query('CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id, created_at)');
     await conn.query('CREATE INDEX IF NOT EXISTS idx_appointments_patient ON appointments(patient_id)');
     await conn.query('CREATE INDEX IF NOT EXISTS idx_appointments_doctor_date ON appointments(doctor_id, appointment_date)');
     await conn.query('CREATE INDEX IF NOT EXISTS idx_medical_records_patient ON medical_records(patient_id)');

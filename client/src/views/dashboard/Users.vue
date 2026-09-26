@@ -103,8 +103,26 @@
             </div>
             <div class="form-group">
               <label for="nu-password">Password *</label>
-              <input id="nu-password" type="password" v-model="form.password" required minlength="8" autocomplete="new-password" />
-              <span class="form-hint">At least 8 characters. The user can change it after signing in.</span>
+              <input
+                id="nu-password"
+                type="password"
+                v-model="form.password"
+                required
+                :minlength="PASSWORD_MIN_LENGTH"
+                :maxlength="PASSWORD_MAX_LENGTH"
+                autocomplete="new-password"
+                :aria-describedby="'nu-password-help'"
+              />
+              <div class="strength-meter" :id="'nu-password-help'">
+                <div class="strength-bar"><span :class="strengthClass" :style="{ width: strengthPercent }" /></div>
+                <span class="strength-label">{{ strengthLabel }}</span>
+              </div>
+              <ul v-if="passwordProblems.length" class="policy-list">
+                <li v-for="problem in passwordProblems" :key="problem">{{ problem }}</li>
+              </ul>
+              <span v-else class="form-hint">
+                At least {{ PASSWORD_MIN_LENGTH }} characters. A short passphrase beats a short complex word.
+              </span>
             </div>
           </div>
           <div class="modal-footer">
@@ -120,10 +138,13 @@
 </template>
 
 <script>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { formatDateTime, getStatusLabel, debounce } from '../../utils/helpers'
+import {
+  validatePassword, passwordStrength, MIN_LENGTH as PASSWORD_MIN_LENGTH, MAX_LENGTH as PASSWORD_MAX_LENGTH
+} from '../../utils/passwordPolicy'
 
 export default {
   name: 'Users',
@@ -151,8 +172,27 @@ export default {
       showCreate.value = true
     }
 
+    // Checked as they type so a rejected password is explained before the
+    // request is sent. The server applies the same rules and has the final say.
+    const passwordProblems = computed(() => {
+      if (!form.password) return []
+      return validatePassword(form.password, {
+        email: form.email,
+        firstName: form.first_name,
+        lastName: form.last_name
+      })
+    })
+    const strength = computed(() => passwordStrength(form.password))
+    const strengthLabel = computed(() => strength.value.label)
+    const strengthClass = computed(() => `strength-${strength.value.score}`)
+    const strengthPercent = computed(() => `${(strength.value.score / 4) * 100}%`)
+
     const createUser = async () => {
       if (creating.value) return
+      if (passwordProblems.value.length > 0) {
+        toast.warning('Choose a password that meets the listed requirements.')
+        return
+      }
       creating.value = true
       try {
         await axios.post('/api/auth/register', {
@@ -212,7 +252,9 @@ export default {
     return {
       users, total, page, limit, search, roleFilter, loading, loadUsers, debouncedLoad,
       getRoleColor, formatDateTime, formatStatusLabel,
-      showCreate, creating, form, openCreate, createUser
+      showCreate, creating, form, openCreate, createUser,
+      passwordProblems, strengthLabel, strengthClass, strengthPercent,
+      PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH
     }
   }
 }
@@ -229,6 +271,18 @@ export default {
 .filter-group select { padding: 10px 16px; border: 1px solid var(--gray-200); border-radius: 8px; font-size: 14px; background: var(--white); color: var(--gray-700); }
 .add-user-btn { white-space: nowrap; }
 .add-user-btn svg { width: 15px; height: 15px; }
+
+.strength-meter { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.strength-bar { flex: 1; height: 5px; background: var(--gray-200); border-radius: 3px; overflow: hidden; }
+.strength-bar span { display: block; height: 100%; border-radius: 3px; transition: width .2s ease, background .2s ease; }
+.strength-0 { background: #dc2626; }
+.strength-1 { background: #ea580c; }
+.strength-2 { background: #ca8a04; }
+.strength-3 { background: #0d9488; }
+.strength-4 { background: #15803d; }
+.strength-label { font-size: 11px; color: var(--gray-500); min-width: 58px; }
+.policy-list { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: var(--gray-600); }
+.policy-list li { margin-bottom: 2px; }
 
 .empty-state { text-align: center; padding: 60px 20px; color: var(--gray-500); }
 .empty-icon { font-size: 40px; display: block; margin-bottom: 12px; }

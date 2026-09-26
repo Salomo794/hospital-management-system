@@ -15,6 +15,20 @@ const routes = [
     meta: { guest: true, title: 'Sign in' }
   },
   {
+    // Both must be guest-only: a signed-in user has no business here, and
+    // leaving them reachable would strand a session behind a password prompt.
+    path: '/forgot-password',
+    name: 'ForgotPassword',
+    component: () => import('../views/auth/ForgotPassword.vue'),
+    meta: { guest: true, title: 'Reset password' }
+  },
+  {
+    path: '/reset-password',
+    name: 'ResetPassword',
+    component: () => import('../views/auth/ResetPassword.vue'),
+    meta: { guest: true, title: 'Choose a new password' }
+  },
+  {
     path: '/',
     component: () => import('../components/Layout.vue'),
     meta: { requiresAuth: true },

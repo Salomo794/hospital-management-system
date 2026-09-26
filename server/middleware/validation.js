@@ -1,4 +1,5 @@
 const { body, param, validationResult } = require('express-validator');
+const { validatePassword } = require('../utils/passwordPolicy');
 
 const handleValidation = (req, res, next) => {
   const errors = validationResult(req);
@@ -8,12 +9,28 @@ const handleValidation = (req, res, next) => {
   next();
 };
 
+// The password rules live in utils/passwordPolicy so registration, the password
+// change endpoint and the client all apply the same policy. express-validator
+// gives a clean field-level error; every problem is reported at once so the
+// person is not walked through one failure at a time.
+const validateNewPassword = (field = 'password') => (req, res, next) => {
+  const problems = validatePassword(req.body?.[field], {
+    email: req.body?.email,
+    firstName: req.body?.first_name,
+    lastName: req.body?.last_name,
+  });
+  if (problems.length > 0) {
+    return res.status(400).json({ message: problems[0], errors: problems.map(message => ({ msg: message, path: field })) });
+  }
+  return next();
+};
+
 const validateRegistration = [
   body('email').isEmail().normalizeEmail(),
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
   body('first_name').trim().notEmpty(),
   body('last_name').trim().notEmpty(),
   body('role').isIn(['admin','doctor','nurse','receptionist','pharmacist','lab_technician']),
+  validateNewPassword(),
   handleValidation
 ];
 
@@ -58,4 +75,6 @@ const validateAppointment = [
   handleValidation
 ];
 
-module.exports = { validateRegistration, validatePatient, validateAppointment, handleValidation };
+module.exports = {
+  validateRegistration, validatePatient, validateAppointment, handleValidation, validateNewPassword,
+};

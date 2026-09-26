@@ -124,6 +124,10 @@
                   </div>
                 </div>
                 <div class="dropdown-divider" />
+                <button class="dropdown-item" @click="openPasswordModal">
+                  <span v-html="icons.key" />
+                  Change password
+                </button>
                 <button class="dropdown-item dropdown-item--danger" @click="logout">
                   <span v-html="icons.logout" />
                   Sign out
@@ -186,15 +190,89 @@
         </div>
       </div>
     </Transition>
+
+    <!-- ──── CHANGE PASSWORD ──── -->
+    <div class="modal-overlay" v-if="showPasswordModal" @click.self="closePasswordModal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="change-password-title">
+        <div class="modal-header">
+          <h2 id="change-password-title">Change password</h2>
+          <button class="icon-btn" @click="closePasswordModal" aria-label="Close">
+            <span v-html="icons.close" />
+          </button>
+        </div>
+        <form @submit.prevent="submitPassword">
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="cp-current">Current password *</label>
+              <input
+                id="cp-current"
+                type="password"
+                v-model="passwordForm.currentPassword"
+                required
+                autocomplete="current-password"
+              />
+            </div>
+            <div class="form-group">
+              <label for="cp-new">New password *</label>
+              <input
+                id="cp-new"
+                type="password"
+                v-model="passwordForm.newPassword"
+                required
+                :minlength="PASSWORD_MIN_LENGTH"
+                :maxlength="PASSWORD_MAX_LENGTH"
+                autocomplete="new-password"
+                aria-describedby="cp-new-help"
+              />
+              <div class="strength-meter" id="cp-new-help">
+                <div class="strength-bar"><span :class="strengthClass" :style="{ width: strengthPercent }" /></div>
+                <span class="strength-label">{{ strengthLabel }}</span>
+              </div>
+              <ul v-if="passwordProblems.length" class="policy-list">
+                <li v-for="problem in passwordProblems" :key="problem">{{ problem }}</li>
+              </ul>
+              <span v-else class="form-hint">
+                At least {{ PASSWORD_MIN_LENGTH }} characters. A short passphrase beats a short complex word.
+              </span>
+            </div>
+            <div class="form-group">
+              <label for="cp-confirm">Confirm new password *</label>
+              <input
+                id="cp-confirm"
+                type="password"
+                v-model="passwordForm.confirmPassword"
+                required
+                autocomplete="new-password"
+              />
+              <span v-if="confirmMismatch" class="form-hint form-hint--error">The two passwords do not match.</span>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="closePasswordModal">Cancel</button>
+            <button
+              type="submit"
+              class="btn btn-primary"
+              :disabled="savingPassword || passwordProblems.length > 0 || confirmMismatch"
+            >
+              {{ savingPassword ? 'Updating…' : 'Update password' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../store/auth'
 import { useUiStore } from '../store/ui'
 import axios from 'axios'
+import { useToast } from '../store/toast'
+import {
+  validatePassword, passwordStrength, MIN_LENGTH as PASSWORD_MIN_LENGTH, MAX_LENGTH as PASSWORD_MAX_LENGTH
+} from '../utils/passwordPolicy'
 
 /* ── inline SVG helper ── */
 const s = (d, extra = '') =>
@@ -230,6 +308,7 @@ const icons = {
   ai:           s('<path d="M12 3l2 5.5 5.5 2-5.5 2L12 18l-2-5.5L4.5 10.5l5.5-2L12 3Z"/><path d="M18.6 16.4l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8.8-1.9Z"/>'),
   users:        s('<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>'),
   audit:        s('<path d="M9 4h9a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1z"/><path d="M17 5h1a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1"/><path d="M8 11h8M8 15h5"/>'),
+  key:          s('<circle cx="8" cy="15" r="4"/><path d="M11 12 20 3M17 3h3v3"/>'),
 }
 
 const routeMeta = [
@@ -256,6 +335,7 @@ export default {
     const router     = useRouter()
     const authStore  = useAuthStore()
     const uiStore    = useUiStore()
+    const toast      = useToast()
 
     const collapsed = computed({
       get: () => uiStore.sidebarCollapsed,
@@ -372,6 +452,55 @@ export default {
 
     const logout = () => { authStore.logout(); router.push('/login') }
 
+    /* ── change password ── */
+    const showPasswordModal = ref(false)
+    const savingPassword = ref(false)
+    const emptyPasswordForm = () => ({ currentPassword: '', newPassword: '', confirmPassword: '' })
+    const passwordForm = reactive(emptyPasswordForm())
+
+    const openPasswordModal = () => {
+      Object.assign(passwordForm, emptyPasswordForm())
+      showPasswordModal.value = true
+      dropdownOpen.value = false
+    }
+    const closePasswordModal = () => { showPasswordModal.value = false }
+
+    // Checked as they type so a rejected password is explained immediately. The
+    // server applies the same rules and has the final say.
+    const passwordProblems = computed(() => {
+      if (!passwordForm.newPassword) return []
+      return validatePassword(passwordForm.newPassword, {
+        email: authStore.user?.email,
+        firstName: authStore.user?.first_name,
+        lastName: authStore.user?.last_name
+      })
+    })
+    const confirmMismatch = computed(
+      () => !!passwordForm.confirmPassword && passwordForm.confirmPassword !== passwordForm.newPassword
+    )
+    const strength = computed(() => passwordStrength(passwordForm.newPassword))
+    const strengthLabel = computed(() => strength.value.label)
+    const strengthClass = computed(() => `strength-${strength.value.score}`)
+    const strengthPercent = computed(() => `${(strength.value.score / 4) * 100}%`)
+
+    const submitPassword = async () => {
+      if (savingPassword.value) return
+      if (passwordProblems.value.length > 0 || confirmMismatch.value) return
+      savingPassword.value = true
+      try {
+        await axios.put('/api/auth/change-password', {
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword
+        })
+        toast.success('Password updated. Other sessions will be signed out.')
+        closePasswordModal()
+      } catch (e) {
+        toast.error(e.response?.data?.message || 'Could not update your password.')
+      } finally {
+        savingPassword.value = false
+      }
+    }
+
     const onResize = () => { isMobile.value = window.innerWidth < 768; if (window.innerWidth >= 768) mobileOpen.value = false }
 
     /* close dropdown/panel on outside click */
@@ -401,6 +530,10 @@ export default {
       isActive, toggleSidebar, closeMobile,
       formatRole, typeColor, relativeTime,
       loadNotifications, markAllRead, openNotification, logout,
+      showPasswordModal, savingPassword, passwordForm,
+      passwordProblems, confirmMismatch, strengthLabel, strengthClass, strengthPercent,
+      openPasswordModal, closePasswordModal, submitPassword,
+      PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH,
       icons,
     }
   }
@@ -722,6 +855,21 @@ export default {
 .dropdown-item--danger { color: #b91c1c; }
 .dropdown-item--danger:hover { background: var(--danger-bg); }
 .dropdown-item :deep(svg) { width: 15px; height: 15px; }
+.dropdown-item:hover { background: var(--gray-50); }
+
+/* Change-password form */
+.strength-meter { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.strength-bar { flex: 1; height: 5px; background: var(--gray-200); border-radius: 3px; overflow: hidden; }
+.strength-bar span { display: block; height: 100%; border-radius: 3px; transition: width .2s ease, background .2s ease; }
+.strength-0 { background: #dc2626; }
+.strength-1 { background: #ea580c; }
+.strength-2 { background: #ca8a04; }
+.strength-3 { background: #0d9488; }
+.strength-4 { background: #15803d; }
+.strength-label { font-size: 11px; color: var(--gray-500); min-width: 58px; }
+.policy-list { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: var(--gray-600); }
+.policy-list li { margin-bottom: 2px; }
+.form-hint--error { color: var(--danger, #b91c1c); }
 
 /* Page wrap */
 .page-wrap {

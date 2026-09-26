@@ -58,7 +58,7 @@
             <p>This order has no associated test items.</p>
           </div>
 
-          <div v-for="(item, idx) in order.items" :key="item.id" class="result-card">
+          <div v-for="item in order.items" :key="item.id" class="result-card">
             <div class="result-card-header" :class="{ 'abnormal': isAbnormal(item) }">
               <div class="result-card-title">
                 <h4>{{ item.test_name }}</h4>

@@ -31,6 +31,14 @@ class FixedWindowRateLimiter {
   reset(key) {
     this.entries.delete(key);
   }
+
+  // Clears every counter. Used by the test suite, where each case starts from
+  // the same loopback address and would otherwise inherit the previous test's
+  // budget. `reset(key)` is not a substitute: a test that never names the key
+  // it burned cannot clean up after itself.
+  clear() {
+    this.entries.clear();
+  }
 }
 
 module.exports = { FixedWindowRateLimiter };
