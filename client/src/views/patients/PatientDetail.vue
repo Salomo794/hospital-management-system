@@ -405,26 +405,26 @@ export default {
 .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .info-grid .full-width { grid-column: 1 / -1; }
 .info-item { display: flex; flex-direction: column; gap: 4px; }
-.info-item label { font-size: 11px; color: var(--gray-400); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+.info-item label { font-size: 11px; color: var(--text-subtle); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
 .info-item span { font-size: 14px; color: var(--gray-800); }
 .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--gray-200); margin-bottom: 16px; }
 .tabs button {
   padding: 10px 20px; border: none; background: none; cursor: pointer;
-  font-size: 14px; color: var(--gray-500); border-bottom: 2px solid transparent;
+  font-size: 14px; color: var(--text-muted); border-bottom: 2px solid transparent;
   margin-bottom: -2px; transition: all 0.2s;
 }
 .tabs button:hover { color: var(--gray-600); }
-.tabs button.active { color: #0d9488; border-bottom-color: #0d9488; font-weight: 600; }
+.tabs button.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
 .tab-content { min-height: 100px; }
-.empty-tab { text-align: center; padding: 40px 20px; color: var(--gray-400); }
+.empty-tab { text-align: center; padding: 40px 20px; color: var(--text-subtle); }
 .empty-tab .empty-icon { font-size: 32px; display: block; margin-bottom: 8px; }
 
-.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: var(--gray-500); }
-.spinner { width: 40px; height: 40px; border: 4px solid var(--gray-200); border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
+.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: var(--text-muted); }
+.spinner { width: 40px; height: 40px; border: 4px solid var(--gray-200); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.text-muted { color: var(--gray-400); font-size: 12px; }
-.text-danger { color: #ef4444; }
+.text-muted { color: var(--text-subtle); font-size: 12px; }
+.text-danger { color: var(--danger-fg); }
 .edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .edit-grid label { display: grid; gap: 6px; color: var(--gray-600); font-size: 13px; font-weight: 600; }
 .edit-grid .full { grid-column: 1 / -1; }

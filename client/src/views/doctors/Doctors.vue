@@ -206,7 +206,7 @@ export default {
 
 .search-bar input:focus {
   outline: none;
-  border-color: #0d9488;
+  border-color: var(--focus-ring);
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
 
@@ -221,7 +221,7 @@ export default {
 
 .filter-group select:focus {
   outline: none;
-  border-color: #0d9488;
+  border-color: var(--focus-ring);
 }
 
 /* Loading State */
@@ -231,7 +231,7 @@ export default {
   align-items: center;
   justify-content: center;
   padding: 64px 20px;
-  color: var(--gray-500);
+  color: var(--text-muted);
   gap: 12px;
 }
 
@@ -239,7 +239,7 @@ export default {
   width: 36px;
   height: 36px;
   border: 3px solid var(--gray-200);
-  border-top-color: #0d9488;
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -292,7 +292,7 @@ export default {
 }
 
 .specialty {
-  color: #0d9488;
+  color: var(--primary);
   font-size: 13px;
   font-weight: 500;
   margin: 0 0 12px;
@@ -307,7 +307,7 @@ export default {
 
 .detail-item {
   font-size: 12px;
-  color: var(--gray-500);
+  color: var(--text-muted);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -320,7 +320,7 @@ export default {
 
 .detail-item.fee {
   font-weight: 600;
-  color: #0d9488;
+  color: var(--primary);
   font-size: 14px;
 }
 
@@ -342,7 +342,7 @@ export default {
 .empty-state {
   text-align: center;
   padding: 64px 20px;
-  color: var(--gray-500);
+  color: var(--text-muted);
 }
 
 .empty-icon {

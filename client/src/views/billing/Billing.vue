@@ -476,9 +476,9 @@ export default {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
-.stat-pending .stat-value { color: #ef4444; }
-.stat-collected .stat-value { color: #10b981; }
-.stat-unpaid .stat-value { color: #f59e0b; }
+.stat-pending .stat-value { color: var(--danger-fg); }
+.stat-collected .stat-value { color: var(--success-fg); }
+.stat-unpaid .stat-value { color: var(--warning-fg); }
 
 .stat-value {
   font-size: 24px;
@@ -487,14 +487,14 @@ export default {
 
 .stat-label {
   font-size: 13px;
-  color: var(--gray-500);
+  color: var(--text-muted);
   margin-top: 4px;
 }
 
-.text-danger { color: #ef4444; }
-.text-success { color: #10b981; }
+.text-danger { color: var(--danger-fg); }
+.text-success { color: var(--success-fg); }
 .text-mono { font-family: monospace; font-size: 13px; }
-.text-muted { color: var(--gray-400); text-align: center; padding: 20px; }
+.text-muted { color: var(--text-subtle); text-align: center; padding: 20px; }
 
 .card {
   background: var(--white);
@@ -519,14 +519,14 @@ export default {
   justify-content: center;
   gap: 12px;
   padding: 48px;
-  color: var(--gray-500);
+  color: var(--text-muted);
 }
 
 .spinner {
   width: 24px;
   height: 24px;
   border: 3px solid var(--gray-200);
-  border-top-color: #0d9488;
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
@@ -599,7 +599,7 @@ export default {
 .empty-state {
   text-align: center;
   padding: 48px 24px;
-  color: var(--gray-500);
+  color: var(--text-muted);
 }
 
 .empty-icon {
@@ -653,7 +653,7 @@ export default {
   border: none;
   font-size: 24px;
   cursor: pointer;
-  color: var(--gray-500);
+  color: var(--text-muted);
   padding: 0 4px;
 }
 
@@ -750,7 +750,7 @@ export default {
   border: none;
   font-size: 18px;
   cursor: pointer;
-  color: var(--gray-500);
+  color: var(--text-muted);
 }
 
 .bill-items {

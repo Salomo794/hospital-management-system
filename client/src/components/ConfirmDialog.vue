@@ -31,8 +31,8 @@ export default {
 </script>
 
 <style scoped>
-.confirm-message { font-size: 14px; color: var(--gray-500); line-height: 1.6; margin: 0; }
+.confirm-message { font-size: 14px; color: var(--text-muted); line-height: 1.6; margin: 0; }
 .confirm-icon { font-size: 40px; margin-bottom: 12px; }
-.icon-danger { color: #dc2626; }
-.icon-primary { color: #0d9488; }
+.icon-danger { color: var(--danger-fg); }
+.icon-primary { color: var(--primary); }
 </style>

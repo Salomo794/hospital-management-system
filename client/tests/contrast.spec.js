@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, globSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
@@ -183,6 +183,58 @@ describe('theme completeness', () => {
 
   it.each(required)('light theme defines %s', (name) => {
     expect(light[name], `${name} is undefined in :root`).toBeTruthy()
+  })
+})
+
+describe('components do not re-break the token layer', () => {
+  // The design system can be perfectly correct and still not reach the screen,
+  // because a component's scoped style sits above it in the cascade. A hardcoded
+  // #64748b caption in one view undoes --text-muted everywhere it appears, and a
+  // scoped .text-danger with a literal value silently reinstates the exact bug
+  // the token layer was introduced to fix. The token tests above cannot see any
+  // of this, so it is checked directly against the source.
+  const componentFiles = [
+    ...globSync(resolve(here, '../src/views/**/*.vue')),
+    ...globSync(resolve(here, '../src/components/*.vue'))
+  ]
+  const styled = componentFiles.filter(file => /<style[\s>]/.test(readFileSync(file, 'utf8')))
+
+  it('finds the component files to check', () => {
+    expect(componentFiles.length).toBeGreaterThan(10)
+    expect(styled.length).toBeGreaterThan(10)
+  })
+
+  // Values tuned for a light page. On a dark surface these are the exact ones
+  // that disappear, so they are refused outright rather than measured.
+  const LIGHT_ONLY = [
+    '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8',
+    '#ef4444', '#dc2626', '#b91c1c', '#16a34a', '#d97706', '#2563eb',
+    '#7f1d1d', '#78350f', '#115e59', '#ea580c', '#10b981', '#f59e0b'
+  ]
+
+  it.each(styled)('%s declares no light-only text colour', (file) => {
+    const css = readFileSync(file, 'utf8')
+    const offenders = []
+    // Only a value used as `color:` is a text colour here; the same hex as a
+    // gradient stop or a spinner edge is fine.
+    for (const match of css.matchAll(/color\s*:\s*(#[0-9a-fA-F]{3,8})\b/g)) {
+      const hex = match[1].toLowerCase()
+      if (LIGHT_ONLY.includes(hex)) {
+        offenders.push(`${hex} at "${match[0].trim()}"`)
+      }
+    }
+    expect(offenders, `use a theme token instead of: ${offenders.join(', ')}`).toEqual([])
+  })
+
+  it.each(styled)('%s does not reach into the neutral ramp for text', (file) => {
+    const css = readFileSync(file, 'utf8')
+    const offenders = []
+    for (const match of css.matchAll(/color\s*:\s*var\(--gray-(400|500)\)/g)) {
+      offenders.push(match[0].trim())
+    }
+    // --gray-400 and --gray-500 are ramp values, tuned for hairlines. As a
+    // caption they are the faintness the text roles exist to remove.
+    expect(offenders, `use --text-subtle or --text-muted instead of: ${offenders.join(', ')}`).toEqual([])
   })
 })
 

@@ -828,14 +828,14 @@ export default {
   justify-content: center;
   padding: 80px 0;
   gap: 16px;
-  color: var(--gray-500);
+  color: var(--text-muted);
 }
 
 .spinner {
   width: 36px;
   height: 36px;
   border: 3px solid var(--gray-200);
-  border-top-color: #0d9488;
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -861,7 +861,7 @@ export default {
 }
 
 .text-muted {
-  color: var(--gray-400);
+  color: var(--text-subtle);
   font-size: 13px;
 }
 
@@ -880,7 +880,7 @@ export default {
 }
 
 .info-row label {
-  color: var(--gray-500);
+  color: var(--text-muted);
 }
 
 .info-row span {
@@ -919,36 +919,36 @@ export default {
   background: var(--danger-bg);
   border: 1px solid #fecaca;
 }
-.vital-red .vital-label { color: #dc2626; }
-.vital-red .vital-value { color: #dc2626; }
+.vital-red .vital-label { color: var(--danger-fg); }
+.vital-red .vital-value { color: var(--danger-fg); }
 
 .vital-orange {
   background: var(--warning-bg);
   border: 1px solid #fed7aa;
 }
-.vital-orange .vital-label { color: #ea580c; }
-.vital-orange .vital-value { color: #ea580c; }
+.vital-orange .vital-label { color: var(--warning-fg); }
+.vital-orange .vital-value { color: var(--warning-fg); }
 
 .vital-blue {
   background: var(--info-bg);
   border: 1px solid #bfdbfe;
 }
-.vital-blue .vital-label { color: #2563eb; }
-.vital-blue .vital-value { color: #2563eb; }
+.vital-blue .vital-label { color: var(--info-fg); }
+.vital-blue .vital-value { color: var(--info-fg); }
 
 .vital-green {
   background: var(--success-bg);
   border: 1px solid #bbf7d0;
 }
-.vital-green .vital-label { color: #16a34a; }
-.vital-green .vital-value { color: #16a34a; }
+.vital-green .vital-label { color: var(--success-fg); }
+.vital-green .vital-value { color: var(--success-fg); }
 
 .vital-teal {
   background: var(--brand-50);
   border: 1px solid #99f6e4;
 }
-.vital-teal .vital-label { color: #0d9488; }
-.vital-teal .vital-value { color: #0d9488; }
+.vital-teal .vital-label { color: var(--primary); }
+.vital-teal .vital-value { color: var(--primary); }
 
 .clinical-section {
   margin-bottom: 16px;
@@ -956,7 +956,7 @@ export default {
 
 .clinical-section h4 {
   font-size: 14px;
-  color: #0d9488;
+  color: var(--primary);
   margin-bottom: 6px;
   font-weight: 600;
 }
@@ -1004,14 +1004,14 @@ export default {
 
 .rx-number {
   font-weight: 600;
-  color: #0d9488;
+  color: var(--primary);
   font-size: 14px;
 }
 
 .rx-date {
   margin-left: auto;
   font-size: 12px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
 }
 
 .rx-body {
@@ -1045,13 +1045,13 @@ export default {
 }
 
 .rx-detail {
-  color: var(--gray-500);
+  color: var(--text-muted);
 }
 
 .rx-notes {
   margin-top: 8px;
   font-size: 13px;
-  color: var(--gray-500);
+  color: var(--text-muted);
   font-style: italic;
 }
 
@@ -1071,14 +1071,14 @@ export default {
 
 .lo-order-number {
   font-weight: 600;
-  color: #2563eb;
+  color: var(--info-fg);
   font-size: 14px;
 }
 
 .lo-priority {
   font-size: 12px;
   text-transform: capitalize;
-  color: var(--gray-500);
+  color: var(--text-muted);
   background: var(--gray-100);
   padding: 2px 8px;
   border-radius: 4px;
@@ -1087,7 +1087,7 @@ export default {
 .lo-date {
   margin-left: auto;
   font-size: 12px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
 }
 
 .lo-body {
@@ -1109,7 +1109,7 @@ export default {
 
 .lo-test-tag {
   background: var(--info-bg);
-  color: #2563eb;
+  color: var(--info-fg);
   font-size: 12px;
   padding: 3px 10px;
   border-radius: 12px;
@@ -1119,12 +1119,12 @@ export default {
 .lo-notes {
   margin-top: 8px;
   font-size: 13px;
-  color: var(--gray-500);
+  color: var(--text-muted);
   font-style: italic;
 }
 
 .empty-state {
-  color: var(--gray-400);
+  color: var(--text-subtle);
   font-size: 14px;
   text-align: center;
   padding: 20px;
@@ -1183,7 +1183,7 @@ export default {
   background: none;
   border: none;
   font-size: 24px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
   cursor: pointer;
   line-height: 1;
 }
@@ -1231,7 +1231,7 @@ export default {
 
 .form-control:focus {
   outline: none;
-  border-color: #0d9488;
+  border-color: var(--focus-ring);
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
 
@@ -1287,7 +1287,7 @@ select.form-control {
 .item-number {
   font-weight: 600;
   font-size: 13px;
-  color: #0d9488;
+  color: var(--primary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -1331,7 +1331,7 @@ select.form-control {
 
 .med-generic {
   font-size: 12px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
 }
 
 .lab-tests-checklist {
@@ -1360,7 +1360,7 @@ select.form-control {
 }
 
 .lab-test-checkbox input[type="checkbox"] {
-  accent-color: #0d9488;
+  accent-color: var(--primary);
 }
 
 .test-name {
@@ -1370,13 +1370,13 @@ select.form-control {
 
 .test-category {
   font-size: 12px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
   margin-left: auto;
 }
 
 .loading-small {
   font-size: 13px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
   padding: 10px;
 }
 
@@ -1412,7 +1412,7 @@ select.form-control {
 .btn-primary {
   background: #0d9488;
   color: white;
-  border-color: #0d9488;
+  border-color: var(--focus-ring);
 }
 
 .btn-primary:hover {
@@ -1422,7 +1422,7 @@ select.form-control {
 .btn-danger {
   background: #ef4444;
   color: white;
-  border-color: #ef4444;
+  border-color: var(--danger);
 }
 
 .btn-danger:hover {
@@ -1460,7 +1460,7 @@ select.form-control {
 
 .badge-gray {
   background: var(--gray-100);
-  color: var(--gray-500);
+  color: var(--text-muted);
 }
 
 @media (max-width: 768px) {

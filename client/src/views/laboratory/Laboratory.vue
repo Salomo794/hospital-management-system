@@ -254,7 +254,7 @@ export default {
 .tabs-inline button.active {
   background: #0d9488;
   color: white;
-  border-color: #0d9488;
+  border-color: var(--focus-ring);
 }
 
 .tabs-inline button:not(.active):hover {
@@ -271,7 +271,7 @@ export default {
 
 .tabs-inline button:not(.active) .tab-count {
   background: var(--gray-200);
-  color: var(--gray-500);
+  color: var(--text-muted);
 }
 
 .search-filters {
@@ -299,7 +299,7 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--gray-500);
+  color: var(--text-muted);
 }
 
 /* Loading spinner */
@@ -309,7 +309,7 @@ export default {
   align-items: center;
   gap: 12px;
   padding: 48px 20px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
   font-size: 14px;
 }
 
@@ -317,7 +317,7 @@ export default {
   width: 32px;
   height: 32px;
   border: 3px solid var(--gray-200);
-  border-top-color: #0d9488;
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -351,7 +351,7 @@ export default {
 
 .empty-state p {
   font-size: 14px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
   margin: 0;
 }
 
@@ -364,7 +364,7 @@ export default {
 
 .text-muted-inline {
   font-size: 13px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
 }
 
 /* Responsive */

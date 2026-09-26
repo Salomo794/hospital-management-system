@@ -440,7 +440,7 @@ export default {
 .filter-group select:focus,
 .filter-group input:focus {
   outline: none;
-  border-color: #0d9488;
+  border-color: var(--focus-ring);
 }
 
 .text-mono {
@@ -464,7 +464,7 @@ export default {
   align-items: center;
   justify-content: center;
   padding: 48px 20px;
-  color: var(--gray-500);
+  color: var(--text-muted);
   gap: 12px;
 }
 
@@ -472,7 +472,7 @@ export default {
   width: 36px;
   height: 36px;
   border: 3px solid var(--gray-200);
-  border-top-color: #0d9488;
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -481,7 +481,7 @@ export default {
   width: 16px;
   height: 16px;
   border: 2px solid var(--gray-200);
-  border-top-color: #0d9488;
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   display: inline-block;
@@ -496,7 +496,7 @@ export default {
 .empty-state {
   text-align: center;
   padding: 48px 20px;
-  color: var(--gray-500);
+  color: var(--text-muted);
 }
 
 .empty-icon {
@@ -529,7 +529,7 @@ export default {
   border: none;
   font-size: 24px;
   cursor: pointer;
-  color: var(--gray-500);
+  color: var(--text-muted);
   transition: color 0.2s;
 }
 
@@ -570,7 +570,7 @@ export default {
 }
 
 .selected-label {
-  color: var(--gray-500);
+  color: var(--text-muted);
 }
 
 .btn-clear {
@@ -578,18 +578,18 @@ export default {
   border: none;
   font-size: 18px;
   cursor: pointer;
-  color: var(--gray-400);
+  color: var(--text-subtle);
   padding: 0 4px;
   transition: color 0.2s;
 }
 
 .btn-clear:hover {
-  color: #ef4444;
+  color: var(--danger-fg);
 }
 
 .search-hint {
   font-size: 12px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
   padding: 6px 0;
   display: flex;
   align-items: center;

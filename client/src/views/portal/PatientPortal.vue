@@ -669,7 +669,7 @@ input, select { width: 100%; padding: 10px 12px; border: 1px solid var(--gray-30
 .welcome-card { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
 .eyebrow { color: var(--brand-600); font-size: 12px; font-weight: 700; text-transform: uppercase; }
 .welcome-card h1 { margin: 4px 0; }
-.welcome-card p { margin: 0; color: var(--gray-500); }
+.welcome-card p { margin: 0; color: var(--text-muted); }
 .queue-card { display: grid; gap: 3px; padding: 14px 18px; border-radius: 10px; background: var(--brand-100); text-align: right; }
 .queue-card span, .queue-card small { color: var(--brand-800); font-size: 12px; }
 .portal-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -679,15 +679,15 @@ input, select { width: 100%; padding: 10px 12px; border: 1px solid var(--gray-30
 .record-row, .bill-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--gray-200); }
 .record-row:last-child, .bill-row:last-child { border-bottom: 0; }
 .record-row div, .bill-summary { display: grid; gap: 4px; }
-.record-row span, .bill-summary span { color: var(--gray-500); font-size: 13px; }
+.record-row span, .bill-summary span { color: var(--text-muted); font-size: 13px; }
 .payment-controls { grid-template-columns: 130px auto; align-items: center; }
-.empty-copy { color: var(--gray-500); padding: 20px 0; }
+.empty-copy { color: var(--text-muted); padding: 20px 0; }
 .error-message, .success-message, .checkin-result { padding: 10px 12px; border-radius: 8px; font-size: 13px; }
 /* The -fg tokens only exist in the dark theme, so the fallback supplies today's
    dark-on-pale colours in light mode and the retuned pair in dark mode. */
 .error-message { color: var(--danger-fg, #991b1b); background: var(--danger-bg); }
 .success-message, .checkin-result { color: var(--success-fg, #115e59); background: var(--success-bg); display: grid; gap: 4px; margin-top: 14px; }
-.loading-state { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 50px; color: var(--gray-500); }
+.loading-state { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 50px; color: var(--text-muted); }
 .spinner { width: 24px; height: 24px; border: 3px solid var(--gray-300); border-top-color: var(--brand-600); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

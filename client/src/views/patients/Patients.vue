@@ -225,7 +225,7 @@
             <div class="modal-header">
               <div>
                 <h2>{{ editingPatient ? 'Edit Patient' : 'Register New Patient' }}</h2>
-                <p style="font-size:12.5px;color:var(--gray-500);margin-top:3px">
+                <p style="font-size:12.5px;color:var(--text-muted);margin-top:3px">
                   {{ editingPatient ? 'Update the patient record below.' : 'Fill in the patient details. An access code & PIN will be generated automatically.' }}
                 </p>
               </div>
@@ -605,7 +605,7 @@ export default {
   margin-bottom: 20px; gap: 16px; flex-wrap: wrap;
 }
 .page-title { font-size: 22px; font-weight: 700; color: var(--gray-900); letter-spacing: -.03em; }
-.page-sub   { font-size: 13px; color: var(--gray-500); margin-top: 3px; }
+.page-sub   { font-size: 13px; color: var(--text-muted); margin-top: 3px; }
 .header-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 
 /* ══ LOOKUP PANEL ══ */
@@ -637,9 +637,9 @@ export default {
   outline: none; transition: border-color .2s;
 }
 .lookup-input::placeholder { color: rgba(255,255,255,.3); font-weight: 400; letter-spacing: 0; }
-.lookup-input:focus { border-color: #14b8a6; box-shadow: 0 0 0 3px rgba(20,184,166,.2); }
-.lookup-input--error   { border-color: #ef4444 !important; }
-.lookup-input--success { border-color: #14b8a6 !important; }
+.lookup-input:focus { border-color: var(--focus-ring); box-shadow: 0 0 0 3px rgba(20,184,166,.2); }
+.lookup-input--error   { border-color: var(--danger) !important; }
+.lookup-input--success { border-color: var(--focus-ring) !important; }
 
 .lookup-error { font-size: 12.5px; color: #f87171; }
 
@@ -701,7 +701,7 @@ export default {
   font-weight: 600; color: var(--gray-800); text-decoration: none; font-size: 13.5px;
 }
 .patient-name-link:hover { color: var(--primary); }
-.patient-email-row { font-size: 11.5px; color: var(--gray-500); }
+.patient-email-row { font-size: 11.5px; color: var(--text-muted); }
 
 .mono-tag {
   font-family: 'JetBrains Mono','Fira Code',monospace;
@@ -718,7 +718,7 @@ export default {
   white-space: nowrap;
 }
 .blood-chip {
-  font-size: 12px; font-weight: 700; color: #b91c1c;
+  font-size: 12px; font-weight: 700; color: var(--danger-fg);
   background: var(--danger-bg); padding: 2px 8px; border-radius: 6px;
   border: 1px solid #fecaca;
 }
@@ -726,7 +726,7 @@ export default {
 /* ══ FORM ══ */
 .form-section-title {
   font-size: 11px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .1em; color: var(--gray-500);
+  letter-spacing: .1em; color: var(--text-muted);
   border-bottom: 1.5px solid var(--gray-100);
   padding-bottom: 8px; margin-bottom: 14px;
 }

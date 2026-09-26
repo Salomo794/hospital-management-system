@@ -243,18 +243,18 @@ export default {
 .result-item:hover { background: var(--brand-50); }
 .selected-patient-banner { background: var(--brand-50); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #99f6e4; }
 .modal-lg { max-width: 700px; }
-.modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--gray-500); }
+.modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-muted); }
 
 .loading-container { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 40px 20px; }
-.spinner { width: 36px; height: 36px; border: 3px solid var(--gray-200); border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; }
+.spinner { width: 36px; height: 36px; border: 3px solid var(--gray-200); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
 .spinner-sm { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 6px; vertical-align: middle; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.loading-text { font-size: 14px; color: var(--gray-400); }
+.loading-text { font-size: 14px; color: var(--text-subtle); }
 
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 20px; text-align: center; }
 .empty-icon { font-size: 48px; line-height: 1; }
 .empty-state p { font-size: 15px; color: var(--gray-600); margin: 0; }
-.empty-hint { font-size: 13px; color: var(--gray-400); }
+.empty-hint { font-size: 13px; color: var(--text-subtle); }
 .full-page-empty { padding: 80px 20px; }
 
 /* Responsive */

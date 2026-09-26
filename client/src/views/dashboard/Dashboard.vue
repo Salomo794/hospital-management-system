@@ -375,7 +375,7 @@ export default {
   margin-bottom: 24px; gap: 16px; flex-wrap: wrap;
 }
 .dash-title { font-size: 22px; font-weight: 700; color: var(--gray-900); letter-spacing: -.03em; }
-.dash-sub   { font-size: 13.5px; color: var(--gray-500); margin-top: 3px; }
+.dash-sub   { font-size: 13.5px; color: var(--text-muted); margin-top: 3px; }
 .dash-header-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .btn-icon-inline { font-size: 14px; }
 
@@ -407,12 +407,12 @@ export default {
 
 .stat-body { flex: 1; min-width: 0; }
 .stat-value { font-size: 22px; font-weight: 700; color: var(--gray-900); letter-spacing: -.03em; line-height: 1.2; }
-.stat-label { font-size: 12px; color: var(--gray-500); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat-label { font-size: 12px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .stat-trend { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 20px; flex-shrink: 0; }
 .trend-up   { background: var(--success-bg); color: var(--success-fg); }
 .trend-down { background: var(--danger-bg); color: var(--danger-fg); }
-.trend-flat { background: var(--gray-100); color: var(--gray-500); }
+.trend-flat { background: var(--gray-100); color: var(--text-muted); }
 
 /* Skeleton cards */
 .skeleton-card {
@@ -450,20 +450,20 @@ export default {
   transition: transform .18s, box-shadow .18s;
 }
 .insight-card:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,.06); }
-.insight-success  { background: var(--success-bg); border-color: #86efac; border-left-color: #16a34a; }
-.insight-warning  { background: var(--warning-bg); border-color: #fde68a; border-left-color: #d97706; }
-.insight-danger   { background: var(--danger-bg); border-color: #fecaca; border-left-color: #dc2626; }
-.insight-info     { background: var(--info-bg); border-color: #bfdbfe; border-left-color: #2563eb; }
+.insight-success  { background: var(--success-bg); border-color: #86efac; border-left-color: var(--success-fg); }
+.insight-warning  { background: var(--warning-bg); border-color: #fde68a; border-left-color: var(--warning-fg); }
+.insight-danger   { background: var(--danger-bg); border-color: #fecaca; border-left-color: var(--danger-fg); }
+.insight-info     { background: var(--info-bg); border-color: #bfdbfe; border-left-color: var(--info-fg); }
 .insight-emoji { font-size: 20px; flex-shrink: 0; margin-top: 1px; line-height: 1; }
 .insight-body  { flex: 1; min-width: 0; }
 .insight-title { font-size: 13px; font-weight: 600; color: var(--gray-800); }
 .insight-msg   { font-size: 12px; color: var(--gray-600); margin-top: 2px; line-height: 1.5; }
-.insight-arrow { color: var(--gray-400); font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+.insight-arrow { color: var(--text-subtle); font-size: 14px; flex-shrink: 0; margin-top: 1px; }
 
 /* Table */
 .dash-table { width: 100%; border-collapse: collapse; }
 .dash-table thead tr { background: var(--gray-50); }
-.dash-table th { padding: 10px 16px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--gray-500); border-bottom: 1px solid var(--gray-200); white-space: nowrap; }
+.dash-table th { padding: 10px 16px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); border-bottom: 1px solid var(--gray-200); white-space: nowrap; }
 .dash-table td { padding: 12px 16px; font-size: 13.5px; color: var(--gray-700); border-bottom: 1px solid var(--gray-100); vertical-align: middle; }
 .dash-table tbody tr:last-child td { border-bottom: none; }
 .dash-table tbody tr:hover td { background: var(--brand-50); }
@@ -484,7 +484,7 @@ export default {
 }
 .patient-details { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .patient-name-text { font-size: 13.5px; font-weight: 600; color: var(--gray-800); }
-.patient-meta-text { font-size: 12px; color: var(--gray-500); }
+.patient-meta-text { font-size: 12px; color: var(--text-muted); }
 
 /* Chart */
 .chart-container { height: 220px; padding: 4px 0; }

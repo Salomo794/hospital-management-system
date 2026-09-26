@@ -88,16 +88,16 @@ export default {
   box-shadow: 0 20px 60px rgba(0, 0, 0, .35);
 }
 .auth-head { margin-bottom: 24px; }
-.auth-head h2 { font-size: 22px; color: #1e293b; margin-bottom: 6px; }
-.subtitle { color: #64748b; font-size: 14px; margin: 0; }
+.auth-head h2 { font-size: 22px; color: var(--text-primary); margin-bottom: 6px; }
+.subtitle { color: var(--text-muted); font-size: 14px; margin: 0; }
 .btn-block { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; }
 .btn-spinner {
   width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3);
   border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-.has-error input { border-color: #ef4444; }
-.field-error { font-size: 12px; color: #ef4444; margin-top: 4px; display: block; }
+.has-error input { border-color: var(--danger); }
+.field-error { font-size: 12px; color: var(--danger-fg); margin-top: 4px; display: block; }
 .notice {
   background: #f0fdfa;
   border: 1px solid #99f6e4;
@@ -105,13 +105,13 @@ export default {
   border-radius: 6px;
   padding: 14px 16px;
   font-size: 14px;
-  color: #115e59;
+  color: var(--primary);
   line-height: 1.5;
 }
 .notice p { margin: 0 0 8px; }
 .notice p:last-child { margin-bottom: 0; }
-.muted { color: #0f766e; font-size: 13px; }
+.muted { color: var(--primary); font-size: 13px; }
 .auth-foot { margin-top: 22px; text-align: center; font-size: 13px; }
-.auth-foot a { color: #0d9488; text-decoration: none; font-weight: 500; }
+.auth-foot a { color: var(--primary); text-decoration: none; font-weight: 500; }
 .auth-foot a:hover { text-decoration: underline; }
 </style>

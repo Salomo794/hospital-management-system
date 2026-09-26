@@ -885,7 +885,7 @@ export default {
   font-size: 13.5px;
   font-weight: 600;
   font-family: inherit;
-  color: var(--gray-500);
+  color: var(--text-muted);
   cursor: pointer;
   white-space: nowrap;
   display: flex;
@@ -929,7 +929,7 @@ export default {
 .suggestion-header h3 { margin: 0 0 3px; font-size: 15px; }
 .suggestion-header p { margin: 0; font-size: 12.5px; }
 
-.cell-sub { font-size: 11.5px; color: var(--gray-400); margin-top: 3px; display: flex; gap: 6px; }
+.cell-sub { font-size: 11.5px; color: var(--text-subtle); margin-top: 3px; display: flex; gap: 6px; }
 .actions-cell { text-align: right; white-space: nowrap; }
 
 .detail-grid {
@@ -946,7 +946,7 @@ export default {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .07em;
-  color: var(--gray-400);
+  color: var(--text-subtle);
 }
 .detail-grid strong { font-size: 13.5px; color: var(--gray-800); }
 .detail-grid .badge { align-self: flex-start; }
@@ -961,7 +961,7 @@ export default {
   margin-bottom: 16px;
 }
 .alert-warning { background: var(--warning-bg); border-color: var(--warning-border); color: #92400e; }
-.alert-danger  { background: var(--danger-bg);  border-color: var(--danger-border);  color: #991b1b; }
+.alert-danger  { background: var(--danger-bg);  border-color: var(--danger-border);  color: var(--danger-fg); }
 
 .detail-items { margin-top: 4px; }
 .receive-input {
@@ -1010,11 +1010,11 @@ export default {
 
 .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--gray-600); cursor: pointer; }
 
-.empty-state { text-align: center; padding: 60px 20px; color: var(--gray-500); }
+.empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
 .empty-icon { font-size: 40px; display: block; margin-bottom: 12px; }
-.text-muted { color: var(--gray-400); font-size: 13px; }
+.text-muted { color: var(--text-subtle); font-size: 13px; }
 
-.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; color: var(--gray-500); }
+.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; color: var(--text-muted); }
 .spinner { width: 38px; height: 38px; border: 4px solid var(--gray-200); border-top-color: var(--brand-600); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 14px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

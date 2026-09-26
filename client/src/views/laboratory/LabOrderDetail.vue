@@ -270,7 +270,7 @@ export default {
 }
 
 .text-muted {
-  color: var(--gray-400);
+  color: var(--text-subtle);
   font-size: 13px;
 }
 
@@ -303,7 +303,7 @@ export default {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
 }
 
 .info-value {
@@ -325,7 +325,7 @@ export default {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
   margin: 0 0 12px 0;
 }
 
@@ -342,7 +342,7 @@ export default {
 
 .demo-label {
   font-size: 11px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
@@ -360,7 +360,7 @@ export default {
   align-items: center;
   gap: 12px;
   padding: 48px 20px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
   font-size: 14px;
 }
 
@@ -368,7 +368,7 @@ export default {
   width: 32px;
   height: 32px;
   border: 3px solid var(--gray-200);
-  border-top-color: #0d9488;
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -402,7 +402,7 @@ export default {
 
 .empty-state p {
   font-size: 14px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
   margin: 0;
 }
 
@@ -485,7 +485,7 @@ export default {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.3px;
-  color: var(--gray-400);
+  color: var(--text-subtle);
   margin-bottom: 4px;
 }
 
@@ -505,14 +505,14 @@ export default {
 .form-group input:focus,
 .form-group textarea:focus {
   outline: none;
-  border-color: #0d9488;
+  border-color: var(--focus-ring);
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
 
 .form-group input:disabled,
 .form-group textarea:disabled {
   background: var(--gray-100);
-  color: var(--gray-400);
+  color: var(--text-subtle);
   cursor: not-allowed;
 }
 

@@ -306,7 +306,7 @@ export default {
 .user-count { font-size: 12px; }
 .header-actions { display: flex; gap: 12px; }
 .search-bar input { padding: 10px 16px; border: 1px solid var(--gray-200); border-radius: 8px; width: 300px; font-size: 14px; }
-.search-bar input:focus { border-color: #0d9488; outline: none; }
+.search-bar input:focus { border-color: var(--focus-ring); outline: none; }
 .filter-group select { padding: 10px 16px; border: 1px solid var(--gray-200); border-radius: 8px; font-size: 14px; background: var(--white); color: var(--gray-700); }
 .add-user-btn { white-space: nowrap; }
 .add-user-btn svg { width: 15px; height: 15px; }
@@ -318,7 +318,7 @@ export default {
 .strength-2 { background: #ca8a04; }
 .strength-3 { background: #0d9488; }
 .strength-4 { background: #15803d; }
-.strength-label { font-size: 11px; color: var(--gray-500); min-width: 58px; }
+.strength-label { font-size: 11px; color: var(--text-muted); min-width: 58px; }
 .policy-list { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: var(--gray-600); }
 .policy-list li { margin-bottom: 2px; }
 .field-error { display: block; margin-top: 4px; font-size: 12px; color: var(--danger, #b91c1c); }
@@ -331,17 +331,17 @@ export default {
   display: flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; padding: 0;
   background: none; border: none; border-radius: 7px;
-  color: var(--gray-400); cursor: pointer;
+  color: var(--text-subtle); cursor: pointer;
 }
 .reveal:hover { color: var(--brand-600, #0d9488); background: var(--brand-50, #f0fdfa); }
 .reveal :deep(svg) { width: 17px; height: 17px; }
 
-.empty-state { text-align: center; padding: 60px 20px; color: var(--gray-500); }
+.empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
 .empty-icon { font-size: 40px; display: block; margin-bottom: 12px; }
-.text-muted { color: var(--gray-400); font-size: 13px; }
+.text-muted { color: var(--text-subtle); font-size: 13px; }
 
-.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; color: var(--gray-500); }
-.spinner { width: 40px; height: 40px; border: 4px solid var(--gray-200); border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
+.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; color: var(--text-muted); }
+.spinner { width: 40px; height: 40px; border: 4px solid var(--gray-200); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 768px) {

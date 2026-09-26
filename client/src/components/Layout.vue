@@ -891,14 +891,14 @@ export default {
   display: flex; align-items: center; gap: 6px;
   font-size: 13px;
 }
-.breadcrumb-section { color: var(--gray-400); font-weight: 500; }
+.breadcrumb-section { color: var(--text-subtle); font-weight: 500; }
 .breadcrumb-sep { color: var(--gray-300); display: flex; align-items: center; }
 .breadcrumb-sep :deep(svg) { width: 12px; height: 12px; }
 .breadcrumb-page { color: var(--gray-800); font-weight: 600; }
 
 .header-clock {
   display: flex; align-items: center; gap: 7px;
-  color: var(--gray-500); font-size: 12.5px; font-weight: 500;
+  color: var(--text-muted); font-size: 12.5px; font-weight: 500;
   padding-right: 12px; border-right: 1px solid var(--gray-200);
   white-space: nowrap;
 }
@@ -961,9 +961,9 @@ export default {
 
 .user-meta { display: flex; flex-direction: column; line-height: 1.3; }
 .user-display-name { font-size: 13px; font-weight: 600; color: var(--gray-800); white-space: nowrap; }
-.user-role-tag { font-size: 11px; color: var(--gray-500); }
+.user-role-tag { font-size: 11px; color: var(--text-muted); }
 
-.chevron-icon { display: flex; color: var(--gray-400); transition: transform .2s; }
+.chevron-icon { display: flex; color: var(--text-subtle); transition: transform .2s; }
 .chevron-icon.flipped { transform: rotate(180deg); }
 .chevron-icon :deep(svg) { width: 15px; height: 15px; }
 
@@ -983,7 +983,7 @@ export default {
   font-weight: 700; font-size: 16px; flex-shrink: 0;
 }
 .dropdown-name  { font-size: 13.5px; font-weight: 600; color: var(--gray-800); }
-.dropdown-email { font-size: 12px; color: var(--gray-500); word-break: break-all; margin-top: 1px; }
+.dropdown-email { font-size: 12px; color: var(--text-muted); word-break: break-all; margin-top: 1px; }
 .dropdown-divider { height: 1px; background: var(--gray-100); }
 .dropdown-item {
   display: flex; align-items: center; gap: 10px;
@@ -992,8 +992,16 @@ export default {
   font-size: 13.5px; font-weight: 500;
   cursor: pointer; transition: background .15s;
   text-align: left; font-family: inherit;
+  /* Stated rather than inherited. This menu hangs from the header, so its panel
+     follows the theme - white in light, near-black in dark - and an inherited
+     colour left "Update my name" and "Change password" black-on-black in dark
+     mode. The icons inherit from here too, since they are currentColor. */
+  color: var(--gray-800);
 }
-.dropdown-item--danger { color: #b91c1c; }
+/* --danger-fg only exists in the dark theme, so the fallback gives a red strong
+   enough for the light panel and the dark theme supplies the pale one a dark
+   panel needs. A single hardcoded value cannot serve both. */
+.dropdown-item--danger { color: var(--danger-fg, var(--danger)); }
 .dropdown-item--danger:hover { background: var(--danger-bg); }
 .dropdown-item :deep(svg) { width: 15px; height: 15px; }
 .dropdown-item:hover { background: var(--gray-50); }
@@ -1006,7 +1014,7 @@ export default {
   display: flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; padding: 0;
   background: none; border: none; border-radius: 7px;
-  color: var(--gray-400); cursor: pointer;
+  color: var(--text-subtle); cursor: pointer;
 }
 .reveal:hover { color: var(--brand-600, #0d9488); background: var(--brand-50, #f0fdfa); }
 .reveal :deep(svg) { width: 17px; height: 17px; }
@@ -1021,7 +1029,7 @@ export default {
 .strength-2 { background: #ca8a04; }
 .strength-3 { background: #0d9488; }
 .strength-4 { background: #15803d; }
-.strength-label { font-size: 11px; color: var(--gray-500); min-width: 58px; }
+.strength-label { font-size: 11px; color: var(--text-muted); min-width: 58px; }
 .policy-list { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: var(--gray-600); }
 .policy-list li { margin-bottom: 2px; }
 .form-hint--error { color: var(--danger, #b91c1c); }
@@ -1084,11 +1092,11 @@ export default {
 .notif-content { min-width: 0; display: block; }
 .notif-item-title { display: block; font-size: 13px; font-weight: 600; color: var(--gray-800); }
 .notif-item-msg   { display: block; font-size: 12.5px; color: var(--gray-600); margin-top: 2px; line-height: 1.5; }
-.notif-item-time  { display: block; font-size: 11px; color: var(--gray-400); margin-top: 5px; }
+.notif-item-time  { display: block; font-size: 11px; color: var(--text-subtle); margin-top: 5px; }
 
 .notif-empty {
   padding: 60px 30px; text-align: center;
-  color: var(--gray-400);
+  color: var(--text-subtle);
   display: flex; flex-direction: column; align-items: center; gap: 6px;
 }
 .notif-empty-icon { color: var(--gray-300); margin-bottom: 8px; }

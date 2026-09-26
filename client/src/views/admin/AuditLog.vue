@@ -231,7 +231,7 @@ export default {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--gray-500);
+  color: var(--text-muted);
 }
 .detail-grid pre {
   margin: 0;
@@ -247,7 +247,7 @@ export default {
 }
 .btn-outline { border: 1px solid var(--gray-200); background: var(--white); color: var(--gray-600); }
 .btn-outline:hover { background: var(--gray-50); }
-.empty-state { text-align: center; padding: 40px 16px; color: var(--gray-400); }
+.empty-state { text-align: center; padding: 40px 16px; color: var(--text-subtle); }
 .empty-icon { font-size: 30px; display: block; margin-bottom: 8px; }
 @media (max-width: 900px) { .detail-grid { grid-template-columns: 1fr; } }
 </style>
