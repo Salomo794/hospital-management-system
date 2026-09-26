@@ -1,11 +1,25 @@
 <template>
   <div class="portal-page">
     <header class="portal-header">
-      <div>
+      <div class="portal-header-title">
         <strong>MediCare Patient Portal</strong>
         <span v-if="patient">{{ patient.first_name }} {{ patient.last_name }}</span>
       </div>
-      <button v-if="token" class="btn btn-sm btn-outline" @click="logout">Sign out</button>
+      <div class="portal-header-actions">
+        <!-- A patient reaches this page without the staff header, so the theme
+             control has to live here too. Same store and same stored key as the
+             staff toggle, so the choice follows them between the two. -->
+        <button
+          type="button"
+          class="theme-toggle"
+          @click="uiStore.toggleDark()"
+          :aria-label="uiStore.dark ? 'Switch to light mode' : 'Switch to dark mode'"
+          :title="uiStore.dark ? 'Switch to light mode' : 'Switch to dark mode'"
+        >
+          <span v-html="uiStore.dark ? sunIcon : moonIcon" />
+        </button>
+        <button v-if="token" class="btn btn-sm btn-outline" @click="logout">Sign out</button>
+      </div>
     </header>
 
     <main class="portal-shell">
@@ -164,11 +178,20 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { formatCurrency, formatDate, getStatusColor } from '../../utils/helpers'
 import { getStoredItem, getStoredJson, removeStoredItem, setStoredItem, setStoredJson } from '../../utils/storage'
+import { useUiStore } from '../../store/ui'
+
+// The theme control in the header. The store is the same one the staff side uses,
+// so the toggle writes the same key and the page follows the rest of the app.
+const svg = body =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+const moonIcon = svg('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/>')
+const sunIcon = svg('<circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4 7 7M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6"/>')
 
 export default {
   name: 'PatientPortal',
   setup() {
     const portalApi = axios.create({ baseURL: '/api' })
+    const uiStore = useUiStore()
     const token = ref(getStoredItem('portal-token'))
     const patient = ref(getStoredJson('portal-patient', value => !!value?.id))
     const loginForm = reactive({ identifier: '', portal_pin: '' })
@@ -608,46 +631,75 @@ export default {
       paymentMethods, mobileMoneyPhones, mobileMoneyNetworks, mobileMoneyConfig, mobileMoneyPaymentIds,
       canPayAnything, paymentMethodOptions,
       canPayBill, isBillCancelled, isPayingBill, login, logout, loadPortalData, checkIn, payBill,
-      outstanding, formatCurrency, formatDate, formatTime, formatLabel, getStatusColor
+      outstanding, formatCurrency, formatDate, formatTime, formatLabel, getStatusColor,
+      uiStore, moonIcon, sunIcon
     }
   }
 }
 </script>
 
 <style scoped>
-.portal-page { min-height: 100vh; background: #f1f5f9; color: #1e293b; }
-.portal-header { min-height: 64px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; background: #0f766e; color: white; }
-.portal-header div { display: flex; gap: 18px; align-items: center; }
+/* The portal is opened by patients on their own phones, often at night, so it
+   follows the same theme as the rest of the app. Every colour below is a design
+   token rather than a literal, which is the whole fix: the tokens are remapped
+   once on <html> for the dark theme, so none of these rules need a dark-specific
+   twin. The two rules at the bottom are the only exceptions, and both are there
+   for contrast rather than looks. */
+.portal-page { min-height: 100vh; background: var(--bg-app); color: var(--gray-800); }
+.portal-header { min-height: 64px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; background: var(--brand-700); color: #fff; }
+.portal-header > div { display: flex; gap: 18px; align-items: center; }
+.portal-header-actions { gap: 10px; }
 .portal-header span { color: rgba(255,255,255,.75); font-size: 13px; }
+.theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; padding: 0;
+  background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.28);
+  border-radius: 8px; color: #fff; cursor: pointer;
+}
+.theme-toggle:hover { background: rgba(255,255,255,.24); }
+.theme-toggle :deep(svg) { width: 16px; height: 16px; }
 .portal-shell { width: min(100% - 32px, 1000px); margin: 28px auto; display: grid; gap: 18px; }
-.portal-card, .welcome-card { background: white; border: 1px solid #e2e8f0; border-radius: 14px; padding: 24px; box-shadow: 0 8px 24px rgba(15,23,42,.06); }
+.portal-card, .welcome-card { background: var(--surface); border: 1px solid var(--gray-200); border-radius: 14px; padding: 24px; box-shadow: var(--shadow-card); }
 .auth-card, .kiosk-card { width: min(100%, 520px); justify-self: center; }
 h1, h2, p { margin-top: 0; }
 form, .payment-controls { display: grid; gap: 14px; }
 label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
-input, select { width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; }
+input, select { width: 100%; padding: 10px 12px; border: 1px solid var(--gray-300); border-radius: 8px; font: inherit; background: var(--surface-elevated); color: var(--gray-800); }
 .btn-block { width: 100%; }
 .welcome-card { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
-.eyebrow { color: #0d9488; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+.eyebrow { color: var(--brand-600); font-size: 12px; font-weight: 700; text-transform: uppercase; }
 .welcome-card h1 { margin: 4px 0; }
-.welcome-card p { margin: 0; color: #64748b; }
-.queue-card { display: grid; gap: 3px; padding: 14px 18px; border-radius: 10px; background: #ccfbf1; text-align: right; }
-.queue-card span, .queue-card small { color: #115e59; font-size: 12px; }
+.welcome-card p { margin: 0; color: var(--gray-500); }
+.queue-card { display: grid; gap: 3px; padding: 14px 18px; border-radius: 10px; background: var(--brand-100); text-align: right; }
+.queue-card span, .queue-card small { color: var(--brand-800); font-size: 12px; }
 .portal-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
-.portal-tabs button { border: 1px solid #cbd5e1; background: white; border-radius: 8px; padding: 9px 14px; cursor: pointer; }
-.portal-tabs button.active { background: #0d9488; border-color: #0d9488; color: white; }
+.portal-tabs button { border: 1px solid var(--gray-300); background: var(--surface-elevated); color: var(--gray-700); border-radius: 8px; padding: 9px 14px; cursor: pointer; }
+.portal-tabs button.active { background: var(--brand-600); border-color: var(--brand-600); color: #fff; }
 .record-list { display: grid; }
-.record-row, .bill-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 0; border-bottom: 1px solid #e2e8f0; }
+.record-row, .bill-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--gray-200); }
 .record-row:last-child, .bill-row:last-child { border-bottom: 0; }
 .record-row div, .bill-summary { display: grid; gap: 4px; }
-.record-row span, .bill-summary span { color: #64748b; font-size: 13px; }
+.record-row span, .bill-summary span { color: var(--gray-500); font-size: 13px; }
 .payment-controls { grid-template-columns: 130px auto; align-items: center; }
-.empty-copy { color: #64748b; padding: 20px 0; }
+.empty-copy { color: var(--gray-500); padding: 20px 0; }
 .error-message, .success-message, .checkin-result { padding: 10px 12px; border-radius: 8px; font-size: 13px; }
-.error-message { color: #991b1b; background: #fee2e2; }
-.success-message, .checkin-result { color: #115e59; background: #ccfbf1; display: grid; gap: 4px; margin-top: 14px; }
-.loading-state { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 50px; color: #64748b; }
-.spinner { width: 24px; height: 24px; border: 3px solid #cbd5e1; border-top-color: #0d9488; border-radius: 50%; animation: spin .8s linear infinite; }
+/* The -fg tokens only exist in the dark theme, so the fallback supplies today's
+   dark-on-pale colours in light mode and the retuned pair in dark mode. */
+.error-message { color: var(--danger-fg, #991b1b); background: var(--danger-bg); }
+.success-message, .checkin-result { color: var(--success-fg, #115e59); background: var(--success-bg); display: grid; gap: 4px; margin-top: 14px; }
+.loading-state { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 50px; color: var(--gray-500); }
+.spinner { width: 24px; height: 24px; border: 3px solid var(--gray-300); border-top-color: var(--brand-600); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 640px) { .portal-header div { display: grid; gap: 2px; } .welcome-card, .record-row, .bill-row { align-items: flex-start; flex-direction: column; } .payment-controls { width: 100%; } }
+
+/* The only two rules that need to know the theme exists. Both are contrast, not
+   decoration: --brand-600 clears the floor on white but not on the dark card, and
+   the queue tint is pale enough that its dark-on-dark pairing has to be restated. */
+:global([data-theme="dark"]) .eyebrow { color: var(--brand-300); }
+:global([data-theme="dark"]) .queue-card span,
+:global([data-theme="dark"]) .queue-card small { color: var(--gray-600); }
+/* Tells the browser to render its own widgets - number spinners, the select
+   dropdown, the autofill caret - against a dark surface. */
+:global([data-theme="dark"]) .portal-page { color-scheme: dark; }
+
+@media (max-width: 640px) { .portal-header-title { display: grid; gap: 2px; } .welcome-card, .record-row, .bill-row { align-items: flex-start; flex-direction: column; } .payment-controls { width: 100%; } }
 </style>

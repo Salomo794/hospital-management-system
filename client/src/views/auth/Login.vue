@@ -20,7 +20,9 @@
           Role-based access &middot; Authenticated sessions
         </div>
       </div>
-      <div class="login-right">
+      <!-- auth-surface keeps the global dark remap from repainting this panel's
+           fields; see the block of the same name in assets/styles.css. -->
+      <div class="login-right auth-surface">
         <form @submit.prevent="handleLogin" class="login-form" novalidate>
           <h2>Welcome Back</h2>
           <p class="subtitle">Sign in to your account</p>

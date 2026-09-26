@@ -1,6 +1,8 @@
 <template>
   <div class="auth-page">
-    <div class="auth-card">
+    <!-- auth-surface keeps the global dark remap from repainting this card's
+         fields; see the block of the same name in assets/styles.css. -->
+    <div class="auth-card auth-surface">
       <div class="auth-head">
         <h2>Choose a new password</h2>
         <p class="subtitle" v-if="!expired">Pick something you have not used before. You will be signed out everywhere else.</p>
