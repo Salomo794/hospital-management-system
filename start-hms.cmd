@@ -38,6 +38,22 @@ if errorlevel 1 (
 )
 popd
 
+rem Take a verified backup before migrating. This is the one moment a rollback
+rem is genuinely needed, because a bad migration is what you would be rolling
+rem back from. Set BACKUP_ON_LAUNCH=false to skip it.
+if /i "%BACKUP_ON_LAUNCH%"=="false" goto skip_backup
+pushd "%ROOT%server"
+echo Backing up the database before migrating...
+node config\backup.js --label pre-launch
+if errorlevel 1 (
+  echo.
+  echo Backup failed. Refusing to migrate without a known-good copy to roll back to.
+  popd
+  exit /b 1
+)
+popd
+:skip_backup
+
 rem Apply idempotent schema migrations before accepting traffic.
 pushd "%ROOT%server"
 node config\setup.js

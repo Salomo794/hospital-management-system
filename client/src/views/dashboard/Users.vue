@@ -110,16 +110,28 @@
             </div>
             <div class="form-group">
               <label for="nu-password">Password *</label>
-              <input
-                id="nu-password"
-                type="password"
-                v-model="form.password"
-                required
-                :minlength="PASSWORD_MIN_LENGTH"
-                :maxlength="PASSWORD_MAX_LENGTH"
-                autocomplete="new-password"
-                :aria-describedby="'nu-password-help'"
-              />
+              <div class="input-wrap">
+                <input
+                  id="nu-password"
+                  :type="showPassword ? 'text' : 'password'"
+                  v-model="form.password"
+                  required
+                  :minlength="PASSWORD_MIN_LENGTH"
+                  :maxlength="PASSWORD_MAX_LENGTH"
+                  autocomplete="new-password"
+                  :aria-describedby="'nu-password-help'"
+                />
+                <!-- An admin has to read this password to pass it to the new
+                     member of staff, which is the whole reason this form exists. -->
+                <button
+                  type="button" class="reveal"
+                  @click="showPassword = !showPassword"
+                  :aria-label="showPassword ? 'Hide password' : 'Show password'"
+                  :title="showPassword ? 'Hide password' : 'Show password'"
+                >
+                  <span v-html="showPassword ? icons.eyeOff : icons.eye" />
+                </button>
+              </div>
               <div class="strength-meter" :id="'nu-password-help'">
                 <div class="strength-bar"><span :class="strengthClass" :style="{ width: strengthPercent }" /></div>
                 <span class="strength-label">{{ strengthLabel }}</span>
@@ -154,6 +166,15 @@ import {
 } from '../../utils/passwordPolicy'
 import { phoneProblem as checkPhone, PHONE_MAX_DIGITS } from '../../utils/phone'
 
+// The same eye pair the sign-in and reset screens use, so the control looks the
+// same wherever a password is typed.
+const s = body =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+const icons = {
+  eye: s('<path d="M2.2 12S5.6 5.5 12 5.5 21.8 12 21.8 12 18.4 18.5 12 18.5 2.2 12 2.2 12Z"/><circle cx="12" cy="12" r="3.1"/>'),
+  eyeOff: s('<path d="M9.9 5.7A9.6 9.6 0 0 1 12 5.5c6.4 0 9.8 6.5 9.8 6.5a17.6 17.6 0 0 1-3.4 4.2"/><path d="M6.4 7.4A17.4 17.4 0 0 0 2.2 12S5.6 18.5 12 18.5a9.7 9.7 0 0 0 4.2-.9"/><path d="M9.9 9.9a3.1 3.1 0 0 0 4.3 4.3"/><path d="M3 3l18 18"/>'),
+}
+
 export default {
   name: 'Users',
   setup() {
@@ -169,6 +190,9 @@ export default {
     /* ── create-user modal ── */
     const showCreate = ref(false)
     const creating = ref(false)
+    // Cleared when the modal opens, so a password left visible by the last use is
+    // not still on screen for the next person who opens this.
+    const showPassword = ref(false)
     const emptyForm = () => ({
       first_name: '', last_name: '', email: '',
       password: '', role: '', phone: ''
@@ -177,6 +201,7 @@ export default {
 
     const openCreate = () => {
       Object.assign(form, emptyForm())
+      showPassword.value = false
       showCreate.value = true
     }
 
@@ -265,7 +290,7 @@ export default {
     return {
       users, total, page, limit, search, roleFilter, loading, loadUsers, debouncedLoad,
       getRoleColor, formatDateTime, formatStatusLabel,
-      showCreate, creating, form, openCreate, createUser,
+      showCreate, creating, form, openCreate, createUser, showPassword, icons,
       passwordProblems, strengthLabel, strengthClass, strengthPercent,
       phoneProblem, PHONE_MAX_DIGITS,
       PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH
@@ -286,8 +311,7 @@ export default {
 .add-user-btn { white-space: nowrap; }
 .add-user-btn svg { width: 15px; height: 15px; }
 
-.strength-meter { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
-.strength-bar { flex: 1; height: 5px; background: var(--gray-200); border-radius: 3px; overflow: hidden; }
+.strength-meter { display: flex; align-items: center; gap: 10px; margin-top: 6px; }.strength-bar { flex: 1; height: 5px; background: var(--gray-200); border-radius: 3px; overflow: hidden; }
 .strength-bar span { display: block; height: 100%; border-radius: 3px; transition: width .2s ease, background .2s ease; }
 .strength-0 { background: #dc2626; }
 .strength-1 { background: #ea580c; }
@@ -298,6 +322,19 @@ export default {
 .policy-list { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: var(--gray-600); }
 .policy-list li { margin-bottom: 2px; }
 .field-error { display: block; margin-top: 4px; font-size: 12px; color: var(--danger, #b91c1c); }
+
+/* Password reveal, styled to match the sign-in and reset screens */
+.input-wrap { position: relative; display: flex; align-items: center; }
+.input-wrap input { padding-right: 44px; }
+.reveal {
+  position: absolute; right: 8px;
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0;
+  background: none; border: none; border-radius: 7px;
+  color: var(--gray-400); cursor: pointer;
+}
+.reveal:hover { color: var(--brand-600, #0d9488); background: var(--brand-50, #f0fdfa); }
+.reveal :deep(svg) { width: 17px; height: 17px; }
 
 .empty-state { text-align: center; padding: 60px 20px; color: var(--gray-500); }
 .empty-icon { font-size: 40px; display: block; margin-bottom: 12px; }

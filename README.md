@@ -158,6 +158,7 @@ The API integration tests run against a throwaway SQLite database, so they never
 | `server/test/procurement.test.js` | Purchase-order workflow, separation of duties, partial receipts, stock-ledger consistency |
 | `server/test/migrations.test.js` | Schema invariants and legacy-data migrations |
 | `server/test/time.test.js` | Hospital-timezone and daylight-saving handling |
+| `server/test/backup.test.js` | Backup contents, verification, rotation, collision, and a restore round trip |
 | `server/test/password-reset.test.js` | Reset requests, enumeration resistance, token lifetime, session revocation, mail failure |
 | `server/test/password-policy.test.js` | Shared password rules and client/server policy parity |
 
@@ -277,6 +278,17 @@ Every backup is integrity-checked and reopened before the command reports succes
 | `npm run db:backup -- --restore <file>` | Restore a backup, keeping a pre-restore copy first |
 
 An untested backup is not a backup. Schedule the command, and occasionally run `--verify` or a restore into a scratch database. The `--restore` path copies the current database aside before replacing it, so a restore is itself reversible.
+
+`start-hms.cmd` takes a verified backup **before** it applies schema migrations, and refuses to migrate if that backup fails. A bad migration is the one situation you genuinely need a rollback for, and it should not depend on somebody having remembered to make one. Set `BACKUP_ON_LAUNCH=false` to skip it. On a first run there is no database yet, which is reported and passed over rather than treated as a failure.
+
+A backup that runs only on restart is not enough for a server left up for weeks, so schedule it as well. On Windows, run this once from an elevated prompt to add a nightly task:
+
+```bat
+schtasks /create /tn "MediCare HMS backup" /sc daily /st 02:30 ^
+  /tr "\"C:\Program Files\nodejs\node.exe\" \"C:\path\to\hospital-management-system\server\config\backup.js\" --label nightly --require" /f
+```
+
+`--require` makes a missing database a failure, so a typo in the path is noticed in the morning rather than silently skipped. The command exits non-zero on any real failure, which is what makes it usable from a scheduler or a monitoring check.
 
 ### Refunds and the audit trail
 

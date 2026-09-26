@@ -254,26 +254,48 @@
           <div class="modal-body">
             <div class="form-group">
               <label for="cp-current">Current password *</label>
-              <input
-                id="cp-current"
-                type="password"
-                v-model="passwordForm.currentPassword"
-                required
-                autocomplete="current-password"
-              />
+              <div class="input-wrap">
+                <input
+                  id="cp-current"
+                  :type="showCurrentPassword ? 'text' : 'password'"
+                  v-model="passwordForm.currentPassword"
+                  required
+                  autocomplete="current-password"
+                />
+                <button
+                  type="button" class="reveal"
+                  @click="showCurrentPassword = !showCurrentPassword"
+                  :aria-label="showCurrentPassword ? 'Hide password' : 'Show password'"
+                  :title="showCurrentPassword ? 'Hide password' : 'Show password'"
+                >
+                  <span v-html="showCurrentPassword ? icons.eyeOff : icons.eye" />
+                </button>
+              </div>
             </div>
             <div class="form-group">
               <label for="cp-new">New password *</label>
-              <input
-                id="cp-new"
-                type="password"
-                v-model="passwordForm.newPassword"
-                required
-                :minlength="PASSWORD_MIN_LENGTH"
-                :maxlength="PASSWORD_MAX_LENGTH"
-                autocomplete="new-password"
-                aria-describedby="cp-new-help"
-              />
+              <div class="input-wrap">
+                <input
+                  id="cp-new"
+                  :type="showNewPassword ? 'text' : 'password'"
+                  v-model="passwordForm.newPassword"
+                  required
+                  :minlength="PASSWORD_MIN_LENGTH"
+                  :maxlength="PASSWORD_MAX_LENGTH"
+                  autocomplete="new-password"
+                  aria-describedby="cp-new-help"
+                />
+                <!-- One toggle for both new fields, so the two are always
+                     compared the same way rather than one being visible. -->
+                <button
+                  type="button" class="reveal"
+                  @click="showNewPassword = !showNewPassword"
+                  :aria-label="showNewPassword ? 'Hide passwords' : 'Show passwords'"
+                  :title="showNewPassword ? 'Hide passwords' : 'Show passwords'"
+                >
+                  <span v-html="showNewPassword ? icons.eyeOff : icons.eye" />
+                </button>
+              </div>
               <div class="strength-meter" id="cp-new-help">
                 <div class="strength-bar"><span :class="strengthClass" :style="{ width: strengthPercent }" /></div>
                 <span class="strength-label">{{ strengthLabel }}</span>
@@ -287,13 +309,23 @@
             </div>
             <div class="form-group">
               <label for="cp-confirm">Confirm new password *</label>
-              <input
-                id="cp-confirm"
-                type="password"
-                v-model="passwordForm.confirmPassword"
-                required
-                autocomplete="new-password"
-              />
+              <div class="input-wrap">
+                <input
+                  id="cp-confirm"
+                  :type="showNewPassword ? 'text' : 'password'"
+                  v-model="passwordForm.confirmPassword"
+                  required
+                  autocomplete="new-password"
+                />
+                <button
+                  type="button" class="reveal"
+                  @click="showNewPassword = !showNewPassword"
+                  :aria-label="showNewPassword ? 'Hide passwords' : 'Show passwords'"
+                  :title="showNewPassword ? 'Hide passwords' : 'Show passwords'"
+                >
+                  <span v-html="showNewPassword ? icons.eyeOff : icons.eye" />
+                </button>
+              </div>
               <span v-if="confirmMismatch" class="form-hint form-hint--error">The two passwords do not match.</span>
             </div>
           </div>
@@ -361,6 +393,10 @@ const icons = {
   audit:        s('<path d="M9 4h9a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1z"/><path d="M17 5h1a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1"/><path d="M8 11h8M8 15h5"/>'),
   key:          s('<circle cx="8" cy="15" r="4"/><path d="M11 12 20 3M17 3h3v3"/>'),
   user:         s('<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>'),
+
+  // password reveal, matching the pair already on the sign-in and reset screens
+  eye:          s('<path d="M2.2 12S5.6 5.5 12 5.5 21.8 12 21.8 12 18.4 18.5 12 18.5 2.2 12 2.2 12Z"/><circle cx="12" cy="12" r="3.1"/>'),
+  eyeOff:       s('<path d="M9.9 5.7A9.6 9.6 0 0 1 12 5.5c6.4 0 9.8 6.5 9.8 6.5a17.6 17.6 0 0 1-3.4 4.2"/><path d="M6.4 7.4A17.4 17.4 0 0 0 2.2 12S5.6 18.5 12 18.5a9.7 9.7 0 0 0 4.2-.9"/><path d="M9.9 9.9a3.1 3.1 0 0 0 4.3 4.3"/><path d="M3 3l18 18"/>'),
 }
 
 const routeMeta = [
@@ -551,11 +587,17 @@ export default {
     /* ── change password ── */
     const showPasswordModal = ref(false)
     const savingPassword = ref(false)
+    // Reset on open, so a password left on screen by the last use of the dialog
+    // does not greet the next person who opens it.
+    const showCurrentPassword = ref(false)
+    const showNewPassword = ref(false)
     const emptyPasswordForm = () => ({ currentPassword: '', newPassword: '', confirmPassword: '' })
     const passwordForm = reactive(emptyPasswordForm())
 
     const openPasswordModal = () => {
       Object.assign(passwordForm, emptyPasswordForm())
+      showCurrentPassword.value = false
+      showNewPassword.value = false
       showPasswordModal.value = true
       dropdownOpen.value = false
     }
@@ -627,6 +669,7 @@ export default {
       formatRole, typeColor, relativeTime,
       loadNotifications, markAllRead, openNotification, logout,
       showPasswordModal, savingPassword, passwordForm,
+      showCurrentPassword, showNewPassword,
       showProfileModal, savingProfile, profileForm,
       openProfileModal, closeProfileModal, submitProfile, profilePhoneProblem, PHONE_MAX_DIGITS,
       passwordProblems, confirmMismatch, strengthLabel, strengthClass, strengthPercent,
@@ -954,6 +997,19 @@ export default {
 .dropdown-item--danger:hover { background: var(--danger-bg); }
 .dropdown-item :deep(svg) { width: 15px; height: 15px; }
 .dropdown-item:hover { background: var(--gray-50); }
+
+/* Password reveal, styled to match the sign-in and reset screens */
+.input-wrap { position: relative; display: flex; align-items: center; }
+.input-wrap input { padding-right: 44px; }
+.reveal {
+  position: absolute; right: 8px;
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0;
+  background: none; border: none; border-radius: 7px;
+  color: var(--gray-400); cursor: pointer;
+}
+.reveal:hover { color: var(--brand-600, #0d9488); background: var(--brand-50, #f0fdfa); }
+.reveal :deep(svg) { width: 17px; height: 17px; }
 
 /* Change-password form */
 .profile-note { margin: 0 0 14px; display: block; }

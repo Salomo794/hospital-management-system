@@ -19,15 +19,22 @@ Options:
   --dir <path>       Where to write backups (default: server/backups)
   --keep <n>         How many backups to retain (default: ${DEFAULT_KEEP})
   --label <text>     Extra note recorded in the manifest, e.g. "pre-upgrade"
+  --require          Treat a missing database as a failure rather than a
+                     first run, for unattended scheduled jobs
   --restore <file>   Restore a backup into the configured database, then exit
   --verify <file>    Check a backup opens and passes its integrity check
   --list             Show retained backups, newest first
+
+Exit codes:
+  0  a backup was taken and verified, or there was no database to copy yet
+  1  the backup failed, could not be verified, or was refused
 
 Examples:
   npm run db:backup -- --label nightly
   npm run db:backup -- --list
   npm run db:backup -- --verify server/backups/hospital-2026-01-16.db
   npm run db:backup -- --restore server/backups/hospital-2026-01-16.db
+  npm run db:backup -- --label nightly --require
 `;
 
 function parseArgs(argv) {
@@ -47,6 +54,7 @@ function parseArgs(argv) {
       case '--dir': options.dir = next(); break;
       case '--keep': options.keep = Number.parseInt(next(), 10); break;
       case '--label': options.label = next(); break;
+      case '--require': options.requireDatabase = true; break;
       case '--restore': options.restore = next(); break;
       case '--verify': options.verify = next(); break;
       case '--list': options.list = true; break;
@@ -60,8 +68,13 @@ function parseArgs(argv) {
   return options;
 }
 
+// Milliseconds are included because a name with only second precision collides:
+// the launcher takes a backup on every start, and two restarts inside the same
+// second - a crash loop, a supervised restart - would produce the same filename
+// and the second run would refuse rather than overwrite. The format is
+// fixed-width, so the names still sort chronologically as plain strings.
 function timestamp(date = new Date()) {
-  const pad = n => String(n).padStart(2, '0');
+  const pad = (n, width = 2) => String(n).padStart(width, '0');
   return [
     date.getUTCFullYear(),
     pad(date.getUTCMonth() + 1),
@@ -70,6 +83,8 @@ function timestamp(date = new Date()) {
     pad(date.getUTCHours()),
     pad(date.getUTCMinutes()),
     pad(date.getUTCSeconds()),
+    '-',
+    pad(date.getUTCMilliseconds(), 3),
     'Z',
   ].join('');
 }
@@ -166,8 +181,16 @@ function rotate(directory, keep) {
 function create(options) {
   const databasePath = resolveDatabasePath();
   if (!fs.existsSync(databasePath)) {
-    console.error(`No database at ${databasePath}. Run npm run db:setup first.`);
-    process.exit(1);
+    // A first run has no database to copy yet. That is a normal state, not a
+    // failure, so the launcher can take a backup before migrating without
+    // blocking a fresh install. This keeps the contract simple: exit 0 means
+    // "there is a good copy, or there was nothing to copy".
+    console.log(`No database at ${databasePath} yet, so there is nothing to back up yet.`);
+    if (options.requireDatabase) {
+      console.error('--require was passed, so this counts as a failure.');
+      process.exit(1);
+    }
+    process.exit(0);
   }
 
   const directory = backupDirectory(options);
