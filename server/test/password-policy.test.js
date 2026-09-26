@@ -12,16 +12,17 @@ const { validateRegistration } = require('../middleware/validation');
 // worse than no policy: it looks like a control and is not one.
 
 test('short passwords are rejected', () => {
-  assert.match(validatePassword('short').join(' '), /at least 12 characters/i);
+  assert.match(validatePassword('short').join(' '), new RegExp(`at least ${MIN_LENGTH} characters`, 'i'));
   assert.equal(validatePassword('').length > 0, true);
-  assert.equal(validatePassword('a'.repeat(11)).length > 0, true);
+  // One character under the floor, and the character just below it.
+  assert.equal(validatePassword('a'.repeat(MIN_LENGTH - 1)).length > 0, true);
 });
 
 test('the demo password that ships with the project is rejected', () => {
   // Every seeded account uses this, so it is the first thing an attacker tries.
   const problems = validatePassword('password123');
   assert.equal(problems.length > 0, true);
-  assert.match(problems.join(' '), /common|12 characters/i);
+  assert.match(problems.join(' '), /common|\d+ characters/i);
 });
 
 test('other well-known passwords are rejected', () => {
@@ -31,7 +32,7 @@ test('other well-known passwords are rejected', () => {
 });
 
 test('length alone is not enough when the characters are predictable', () => {
-  // These all satisfy "at least 12 characters".
+  // These all satisfy the length floor, and are refused on predictability.
   for (const predictable of ['aaaaaaaaaaaa', '123456789012', 'abcdefghijkl']) {
     const problems = validatePassword(predictable).join(' ');
     assert.equal(problems.length > 0, true, `"${predictable}" should be rejected`);
@@ -75,9 +76,17 @@ test('an over-long password is refused rather than silently truncated by bcrypt'
   assert.match(validatePassword('a'.repeat(300)).join(' '), /at most/i);
 });
 
-test('the minimum length is twelve', () => {
-  assert.equal(MIN_LENGTH, 12);
-  assert.equal(isAcceptable('a'.repeat(12), {}) === false, true, 'repeats are still refused');
+test('the minimum length is a floor, not the whole policy', () => {
+  // Pinned deliberately: the owner lowered this from twelve to eight so that a
+  // twelve-character floor was not blocking staff accounts from being created.
+  // The compensating rules are what have to carry the weight, so they are the
+  // ones asserted above.
+  assert.equal(MIN_LENGTH, 8);
+  assert.equal(
+    isAcceptable('a'.repeat(MIN_LENGTH), {}),
+    false,
+    'a password of exactly the minimum length is still refused when it is all repeats'
+  );
 });
 
 test('the client and server policies agree', async () => {
@@ -153,14 +162,14 @@ test('registration enforces the same policy', async () => {
   const weak = { ...good, password: 'password123' };
   const weakResult = await run(weak);
   assert.equal(weakResult.status, 400);
-  assert.match(weakResult.payload.message, /common|12 characters/i);
+  assert.match(weakResult.payload.message, /common|\d+ characters/i);
   // Every problem is reported at once rather than one per attempt.
   assert.equal(Array.isArray(weakResult.payload.errors), true);
   assert.equal(weakResult.payload.errors[0].path, 'password');
 
   const short = await run({ ...good, password: 'short' });
   assert.equal(short.status, 400);
-  assert.match(short.payload.message, /at least 12 characters/i);
+  assert.match(short.payload.message, /at least \d+ characters/i);
 
   // The policy also checks the account being created.
   const selfRef = await run({ ...good, email: 'grace.mwangi@hospital.com', password: 'gracemwangi2026' });

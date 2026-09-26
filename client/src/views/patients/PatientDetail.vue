@@ -163,11 +163,11 @@
             <label>Date of birth<input v-model="editForm.date_of_birth" type="date" :max="today" required /></label>
             <label>Gender<select v-model="editForm.gender" required><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select></label>
             <label>Blood type<select v-model="editForm.blood_type"><option value="">Unknown</option><option v-for="type in bloodTypes" :key="type">{{ type }}</option></select></label>
-            <label>Phone<input v-model.trim="editForm.phone" /></label>
+            <label>Phone<input v-model.trim="editForm.phone" type="tel" inputmode="numeric" pattern="[0-9]*" :maxlength="PHONE_MAX_DIGITS" placeholder="Digits only" /></label>
             <label class="full">Email<input v-model.trim="editForm.email" type="email" /></label>
             <label class="full">Address<input v-model.trim="editForm.address" /></label>
             <label>Emergency contact<input v-model.trim="editForm.emergency_contact_name" /></label>
-            <label>Emergency phone<input v-model.trim="editForm.emergency_contact_phone" /></label>
+            <label>Emergency phone<input v-model.trim="editForm.emergency_contact_phone" type="tel" inputmode="numeric" pattern="[0-9]*" :maxlength="PHONE_MAX_DIGITS" placeholder="Digits only" /></label>
             <label>Insurance provider<input v-model.trim="editForm.insurance_provider" /></label>
             <label>Insurance number<input v-model.trim="editForm.insurance_number" /></label>
             <label class="full">Allergies<textarea v-model="editForm.allergies" rows="2" /></label>
@@ -190,6 +190,7 @@ import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { useAuthStore } from '../../store/auth'
 import { formatDate, formatTime, formatCurrency, getStatusColor } from '../../utils/helpers'
+import { PHONE_MAX_DIGITS } from '../../utils/phone'
 
 const emptyEditForm = () => ({
   first_name: '', last_name: '', date_of_birth: '', gender: 'other', blood_type: '',
@@ -379,7 +380,8 @@ export default {
       patient, history, tab, showEditModal, loading, saving, error, editForm,
       resettingPortalPin, newPortalPin, canResetPortalPin,
       today, bloodTypes, formatDate, formatTime, formatCurrency, getStatusColor,
-      loadPatient, openEditModal, closeEditModal, savePatient, resetPortalPin
+      loadPatient, openEditModal, closeEditModal, savePatient, resetPortalPin,
+      PHONE_MAX_DIGITS
     }
   }
 }

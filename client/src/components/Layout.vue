@@ -220,7 +220,11 @@
             </div>
             <div class="form-group">
               <label for="un-phone">Phone</label>
-              <input id="un-phone" type="tel" v-model.trim="profileForm.phone" maxlength="30" autocomplete="tel" placeholder="Optional" />
+              <input
+                id="un-phone" type="tel" v-model.trim="profileForm.phone" inputmode="numeric" pattern="[0-9]*"
+                :maxlength="PHONE_MAX_DIGITS" autocomplete="tel" placeholder="Digits only, e.g. 0788123456"
+              />
+              <span v-if="profilePhoneProblem" class="form-hint form-hint--error">{{ profilePhoneProblem }}</span>
             </div>
           </div>
           <div class="modal-footer">
@@ -319,6 +323,7 @@ import { useToast } from '../store/toast'
 import {
   validatePassword, passwordStrength, MIN_LENGTH as PASSWORD_MIN_LENGTH, MAX_LENGTH as PASSWORD_MAX_LENGTH
 } from '../utils/passwordPolicy'
+import { phoneProblem as checkPhone, PHONE_MAX_DIGITS } from '../utils/phone'
 
 /* ── inline SVG helper ── */
 const s = (d, extra = '') =>
@@ -515,11 +520,16 @@ export default {
       dropdownOpen.value = false
     }
     const closeProfileModal = () => { showProfileModal.value = false }
+    const profilePhoneProblem = computed(() => checkPhone(profileForm.phone))
 
     const submitProfile = async () => {
       if (savingProfile.value) return
       if (!profileForm.first_name.trim() || !profileForm.last_name.trim()) {
         toast.warning('Both a first and last name are required.')
+        return
+      }
+      if (profilePhoneProblem.value) {
+        toast.warning(profilePhoneProblem.value)
         return
       }
       savingProfile.value = true
@@ -618,7 +628,7 @@ export default {
       loadNotifications, markAllRead, openNotification, logout,
       showPasswordModal, savingPassword, passwordForm,
       showProfileModal, savingProfile, profileForm,
-      openProfileModal, closeProfileModal, submitProfile,
+      openProfileModal, closeProfileModal, submitProfile, profilePhoneProblem, PHONE_MAX_DIGITS,
       passwordProblems, confirmMismatch, strengthLabel, strengthClass, strengthPercent,
       openPasswordModal, closePasswordModal, submitPassword,
       PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH,

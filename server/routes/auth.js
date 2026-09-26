@@ -11,6 +11,7 @@ const { FixedWindowRateLimiter } = require('../utils/rateLimiter');
 const { recordAudit, pick } = require('../utils/audit');
 const { appTimezone } = require('../config/time');
 const { validatePassword } = require('../utils/passwordPolicy');
+const { phoneDigitsOnly, phoneProblem, normalisePhone, PHONE_MIN_DIGITS, PHONE_MAX_DIGITS } = require('../utils/phone');
 const { withTransaction } = require('../utils/http');
 const mailer = require('../services/mailer');
 const {
@@ -336,12 +337,12 @@ router.put('/me', authenticate, asyncHandler(async (req, res) => {
     }
     if (field === 'phone') {
       const trimmed = String(value || '').trim();
-      if (trimmed.length > 30) throw new ApiError(400, 'phone is too long');
-      if (trimmed && !/^[\d\s()+.-]+$/.test(trimmed)) {
-        throw new ApiError(400, 'phone may only contain digits, spaces and + ( ) . - characters');
+      if (!phoneDigitsOnly(trimmed)) throw new ApiError(400, phoneProblem);
+      if (trimmed.length < PHONE_MIN_DIGITS || trimmed.length > PHONE_MAX_DIGITS) {
+        throw new ApiError(400, `Phone must be between ${PHONE_MIN_DIGITS} and ${PHONE_MAX_DIGITS} digits`);
       }
       updates.push('phone = ?');
-      values.push(trimmed || null);
+      values.push(normalisePhone(trimmed));
       continue;
     }
     updates.push(`${field} = ?`);

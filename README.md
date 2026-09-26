@@ -231,7 +231,7 @@ Staff accounts sit in front of protected health information, so a weak password 
 
 The rules are built around length and blocking the passwords that actually get guessed, rather than symbol counts that only push people towards `Password1!`:
 
-- At least 12 characters, and at most 200. bcrypt silently ignores anything past 72 bytes, so without an upper bound two different passwords could open the same account.
+- At least 8 characters, and at most 200. bcrypt silently ignores anything past 72 bytes, so without an upper bound two different passwords could open the same account. The floor is deliberately low so it never blocks someone from being created or signed in; the rules below are what carry the weight.
 - Known-leaked passwords are refused as substrings, so `password123`, `password1234` and `password123!` are all caught rather than only the exact string.
 - Length alone is not enough: repeated characters and ascending or descending runs are refused, so `aaaaaaaaaaaa` and `123456789012` do not pass.
 - The password may not contain the person's own name or email, nor words tied to this system.
@@ -239,6 +239,12 @@ The rules are built around length and blocking the passwords that actually get g
 The create-user form and the change-password dialog in the header menu both apply `client/src/utils/passwordPolicy.js` so a problem is explained while it is being typed. That module mirrors the server rules, and a parity test runs a corpus through both implementations and requires identical answers, so the two cannot drift apart silently.
 
 Demo seeding still writes `password123` for the fixture accounts, because those are development credentials and the README says as much. The policy would refuse that password for a real account.
+
+### Phone numbers
+
+Every field that holds a phone number — a staff account, the self-service profile, a patient, and a patient's emergency contact — accepts digits only, between 4 and 20 of them. One rule lives in `server/utils/phone.js` and is applied through `middleware/validation.js`; `client/src/utils/phone.js` mirrors it so a form can explain the problem while it is being typed, with a numeric keypad offered on a phone.
+
+The reason is not tidiness. Allowing `+250 788 123 456` next to `0788123456` means the same person is stored as two rows that never match, and a search or an SMS integration has to guess which spelling the caller meant. A blank field is still valid everywhere, and is stored as `NULL` rather than an empty string so that clearing a number and looking one up behave the same way.
 
 ### Staff names
 

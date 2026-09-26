@@ -8,10 +8,12 @@ import {
 // both implementations, so the two cannot drift apart unnoticed.
 
 describe('length', () => {
-  it('requires twelve characters', () => {
-    expect(MIN_LENGTH).toBe(12)
-    expect(validatePassword('short').join(' ')).toMatch(/at least 12 characters/i)
-    expect(validatePassword('a'.repeat(11)).length).toBeGreaterThan(0)
+  it('enforces the policy minimum', () => {
+    // Pinned deliberately: the owner set the floor at eight, replacing an
+    // earlier twelve that was blocking staff accounts from being created.
+    expect(MIN_LENGTH).toBe(8)
+    expect(validatePassword('short').join(' ')).toMatch(new RegExp(`at least ${MIN_LENGTH} characters`, 'i'))
+    expect(validatePassword('a'.repeat(MIN_LENGTH - 1)).length).toBeGreaterThan(0)
   })
 
   it('refuses a password longer than bcrypt can use', () => {
@@ -41,7 +43,8 @@ describe('passwords that appear in every credential list', () => {
 })
 
 describe('long but predictable', () => {
-  // Each of these satisfies "at least twelve characters".
+  // Each of these clears the length floor and is still refused, which is the
+  // point: the floor is a minimum, not the policy.
   const predictable = ['aaaaaaaaaaaa', '123456789012', 'abcdefghijkl']
 
   for (const password of predictable) {
@@ -95,7 +98,7 @@ describe('the strength meter', () => {
     expect(long.score).toBeGreaterThan(short.score)
   })
 
-  it('does not rate an unacceptable password highly just because it is long', () => {
+  it('does not rate an unacceptable password highly just because it clears the floor', () => {
     // Length alone must not read as strong, or the meter contradicts the rules.
     const score = passwordStrength('aaaaaaaaaaaa').score
     expect(score).toBeLessThan(4)

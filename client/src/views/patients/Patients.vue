@@ -276,7 +276,10 @@
                   </div>
                   <div class="form-group">
                     <label>Phone</label>
-                    <input v-model="form.phone" placeholder="+1 555 000 0000" />
+                    <input
+                      v-model.trim="form.phone" type="tel" inputmode="numeric" pattern="[0-9]*"
+                      :maxlength="PHONE_MAX_DIGITS" placeholder="Digits only, e.g. 0788123456"
+                    />
                   </div>
                 </div>
                 <div class="form-row">
@@ -299,7 +302,10 @@
                   </div>
                   <div class="form-group">
                     <label>Contact Phone</label>
-                    <input v-model="form.emergency_contact_phone" placeholder="+1 555 000 0000" />
+                    <input
+                      v-model.trim="form.emergency_contact_phone" type="tel" inputmode="numeric" pattern="[0-9]*"
+                      :maxlength="PHONE_MAX_DIGITS" placeholder="Digits only, e.g. 0788123456"
+                    />
                   </div>
                 </div>
 
@@ -371,6 +377,7 @@ import { useToast } from '../../store/toast'
 import { useConfirm } from '../../store/confirm'
 import { useAuthStore } from '../../store/auth'
 import PatientAccessCard from '../../components/PatientAccessCard.vue'
+import { PHONE_MAX_DIGITS } from '../../utils/phone'
 
 export default {
   name: 'Patients',
@@ -582,6 +589,7 @@ export default {
       formatDate, debouncedSearch, hasAllergy, hasClinicalCondition, authStore,
       openCreateModal, openEditModal, closeModal, savePatient, deletePatient,
       lookupPatient, clearLookup,
+      PHONE_MAX_DIGITS,
     }
   }
 }

@@ -20,6 +20,7 @@ delete process.env.PUBLIC_URL;
 
 const setupDatabase = require('../config/setup');
 const seedDatabase = require('../config/seed');
+const { MIN_LENGTH } = require('../utils/passwordPolicy');
 const app = require('../index');
 const pool = require('../config/database');
 const mailer = require('../services/mailer');
@@ -234,7 +235,7 @@ test('the password policy is enforced on reset and a rejection does not burn the
     .post('/api/auth/reset-password')
     .send({ token, newPassword: 'short' })
     .expect(400);
-  assert.match(weak.body.message, /at least 12 characters/i);
+  assert.match(weak.body.message, new RegExp(`at least ${MIN_LENGTH} characters`, 'i'));
 
   const common = await request(app)
     .post('/api/auth/reset-password')

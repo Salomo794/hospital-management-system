@@ -20,7 +20,7 @@
           <div class="input-wrap">
             <input
               id="new-password" :type="show ? 'text' : 'password'"
-              v-model="password" placeholder="At least 12 characters" @input="touched = true"
+              v-model="password" :placeholder="`At least ${PASSWORD_MIN_LENGTH} characters`" @input="touched = true"
               :minlength="PASSWORD_MIN_LENGTH" :maxlength="PASSWORD_MAX_LENGTH"
               autocomplete="new-password" aria-describedby="new-password-help"
             />

@@ -98,7 +98,14 @@
               </div>
               <div class="form-group">
                 <label for="nu-phone">Phone</label>
-                <input id="nu-phone" type="tel" v-model.trim="form.phone" placeholder="Optional" autocomplete="off" />
+                <!-- pattern and inputmode make the browser hold the same line as
+                     the API: digits only. A mobile keypad is offered on a phone,
+                     and letters are refused before the request is sent. -->
+                <input
+                  id="nu-phone" type="tel" v-model.trim="form.phone" placeholder="Digits only, e.g. 0788123456"
+                  inputmode="numeric" pattern="[0-9]*" :maxlength="PHONE_MAX_DIGITS" autocomplete="off"
+                />
+                <span class="field-error" v-if="phoneProblem">{{ phoneProblem }}</span>
               </div>
             </div>
             <div class="form-group">
@@ -145,6 +152,7 @@ import { formatDateTime, getStatusLabel, debounce } from '../../utils/helpers'
 import {
   validatePassword, passwordStrength, MIN_LENGTH as PASSWORD_MIN_LENGTH, MAX_LENGTH as PASSWORD_MAX_LENGTH
 } from '../../utils/passwordPolicy'
+import { phoneProblem as checkPhone, PHONE_MAX_DIGITS } from '../../utils/phone'
 
 export default {
   name: 'Users',
@@ -186,11 +194,16 @@ export default {
     const strengthLabel = computed(() => strength.value.label)
     const strengthClass = computed(() => `strength-${strength.value.score}`)
     const strengthPercent = computed(() => `${(strength.value.score / 4) * 100}%`)
+    const phoneProblem = computed(() => checkPhone(form.phone))
 
     const createUser = async () => {
       if (creating.value) return
       if (passwordProblems.value.length > 0) {
         toast.warning('Choose a password that meets the listed requirements.')
+        return
+      }
+      if (phoneProblem.value) {
+        toast.warning(phoneProblem.value)
         return
       }
       creating.value = true
@@ -201,7 +214,7 @@ export default {
           email: form.email,
           password: form.password,
           role: form.role,
-          phone: form.phone || null
+          phone: form.phone.trim() || null
         })
         toast.success(`User ${form.first_name} ${form.last_name} created.`)
         showCreate.value = false
@@ -254,6 +267,7 @@ export default {
       getRoleColor, formatDateTime, formatStatusLabel,
       showCreate, creating, form, openCreate, createUser,
       passwordProblems, strengthLabel, strengthClass, strengthPercent,
+      phoneProblem, PHONE_MAX_DIGITS,
       PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH
     }
   }
@@ -283,6 +297,7 @@ export default {
 .strength-label { font-size: 11px; color: var(--gray-500); min-width: 58px; }
 .policy-list { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: var(--gray-600); }
 .policy-list li { margin-bottom: 2px; }
+.field-error { display: block; margin-top: 4px; font-size: 12px; color: var(--danger, #b91c1c); }
 
 .empty-state { text-align: center; padding: 60px 20px; color: var(--gray-500); }
 .empty-icon { font-size: 40px; display: block; margin-bottom: 12px; }

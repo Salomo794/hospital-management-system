@@ -471,11 +471,11 @@ test('a staff member can update their own name but not their own access', async 
   const updated = await request(app)
     .put('/api/auth/me')
     .set('Authorization', `Bearer ${nurseToken}`)
-    .send({ first_name: 'Adaeze', last_name: 'Nkemdi-Obi', phone: '+250788123456' })
+    .send({ first_name: 'Adaeze', last_name: 'Nkemdi-Obi', phone: '250788123456' })
     .expect(200);
   assert.equal(updated.body.first_name, 'Adaeze');
   assert.equal(updated.body.last_name, 'Nkemdi-Obi');
-  assert.equal(updated.body.phone, '+250788123456');
+  assert.equal(updated.body.phone, '250788123456');
   // The rest of the profile is returned unchanged, and the role is not ours to set.
   assert.equal(updated.body.role, 'nurse');
   assert.equal(updated.body.email, unique);

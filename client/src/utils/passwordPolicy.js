@@ -9,8 +9,12 @@
 // that runs a corpus through both implementations and requires identical results,
 // so a rule changed on one side cannot quietly drift from the other.
 
-export const MIN_LENGTH = 12
+export const MIN_LENGTH = 8
 export const MAX_LENGTH = 200
+
+// A floor rather than a target. See the note in server/utils/passwordPolicy.js:
+// the blocked list, the repeated-character and run checks, and the name rules
+// are what carry the weight from here up.
 
 const BANNED = [
   'password', 'passw0rd', 'password1', 'password123', 'password1234',
@@ -87,11 +91,14 @@ export function isAcceptable(password, context) {
 
 // A rough score for the strength meter. This is a nudge towards a longer
 // passphrase, not a security control: length is what actually matters, so the
-// meter leans on it rather than on character-class rules.
+// meter leans on it rather than on character-class rules. The bands start at
+// the policy's own minimum so the meter never reads "Empty" for a password the
+// policy would already accept.
 export function passwordStrength(password) {
   const value = String(password || '')
   if (!value) return { score: 0, label: 'Empty' }
   let score = 0
+  if (value.length >= MIN_LENGTH) score += 1
   if (value.length >= 12) score += 1
   if (value.length >= 16) score += 1
   if (value.length >= 20) score += 1

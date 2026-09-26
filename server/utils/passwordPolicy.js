@@ -11,8 +11,16 @@
 
 // Cost 12 is bcrypt's default here and is a deliberate trade-off: it is the
 // single largest source of latency in the auth endpoints.
-const MIN_LENGTH = 12;
+const MIN_LENGTH = 8;
 const MAX_LENGTH = 200;
+
+// Eight is a floor, not a target, and it is deliberately lower than the
+// twelve this policy originally shipped with, at the owner's request, because a
+// twelve-character floor was blocking staff from being created at all. The
+// compensating rules below carry more of the weight as a result: the blocked
+// list, the refusal of repeated characters and runs, and the name and
+// self-reference checks are what actually stop a guessable password, and they
+// still fire from eight characters up.
 
 // The passwords that show up first in any credential-stuffing list. Blocking
 // these outright is more effective than demanding a symbol, because

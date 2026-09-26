@@ -4,6 +4,7 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { ApiError, asyncHandler, getPagination, parseInteger } = require('../utils/http');
 const { recordAudit, pick } = require('../utils/audit');
+const { phoneDigitsOnly, phoneProblem, normalisePhone } = require('../utils/phone');
 
 const ROLES = ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab_technician'];
 const AUDITED_FIELDS = ['email', 'role', 'first_name', 'last_name', 'phone', 'is_active'];
@@ -60,13 +61,22 @@ router.put('/:id', authenticate, authorize('admin'), asyncHandler(async (req, re
   if ((first_name !== undefined && !String(first_name).trim()) || (last_name !== undefined && !String(last_name).trim())) {
     throw new ApiError(400, 'first_name and last_name cannot be empty');
   }
+  // The admin edit path had no phone rule at all, which is how a staff account
+  // ended up holding a formatted number that the registration form would now
+  // refuse. Same helper as everywhere else.
+  if (phone !== undefined && !phoneDigitsOnly(phone)) {
+    throw new ApiError(400, phoneProblem);
+  }
 
   const updates = [];
   const values = [];
   for (const [field, value] of Object.entries({ first_name, last_name, phone, role, is_active })) {
     if (value !== undefined) {
       updates.push(`${field} = ?`);
-      values.push(typeof value === 'string' && value.trim() ? value.trim() : value);
+      // A cleared phone is stored as NULL rather than "", so clearing it and
+      // looking it up behave the same way everywhere else in the database.
+      if (field === 'phone') values.push(normalisePhone(value));
+      else values.push(typeof value === 'string' && value.trim() ? value.trim() : value);
     }
   }
   if (updates.length === 0) throw new ApiError(400, 'No fields to update');
