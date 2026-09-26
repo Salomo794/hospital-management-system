@@ -124,6 +124,10 @@
                   </div>
                 </div>
                 <div class="dropdown-divider" />
+                <button class="dropdown-item" @click="openProfileModal">
+                  <span v-html="icons.user" />
+                  Update my name
+                </button>
                 <button class="dropdown-item" @click="openPasswordModal">
                   <span v-html="icons.key" />
                   Change password
@@ -190,6 +194,48 @@
         </div>
       </div>
     </Transition>
+
+    <!-- ──── UPDATE MY NAME ──── -->
+    <div class="modal-overlay" v-if="showProfileModal" @click.self="closeProfileModal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="update-name-title">
+        <div class="modal-header">
+          <h2 id="update-name-title">Update my name</h2>
+          <button class="icon-btn" @click="closeProfileModal" aria-label="Close">
+            <span v-html="icons.close" />
+          </button>
+        </div>
+        <form @submit.prevent="submitProfile">
+          <div class="modal-body">
+            <p class="form-hint profile-note">
+              This is the name staff see on records you sign. Your sign-in email and role
+              are managed by an administrator.
+            </p>
+            <div class="form-group">
+              <label for="un-first">First name *</label>
+              <input id="un-first" type="text" v-model.trim="profileForm.first_name" required maxlength="100" autocomplete="given-name" />
+            </div>
+            <div class="form-group">
+              <label for="un-last">Last name *</label>
+              <input id="un-last" type="text" v-model.trim="profileForm.last_name" required maxlength="100" autocomplete="family-name" />
+            </div>
+            <div class="form-group">
+              <label for="un-phone">Phone</label>
+              <input id="un-phone" type="tel" v-model.trim="profileForm.phone" maxlength="30" autocomplete="tel" placeholder="Optional" />
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="closeProfileModal">Cancel</button>
+            <button
+              type="submit"
+              class="btn btn-primary"
+              :disabled="savingProfile || !profileForm.first_name || !profileForm.last_name"
+            >
+              {{ savingProfile ? 'Saving…' : 'Save' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <!-- ──── CHANGE PASSWORD ──── -->
     <div class="modal-overlay" v-if="showPasswordModal" @click.self="closePasswordModal">
@@ -309,6 +355,7 @@ const icons = {
   users:        s('<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>'),
   audit:        s('<path d="M9 4h9a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1z"/><path d="M17 5h1a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1"/><path d="M8 11h8M8 15h5"/>'),
   key:          s('<circle cx="8" cy="15" r="4"/><path d="M11 12 20 3M17 3h3v3"/>'),
+  user:         s('<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>'),
 }
 
 const routeMeta = [
@@ -452,6 +499,45 @@ export default {
 
     const logout = () => { authStore.logout(); router.push('/login') }
 
+    /* ── update my name ── */
+    const showProfileModal = ref(false)
+    const savingProfile = ref(false)
+    const emptyProfileForm = () => ({
+      first_name: authStore.user?.first_name || '',
+      last_name: authStore.user?.last_name || '',
+      phone: authStore.user?.phone || ''
+    })
+    const profileForm = reactive(emptyProfileForm())
+
+    const openProfileModal = () => {
+      Object.assign(profileForm, emptyProfileForm())
+      showProfileModal.value = true
+      dropdownOpen.value = false
+    }
+    const closeProfileModal = () => { showProfileModal.value = false }
+
+    const submitProfile = async () => {
+      if (savingProfile.value) return
+      if (!profileForm.first_name.trim() || !profileForm.last_name.trim()) {
+        toast.warning('Both a first and last name are required.')
+        return
+      }
+      savingProfile.value = true
+      try {
+        await authStore.updateProfile({
+          first_name: profileForm.first_name.trim(),
+          last_name: profileForm.last_name.trim(),
+          phone: profileForm.phone.trim()
+        })
+        toast.success('Your name has been updated.')
+        closeProfileModal()
+      } catch (e) {
+        toast.error(e.response?.data?.message || 'Could not update your name.')
+      } finally {
+        savingProfile.value = false
+      }
+    }
+
     /* ── change password ── */
     const showPasswordModal = ref(false)
     const savingPassword = ref(false)
@@ -531,6 +617,8 @@ export default {
       formatRole, typeColor, relativeTime,
       loadNotifications, markAllRead, openNotification, logout,
       showPasswordModal, savingPassword, passwordForm,
+      showProfileModal, savingProfile, profileForm,
+      openProfileModal, closeProfileModal, submitProfile,
       passwordProblems, confirmMismatch, strengthLabel, strengthClass, strengthPercent,
       openPasswordModal, closePasswordModal, submitPassword,
       PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH,
@@ -858,6 +946,7 @@ export default {
 .dropdown-item:hover { background: var(--gray-50); }
 
 /* Change-password form */
+.profile-note { margin: 0 0 14px; display: block; }
 .strength-meter { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
 .strength-bar { flex: 1; height: 5px; background: var(--gray-200); border-radius: 3px; overflow: hidden; }
 .strength-bar span { display: block; height: 100%; border-radius: 3px; transition: width .2s ease, background .2s ease; }

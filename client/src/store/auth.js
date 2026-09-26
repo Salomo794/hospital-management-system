@@ -34,6 +34,16 @@ export const useAuthStore = defineStore('auth', {
       setStoredJson('user', data.user)
       axios.defaults.headers.common.Authorization = `Bearer ${data.token}`
     },
+    // Updates the signed-in user's own display name and phone. The server
+    // re-reads the user on every request, so the new name applies immediately
+    // everywhere; the cached copy is updated here so the header does not have to
+    // wait for a reload.
+    async updateProfile({ first_name, last_name, phone }) {
+      const { data } = await axios.put('/api/auth/me', { first_name, last_name, phone })
+      this.user = { ...this.user, ...data }
+      setStoredJson('user', this.user)
+      return data
+    },
     // Keeps the display timezone in step with the server, in case APP_TIMEZONE
     // changed since the stored session was written.
     async refreshTimezone() {

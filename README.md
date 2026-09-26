@@ -240,6 +240,12 @@ The create-user form and the change-password dialog in the header menu both appl
 
 Demo seeding still writes `password123` for the fixture accounts, because those are development credentials and the README says as much. The policy would refuse that password for a real account.
 
+### Staff names
+
+A staff member can correct their own display name from **Update my name** in the header menu, without needing an administrator. `PUT /api/auth/me` only accepts `first_name`, `last_name` and `phone`.
+
+`role`, `is_active` and `email` are deliberately excluded. A self-service endpoint that honoured a role would be a privilege escalation, and the email address is the login identifier, so changing it deserves the same care as a password change. Those stay with an administrator through `PUT /api/users/:id`, which is admin-only. Anything sent in those fields is ignored rather than refused, so a client bug cannot accidentally rewrite them. Changes are recorded in the audit trail with the before and after values.
+
 ### Timezones
 
 Timestamps are stored in UTC and sent to the client as `YYYY-MM-DD HH:MM:SS`, with no offset marker. Two rules follow from that, and breaking either one silently corrupts data rather than raising an error:

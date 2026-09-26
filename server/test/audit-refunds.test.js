@@ -447,6 +447,111 @@ test('reading a patient record is logged, not just changing it', async () => {
   assert.equal(history.body.entries[0].actor_label, 'doctor@hospital.com');
 });
 
+test('a staff member can update their own name but not their own access', async () => {
+  const adminToken = await login();
+  const unique = `nurse-${Date.now()}@hospital.com`;
+  const created = await request(app)
+    .post('/api/auth/register')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({
+      email: unique,
+      password: 'Thornbury!Ward2026',
+      first_name: 'Ada',
+      last_name: 'Nkemdi',
+      role: 'nurse',
+    })
+    .expect(201);
+  const userId = created.body.user.id;
+  const nurseToken = (await request(app)
+    .post('/api/auth/login')
+    .send({ email: unique, password: 'Thornbury!Ward2026' })
+    .expect(200)).body.token;
+
+  // The self-service update works, and reports the new name back.
+  const updated = await request(app)
+    .put('/api/auth/me')
+    .set('Authorization', `Bearer ${nurseToken}`)
+    .send({ first_name: 'Adaeze', last_name: 'Nkemdi-Obi', phone: '+250788123456' })
+    .expect(200);
+  assert.equal(updated.body.first_name, 'Adaeze');
+  assert.equal(updated.body.last_name, 'Nkemdi-Obi');
+  assert.equal(updated.body.phone, '+250788123456');
+  // The rest of the profile is returned unchanged, and the role is not ours to set.
+  assert.equal(updated.body.role, 'nurse');
+  assert.equal(updated.body.email, unique);
+
+  // The change is persisted, not just echoed back.
+  const [stored] = await pool.query('SELECT first_name, last_name FROM users WHERE id = ?', [userId]);
+  assert.equal(stored[0].first_name, 'Adaeze');
+  assert.equal(stored[0].last_name, 'Nkemdi-Obi');
+
+  // A self-service endpoint that accepted a role would be a privilege
+  // escalation, so those fields are ignored rather than honoured.
+  const escalate = await request(app)
+    .put('/api/auth/me')
+    .set('Authorization', `Bearer ${nurseToken}`)
+    .send({ first_name: 'Adaeze', last_name: 'Nkemdi-Obi', role: 'admin' })
+    .expect(200);
+  assert.equal(escalate.body.role, 'nurse', 'a user must not be able to change their own role');
+  const [afterEscalate] = await pool.query('SELECT role FROM users WHERE id = ?', [userId]);
+  assert.equal(afterEscalate[0].role, 'nurse');
+
+  // Nor can they deactivate themselves or rewrite their login identifier.
+  await request(app)
+    .put('/api/auth/me')
+    .set('Authorization', `Bearer ${nurseToken}`)
+    .send({ first_name: 'Adaeze', last_name: 'Nkemdi-Obi', email: 'attacker@evil.example', is_active: false })
+    .expect(200);
+  const [afterIdentity] = await pool.query('SELECT email, is_active FROM users WHERE id = ?', [userId]);
+  assert.equal(afterIdentity[0].email, unique, 'email must not be self-service editable');
+  assert.equal(afterIdentity[0].is_active, 1, 'a user must not be able to deactivate themselves');
+
+  // Bad input is refused rather than silently stored.
+  await request(app)
+    .put('/api/auth/me')
+    .set('Authorization', `Bearer ${nurseToken}`)
+    .send({ first_name: '   ' })
+    .expect(400);
+  await request(app)
+    .put('/api/auth/me')
+    .set('Authorization', `Bearer ${nurseToken}`)
+    .send({ phone: 'not-a-phone-number' })
+    .expect(400);
+  await request(app)
+    .put('/api/auth/me')
+    .set('Authorization', `Bearer ${nurseToken}`)
+    .send({})
+    .expect(400);
+
+  // It requires a session.
+  await request(app).put('/api/auth/me').send({ first_name: 'X' }).expect(401);
+
+  // Someone else's name cannot be edited through this route.
+  const [admin] = await pool.query('SELECT id, first_name FROM users WHERE role = ? ORDER BY id LIMIT 1', ['admin']);
+  const hijack = await request(app)
+    .put('/api/auth/me')
+    .set('Authorization', `Bearer ${nurseToken}`)
+    .send({ first_name: 'Hijacked' })
+    .expect(200);
+  assert.notEqual(hijack.body.id, admin[0].id);
+  const [adminAfter] = await pool.query('SELECT first_name FROM users WHERE id = ?', [admin[0].id]);
+  assert.equal(adminAfter[0].first_name, admin[0].first_name, 'another account must be untouched');
+
+  // And the change is in the audit trail. Later calls in this test also updated
+  // the profile, so look for the entry that recorded the rename itself rather
+  // than assuming the newest one is it.
+  const audit = await request(app)
+    .get('/api/audit?action=auth.profile.updated&limit=10')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .expect(200);
+  assert.ok(audit.body.total > 0);
+  const entry = audit.body.entries.find(item => /Adaeze/.test(item.new_values || ''));
+  assert.ok(entry, 'expected the rename to be recorded in the audit trail');
+  assert.equal(entry.actor_label, unique);
+  assert.equal(entry.record_id, userId);
+  assert.match(entry.old_values, /Ada/);
+});
+
 test('a patient portal payment is attributed to the patient, not a staff id', async () => {
   const adminToken = await login();
   const unique = `portal-audit-${Date.now()}@example.com`;

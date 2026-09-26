@@ -8,7 +8,7 @@ const { validateRegistration } = require('../middleware/validation');
 const { ApiError, asyncHandler } = require('../utils/http');
 const { randomUUID } = require('../utils/ids');
 const { FixedWindowRateLimiter } = require('../utils/rateLimiter');
-const { recordAudit } = require('../utils/audit');
+const { recordAudit, pick } = require('../utils/audit');
 const { appTimezone } = require('../config/time');
 const { validatePassword } = require('../utils/passwordPolicy');
 const { withTransaction } = require('../utils/http');
@@ -311,6 +311,68 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
   // The client renders every timestamp in the hospital's timezone so two staff
   // members never disagree about when something happened.
   res.json({ ...rows[0], timezone: appTimezone() });
+}));
+
+// Lets a staff member correct their own display name without an administrator
+// having to do it for them.
+//
+// Deliberately limited to first_name, last_name and phone. Role, is_active,
+// email and password are all excluded: a self-service endpoint that accepted a
+// role would be a privilege escalation, and email is the login identifier, so
+// changing it needs the same care as a password change. Those stay with an
+// administrator through PUT /api/users/:id.
+router.put('/me', authenticate, asyncHandler(async (req, res) => {
+  const { first_name, last_name, phone } = req.body || {};
+  const updates = [];
+  const values = [];
+
+  for (const [field, value] of Object.entries({ first_name, last_name, phone })) {
+    if (value === undefined) continue;
+    if (field !== 'phone' && !String(value || '').trim()) {
+      throw new ApiError(400, `${field.replace('_', ' ')} cannot be empty`);
+    }
+    if (field !== 'phone' && String(value).trim().length > 100) {
+      throw new ApiError(400, `${field.replace('_', ' ')} is too long`);
+    }
+    if (field === 'phone') {
+      const trimmed = String(value || '').trim();
+      if (trimmed.length > 30) throw new ApiError(400, 'phone is too long');
+      if (trimmed && !/^[\d\s()+.-]+$/.test(trimmed)) {
+        throw new ApiError(400, 'phone may only contain digits, spaces and + ( ) . - characters');
+      }
+      updates.push('phone = ?');
+      values.push(trimmed || null);
+      continue;
+    }
+    updates.push(`${field} = ?`);
+    values.push(String(value).trim());
+  }
+
+  if (updates.length === 0) {
+    throw new ApiError(400, 'Provide a first name, last name or phone number to update');
+  }
+
+  const [before] = await pool.query(
+    'SELECT first_name, last_name, phone FROM users WHERE id = ?',
+    [req.user.id]
+  );
+  await pool.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, [...values, req.user.id]);
+  const [after] = await pool.query(
+    'SELECT id, uuid, email, role, first_name, last_name, phone, avatar, created_at FROM users WHERE id = ?',
+    [req.user.id]
+  );
+
+  await recordAudit({
+    req,
+    action: 'auth.profile.updated',
+    table: 'users',
+    recordId: req.user.id,
+    summary: `${req.user.email} updated their own name`,
+    before: pick(before[0], ['first_name', 'last_name', 'phone']),
+    after: pick(after[0], ['first_name', 'last_name', 'phone']),
+  });
+
+  res.json({ ...after[0], timezone: appTimezone() });
 }));
 
 router.put('/change-password', authenticate, asyncHandler(async (req, res) => {
