@@ -267,7 +267,9 @@ export default {
 .feature span { color: #5eead4; font-size: 16px; }
 .login-right {
   flex: 1; padding: 44px;
-  background: rgba(255,255,255,.97);
+  /* Near-opaque white, so it read as a panel on the gradient. Kept literal
+     it stayed white in dark mode and took the themed heading with it. */
+    background: var(--surface-elevated);
   backdrop-filter: blur(20px);
 }
 .login-form h2 { font-size: 24px; color: var(--text-primary); margin-bottom: 4px; }
@@ -303,13 +305,13 @@ export default {
   font-weight: 500;
 }
 .form-links a:hover { text-decoration: underline; }
-.form-links a:focus-visible { outline: 2px solid #0d9488; outline-offset: 2px; border-radius: 4px; }
-.demo-accounts { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+.form-links a:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
+.demo-accounts { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--control-border); }
 .demo-accounts p { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
 .demo-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .demo-btn {
-  padding: 4px 10px; border: 1px solid #e2e8f0; border-radius: 6px;
-  background: #f8fafc; font-size: 11px; cursor: pointer; transition: all 0.2s;
+  padding: 4px 10px; border: 1px solid var(--control-border); border-radius: 6px;
+    background: var(--surface); font-size: 11px; cursor: pointer; transition: all 0.2s;
 }
 .demo-btn:hover { background: #0d9488; color: white; border-color: var(--focus-ring); }
 .demo-note { font-size: 11px; color: var(--text-subtle); margin-top: 8px; }

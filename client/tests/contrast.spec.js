@@ -226,6 +226,44 @@ describe('components do not re-break the token layer', () => {
     expect(offenders, `use a theme token instead of: ${offenders.join(', ')}`).toEqual([])
   })
 
+  // The other half of the same problem, and the more dangerous half. Converting a
+  // text colour to a token while the surface behind it stays a literal light value
+  // makes dark mode worse rather than better: the text follows the theme to
+  // near-white and lands on an unchanged white card, so the content disappears.
+  // That is not hypothetical - it is what the auth screens, the login panel and
+  // two coloured notice boxes did until this was found.
+  const LIGHT_SURFACES = [
+    '#fff', '#ffffff', '#fafafa', '#f8fafc', '#f9fafb', '#f1f5f9', '#f5f5f4',
+    '#fef2f2', '#fee2e2', '#fffbeb', '#fef3c7', '#fff7ed', '#ecfdf5', '#dcfce7',
+    '#f0fdf4', '#eff6ff', '#dbeafe', '#e0f2fe', '#f5f3ff', '#ede9fe', '#faf5ff'
+  ]
+
+  it.each(styled)('%s paints no surface with a literal light colour', (file) => {
+    const css = readFileSync(file, 'utf8')
+    const offenders = []
+    for (const match of css.matchAll(/background(?:-color)?\s*:\s*([^;{}]+)/g)) {
+      const value = match[1].trim()
+      // A gradient is a design decision, not a surface fill, and a translucent
+      // white is an overlay on an already-dark panel rather than a card.
+      if (/gradient\(/.test(value)) continue
+      const hex = value.match(/^#([0-9a-fA-F]{3,8})$/)
+      if (hex && LIGHT_SURFACES.includes(`#${hex[1].toLowerCase()}`)) {
+        offenders.push(`${value} in "${match[0].trim()}"`)
+        continue
+      }
+      const rgba = value.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/)
+      if (rgba) {
+        const [, r, g, b, a] = rgba
+        const nearWhite = +r > 240 && +g > 240 && +b > 240
+        // Opaque or nearly so: that reads as a surface, not a highlight.
+        if (nearWhite && parseFloat(a) >= 0.9) {
+          offenders.push(`${value} in "${match[0].trim()}"`)
+        }
+      }
+    }
+    expect(offenders, `use --surface, --surface-elevated or a *-bg token instead of: ${offenders.join(', ')}`).toEqual([])
+  })
+
   it.each(styled)('%s does not reach into the neutral ramp for text', (file) => {
     const css = readFileSync(file, 'utf8')
     const offenders = []

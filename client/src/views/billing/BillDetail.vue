@@ -579,9 +579,9 @@ export default {
 /* Explains that the money has not arrived yet, so it is never mistaken for a
    confirmation that it has. */
 .notice {
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  border-left: 4px solid #f59e0b;
+  background: var(--warning-bg);
+    border: 1px solid var(--warning);
+    border-left: 4px solid var(--warning-fg);
   border-radius: 6px;
   padding: 12px 14px;
   margin-bottom: 16px;

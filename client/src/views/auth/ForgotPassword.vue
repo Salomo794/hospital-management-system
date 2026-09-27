@@ -82,7 +82,10 @@ export default {
 .auth-card {
   width: 100%;
   max-width: 420px;
-  background: #fff;
+  /* A themed surface, not a literal white. The card sits on an always-dark
+     gradient panel, so a hardcoded white stayed white in dark mode while the text
+     inside followed the theme to near-white - the heading simply vanished. */
+    background: var(--surface-elevated);
   border-radius: 16px;
   padding: 36px 32px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, .35);

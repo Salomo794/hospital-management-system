@@ -172,7 +172,9 @@ export default {
 .auth-card {
   width: 100%;
   max-width: 440px;
-  background: #fff;
+  /* Themed surface, not a literal white - see ForgotPassword.vue. Kept in
+     step deliberately so the three auth screens cannot drift apart again. */
+    background: var(--surface-elevated);
   border-radius: 16px;
   padding: 36px 32px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, .35);
@@ -203,7 +205,7 @@ export default {
 .strength-label { font-size: 11px; color: var(--text-muted); min-width: 58px; }
 .policy-list {
   list-style: none; padding: 10px 12px; margin: 0 0 16px;
-  background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px;
+  background: var(--danger-bg); border: 1px solid var(--danger); border-radius: 6px;
   font-size: 12.5px; color: var(--danger-fg);
 }
 .policy-list li { margin-bottom: 3px; }
@@ -212,7 +214,9 @@ export default {
   border-radius: 6px; padding: 14px 16px; font-size: 14px; line-height: 1.5; margin-bottom: 16px;
 }
 .notice p { margin: 0 0 8px; }
-.notice.error { background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #dc2626; color: var(--danger-fg); }
+.notice.error { background: var(--danger-bg);
+    border: 1px solid var(--danger);
+    border-left: 4px solid var(--danger-fg); color: var(--danger-fg); }
 .notice.error a { color: var(--danger-fg); font-weight: 600; }
 .btn-block { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; }
 .btn-spinner {
