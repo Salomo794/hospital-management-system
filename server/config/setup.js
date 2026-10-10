@@ -352,9 +352,9 @@ async function setup() {
     console.log('All tables created successfully (SQLite)!');
   } catch (error) {
     console.error('Error creating tables:', error);
+    process.exitCode = 1;
   } finally {
     conn.release();
-    process.exit();
   }
 }
 

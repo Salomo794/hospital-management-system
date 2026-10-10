@@ -10,7 +10,12 @@ sqlite.pragma('journal_mode = WAL');
 sqlite.pragma('foreign_keys = ON');
 
 // --- Lightweight idempotent migrations (keeps existing DBs in sync) ---
+function tableExists(table) {
+  return !!sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+}
+
 function columnExists(table, column) {
+  if (!tableExists(table)) return false;
   const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all();
   return cols.some(c => c.name === column);
 }
@@ -44,15 +49,18 @@ function migrate() {
     FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL
   )`);
 
-  // patients.portal_pin — patient self-service login
-  if (!columnExists('patients', 'portal_pin')) {
-    sqlite.exec('ALTER TABLE patients ADD COLUMN portal_pin TEXT');
-    sqlite.exec("UPDATE patients SET portal_pin = '' WHERE portal_pin IS NULL");
-  }
+  // patients.portal_pin — patient self-service login.
+  // Guarded with tableExists so a fresh DB (before setup.js runs) doesn't crash.
+  if (tableExists('patients')) {
+    if (!columnExists('patients', 'portal_pin')) {
+      sqlite.exec('ALTER TABLE patients ADD COLUMN portal_pin TEXT');
+      sqlite.exec("UPDATE patients SET portal_pin = '' WHERE portal_pin IS NULL");
+    }
 
-  // Backfill a default demo PIN for any patient that still lacks one.
-  const defaultPinHash = bcrypt.hashSync('password123', 4);
-  sqlite.prepare("UPDATE patients SET portal_pin = ? WHERE portal_pin IS NULL OR portal_pin = ''").run(defaultPinHash);
+    // Backfill a default demo PIN for any patient that still lacks one.
+    const defaultPinHash = bcrypt.hashSync('password123', 4);
+    sqlite.prepare("UPDATE patients SET portal_pin = ? WHERE portal_pin IS NULL OR portal_pin = ''").run(defaultPinHash);
+  }
 }
 
 migrate();
