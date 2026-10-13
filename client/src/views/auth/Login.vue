@@ -352,7 +352,7 @@ export default {
 .login-right {
   flex: 1;
   padding: 44px 40px;
-  background: rgba(255, 255, 255, 0.97);
+  background: var(--surface);
 }
 
 .form-heading {
@@ -376,12 +376,12 @@ export default {
 .login-form h2 {
   font-size: 24px;
   font-weight: 700;
-  color: #1e293b;
+  color: var(--text-primary);
   margin-bottom: 4px;
 }
 
 .subtitle {
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 14px;
 }
 
@@ -393,7 +393,7 @@ export default {
   display: block;
   font-size: 13px;
   font-weight: 600;
-  color: #334155;
+  color: var(--text-secondary);
   margin-bottom: 6px;
 }
 
@@ -403,15 +403,15 @@ export default {
   border: 1.5px solid #e2e8f0;
   border-radius: 10px;
   font-size: 14px;
-  color: #1e293b;
-  background: #f8fafc;
+  color: var(--text-primary);
+  background: var(--bg-app);
   transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
 }
 
 .form-group input:focus {
   outline: none;
   border-color: #0d9488;
-  background: white;
+  background: var(--surface);
   box-shadow: 0 0 0 4px rgba(13, 148, 136, 0.12);
 }
 
@@ -445,12 +445,12 @@ export default {
 }
 
 .has-error input {
-  border-color: #ef4444;
+  border-color: var(--danger);
 }
 
 .field-error {
   font-size: 12px;
-  color: #ef4444;
+  color: var(--danger);
   margin-top: 5px;
   display: block;
 }
@@ -463,7 +463,7 @@ export default {
 
 .demo-title {
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-muted);
   margin-bottom: 10px;
 }
 
@@ -477,7 +477,7 @@ export default {
   padding: 5px 12px;
   border: 1px solid #e2e8f0;
   border-radius: 999px;
-  background: #f8fafc;
+  background: var(--bg-app);
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
@@ -492,7 +492,7 @@ export default {
 
 .demo-note {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--text-subtle);
   margin-top: 10px;
 }
 
