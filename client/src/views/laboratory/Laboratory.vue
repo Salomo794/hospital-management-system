@@ -1,7 +1,6 @@
 <template>
   <div class="lab-page">
     <div class="page-header">
-      <h1>Laboratory</h1>
       <div class="tabs-inline">
         <button :class="{ active: view === 'orders' }" @click="switchTab('orders')">
           Lab Orders
@@ -16,7 +15,7 @@
 
     <div v-if="view === 'orders'">
       <div class="search-filters">
-        <select v-model="statusFilter" @change="loadOrders">
+        <select v-model="statusFilter" @change="page = 1; loadOrders()">
           <option value="">All Status</option>
           <option value="ordered">Ordered</option>
           <option value="in_progress">In Progress</option>
@@ -26,7 +25,7 @@
       <div class="card">
         <div class="card-header">
           <h3>Lab Orders</h3>
-          <span class="text-muted-inline">{{ orders.length }} total</span>
+          <span class="text-muted-inline">{{ total }} total</span>
         </div>
 
         <div v-if="loadingOrders" class="loading-state">
@@ -76,6 +75,11 @@
             </tr>
           </tbody>
         </table>
+        <div class="pagination" v-if="!loadingOrders && total > limit">
+          <button class="btn btn-sm" :disabled="page <= 1" @click="page--; loadOrders()">Previous</button>
+          <span>Page {{ page }} of {{ Math.ceil(total / limit) }}</span>
+          <button class="btn btn-sm" :disabled="page >= Math.ceil(total / limit)" @click="page++; loadOrders()">Next</button>
+        </div>
       </div>
     </div>
 
@@ -94,7 +98,7 @@
         <div v-else-if="tests.length === 0" class="empty-state">
           <div class="empty-icon">&#128203;</div>
           <h4>No Tests Available</h4>
-          <p>The test catalog is empty. Add tests to get started.</p>
+          <p>The test catalog is empty. An administrator can add tests through the lab-test API or a managed seed.</p>
         </div>
 
         <table class="data-table" v-else>
@@ -136,6 +140,9 @@ export default {
     const toast = useToast()
     const view = ref('orders')
     const orders = ref([])
+    const total = ref(0)
+    const page = ref(1)
+    const limit = ref(20)
     const tests = ref([])
     const statusFilter = ref('')
     const loadingOrders = ref(false)
@@ -147,17 +154,21 @@ export default {
       else loadTests()
     }
 
+    let ordersRequestId = 0
     const loadOrders = async () => {
+      const requestId = ++ordersRequestId
       loadingOrders.value = true
       try {
-        const params = {}
+        const params = { page: page.value, limit: limit.value }
         if (statusFilter.value) params.status = statusFilter.value
         const { data } = await axios.get('/api/laboratory/orders', { params })
+        if (requestId !== ordersRequestId) return
         orders.value = data.orders
+        total.value = data.total
       } catch (e) {
         toast.error('Failed to load lab orders')
       } finally {
-        loadingOrders.value = false
+        if (requestId === ordersRequestId) loadingOrders.value = false
       }
     }
 
@@ -182,7 +193,7 @@ export default {
     onMounted(loadOrders)
 
     return {
-      view, orders, tests, statusFilter,
+      view, orders, total, page, limit, tests, statusFilter,
       loadingOrders, loadingTests,
       switchTab, loadOrders, loadTests,
       priorityClass,
@@ -209,7 +220,7 @@ export default {
 .page-header h1 {
   font-size: 22px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--gray-900);
   margin: 0;
 }
 
@@ -220,12 +231,12 @@ export default {
 
 .tabs-inline button {
   padding: 10px 20px;
-  border: 1px solid #e2e8f0;
-  background: white;
+  border: 1px solid var(--gray-200);
+  background: var(--white);
   cursor: pointer;
   font-size: 14px;
   font-weight: 500;
-  color: #475569;
+  color: var(--gray-600);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -243,11 +254,11 @@ export default {
 .tabs-inline button.active {
   background: #0d9488;
   color: white;
-  border-color: #0d9488;
+  border-color: var(--focus-ring);
 }
 
 .tabs-inline button:not(.active):hover {
-  background: #f1f5f9;
+  background: var(--gray-100);
 }
 
 .tab-count {
@@ -259,8 +270,8 @@ export default {
 }
 
 .tabs-inline button:not(.active) .tab-count {
-  background: #e2e8f0;
-  color: #64748b;
+  background: var(--gray-200);
+  color: var(--text-muted);
 }
 
 .search-filters {
@@ -269,18 +280,18 @@ export default {
 
 .search-filters select {
   padding: 10px 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   font-size: 14px;
-  color: #334155;
-  background: white;
+  color: var(--gray-700);
+  background: var(--white);
   min-width: 180px;
 }
 
 .text-mono {
   font-family: monospace;
   font-size: 13px;
-  color: #475569;
+  color: var(--gray-600);
 }
 
 .tests-cell {
@@ -288,7 +299,7 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 /* Loading spinner */
@@ -298,15 +309,15 @@ export default {
   align-items: center;
   gap: 12px;
   padding: 48px 20px;
-  color: #94a3b8;
+  color: var(--text-subtle);
   font-size: 14px;
 }
 
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid #e2e8f0;
-  border-top-color: #0d9488;
+  border: 3px solid var(--gray-200);
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -334,13 +345,13 @@ export default {
 .empty-state h4 {
   font-size: 16px;
   font-weight: 600;
-  color: #334155;
+  color: var(--gray-700);
   margin: 0;
 }
 
 .empty-state p {
   font-size: 14px;
-  color: #94a3b8;
+  color: var(--text-subtle);
   margin: 0;
 }
 
@@ -353,7 +364,7 @@ export default {
 
 .text-muted-inline {
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--text-subtle);
 }
 
 /* Responsive */

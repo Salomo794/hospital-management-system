@@ -5,6 +5,14 @@
       <p>Loading medical record...</p>
     </div>
 
+    <div v-else-if="error" class="loading-state">
+      <p>{{ error }}</p>
+      <div class="btn-group">
+        <button class="btn btn-primary" @click="fetchRecord">Retry</button>
+        <button class="btn btn-outline" @click="$router.back()">Go back</button>
+      </div>
+    </div>
+
     <template v-else-if="record">
       <div class="detail-header">
         <button class="btn btn-sm" @click="$router.back()">&larr; Back</button>
@@ -255,11 +263,13 @@
 
                 <div class="form-row">
                   <div class="form-group">
-                    <label>Quantity</label>
+                    <label>Quantity *</label>
                     <input
                       v-model.number="item.quantity"
                       type="number"
                       min="1"
+                      step="1"
+                      required
                       class="form-control"
                     />
                   </div>
@@ -365,12 +375,12 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, onBeforeUnmount, reactive } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, reactive, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { useAuthStore } from '../../store/auth'
-import { formatDate, formatCurrency, getStatusColor, debounce } from '../../utils/helpers'
+import { formatDate, formatCurrency, getStatusColor } from '../../utils/helpers'
 
 export default {
   name: 'EMRDetail',
@@ -380,6 +390,12 @@ export default {
     const auth = useAuthStore()
     const record = ref(null)
     const loading = ref(true)
+    const error = ref('')
+    let recordRequestGeneration = 0
+    let recordController = null
+    let prescriptionSubmissionGeneration = 0
+    let labOrderSubmissionGeneration = 0
+    let componentUnmounted = false
 
     const parsedVitals = computed(() => {
       if (!record.value?.vital_signs) return {}
@@ -410,14 +426,42 @@ export default {
     }
 
     async function fetchRecord() {
+      if (componentUnmounted) return
+      recordRequestGeneration += 1
+      const requestGeneration = recordRequestGeneration
+      const recordId = route.params.id
+      recordController?.abort()
+      const controller = new AbortController()
+      recordController = controller
       loading.value = true
+      error.value = ''
+      record.value = null
       try {
-        const { data } = await axios.get(`/api/emr/${route.params.id}`)
+        const { data } = await axios.get(`/api/emr/${recordId}`, { signal: controller.signal })
+        if (
+          componentUnmounted ||
+          controller.signal.aborted ||
+          requestGeneration !== recordRequestGeneration
+        ) return
         record.value = data
       } catch (err) {
-        toast.error('Failed to load medical record.')
+        if (
+          componentUnmounted ||
+          controller.signal.aborted ||
+          requestGeneration !== recordRequestGeneration ||
+          axios.isCancel(err)
+        ) return
+        error.value = err.response?.data?.message || 'Failed to load medical record.'
+        toast.error(error.value)
       } finally {
-        loading.value = false
+        if (
+          !componentUnmounted &&
+          requestGeneration === recordRequestGeneration &&
+          recordController === controller
+        ) {
+          loading.value = false
+          recordController = null
+        }
       }
     }
 
@@ -450,23 +494,55 @@ export default {
       items: [createEmptyItem()]
     })
 
-    const searchMedicineDebounced = debounce(async (idx, query) => {
-      if (!query || query.length < 2) {
-        prescriptionForm.items[idx].medicineOptions = []
-        return
-      }
-      try {
-        const { data } = await axios.get('/api/pharmacy/medicines', { params: { search: query } })
-        prescriptionForm.items[idx].medicineOptions = Array.isArray(data) ? data : (data.data || data.medicines || [])
-      } catch {
-        prescriptionForm.items[idx].medicineOptions = []
-      }
-    }, 350)
+    const medicineSearchDebouncers = new Map()
+    const medicineSearchControllers = new Map()
+
+    function clearPrescriptionWarnings() {
+      safetyWarnings.value = []
+    }
 
     function searchMedicine(idx, value) {
-      prescriptionForm.items[idx].medicineSearch = value
-      prescriptionForm.items[idx].medicine_id = null
-      searchMedicineDebounced(idx, value)
+      const item = prescriptionForm.items[idx]
+      if (!item) return
+      item.medicineSearch = value
+      item.medicine_id = null
+      clearPrescriptionWarnings()
+      clearTimeout(medicineSearchDebouncers.get(idx))
+      medicineSearchDebouncers.delete(idx)
+      medicineSearchControllers.get(idx)?.abort()
+      medicineSearchControllers.delete(idx)
+      const requestId = (item.searchRequestId || 0) + 1
+      item.searchRequestId = requestId
+      if (!value || value.length < 2) {
+        item.medicineOptions = []
+        return
+      }
+      const controller = new AbortController()
+      medicineSearchControllers.set(idx, controller)
+      const timer = setTimeout(async () => {
+        try {
+          const { data } = await axios.get('/api/pharmacy/medicines', {
+            params: { search: value, limit: 20 },
+            signal: controller.signal
+          })
+          if (
+            !componentUnmounted &&
+            !controller.signal.aborted &&
+            prescriptionForm.items[idx] === item &&
+            item.searchRequestId === requestId &&
+            item.medicineSearch === value
+          ) {
+            item.medicineOptions = data.medicines || []
+          }
+        } catch {
+          if (!componentUnmounted && !controller.signal.aborted && prescriptionForm.items[idx] === item && item.searchRequestId === requestId) {
+            item.medicineOptions = []
+          }
+        } finally {
+          if (medicineSearchControllers.get(idx) === controller) medicineSearchControllers.delete(idx)
+        }
+      }, 350)
+      medicineSearchDebouncers.set(idx, timer)
     }
 
     function selectMedicine(idx, med) {
@@ -474,17 +550,32 @@ export default {
       prescriptionForm.items[idx].medicineSearch = med.name
       prescriptionForm.items[idx].medicineOptions = []
       prescriptionForm.items[idx].showDropdown = false
+      clearPrescriptionWarnings()
     }
 
     function addPrescriptionItem() {
       prescriptionForm.items.push(createEmptyItem())
+      clearPrescriptionWarnings()
     }
 
     function removePrescriptionItem(idx) {
+      clearTimeout(medicineSearchDebouncers.get(idx))
+      medicineSearchDebouncers.delete(idx)
+      medicineSearchControllers.get(idx)?.abort()
+      medicineSearchControllers.delete(idx)
       prescriptionForm.items.splice(idx, 1)
+      clearPrescriptionWarnings()
+    }
+
+    function clearMedicineSearches() {
+      medicineSearchDebouncers.forEach(timer => clearTimeout(timer))
+      medicineSearchDebouncers.clear()
+      medicineSearchControllers.forEach(controller => controller.abort())
+      medicineSearchControllers.clear()
     }
 
     function openPrescriptionModal() {
+      clearMedicineSearches()
       prescriptionForm.notes = ''
       prescriptionForm.items = [createEmptyItem()]
       safetyWarnings.value = []
@@ -492,33 +583,50 @@ export default {
     }
 
     function closePrescriptionModal() {
+      clearMedicineSearches()
       showPrescriptionModal.value = false
       safetyWarnings.value = []
     }
 
     async function submitPrescription(acknowledge = false) {
-      const validItems = prescriptionForm.items.filter(i => i.medicine_id && i.frequency)
-      if (!validItems.length) {
-        toast.warning('Please add at least one item with a medicine and frequency.')
+      const recordId = Number(record.value?.id)
+      if (!recordId) return
+      const invalidItem = prescriptionForm.items.find(item => {
+        const quantity = Number(item.quantity)
+        return !item.medicine_id || !String(item.dosage || '').trim() || !String(item.frequency || '').trim() || !Number.isInteger(quantity) || quantity <= 0
+      })
+      if (invalidItem) {
+        toast.warning('Complete every prescription item, including medicine, dosage, frequency, and a positive whole-number quantity.')
         return
       }
+
+      const requestRecordGeneration = recordRequestGeneration
+      const submissionGeneration = ++prescriptionSubmissionGeneration
+      const isCurrentRequest = () => (
+        !componentUnmounted &&
+        submissionGeneration === prescriptionSubmissionGeneration &&
+        requestRecordGeneration === recordRequestGeneration &&
+        Number(route.params.id) === recordId &&
+        Number(record.value?.id) === recordId
+      )
       submittingPrescription.value = true
       if (!acknowledge) safetyWarnings.value = []
       try {
         const { data } = await axios.post('/api/emr/prescriptions', {
-          medical_record_id: record.value.id,
+          medical_record_id: recordId,
           patient_id: record.value.patient_id,
-          items: validItems.map(i => ({
+          items: prescriptionForm.items.map(i => ({
             medicine_id: i.medicine_id,
-            dosage: i.dosage,
+            dosage: String(i.dosage).trim(),
             frequency: i.frequency,
             duration: i.duration,
-            quantity: i.quantity,
+            quantity: Number(i.quantity),
             instructions: i.instructions
           })),
           notes: prescriptionForm.notes,
           acknowledge_warnings: acknowledge
         })
+        if (!isCurrentRequest()) return
         if (data.warnings && data.warnings.length) {
           toast.warning(`Prescription created with ${data.warnings.length} safety warning(s).`)
         } else {
@@ -527,6 +635,7 @@ export default {
         closePrescriptionModal()
         await fetchRecord()
       } catch (err) {
+        if (!isCurrentRequest()) return
         const res = err.response?.data
         if (err.response?.status === 409 && res?.warnings) {
           safetyWarnings.value = res.warnings
@@ -535,7 +644,7 @@ export default {
           toast.error(res?.message || 'Failed to create prescription.')
         }
       } finally {
-        submittingPrescription.value = false
+        if (submissionGeneration === prescriptionSubmissionGeneration) submittingPrescription.value = false
       }
     }
 
@@ -544,6 +653,8 @@ export default {
     const submittingLabOrder = ref(false)
     const loadingLabTests = ref(false)
     const availableLabTests = ref([])
+    let labTestsGeneration = 0
+    let labTestsController = null
 
     const labOrderForm = reactive({
       test_ids: [],
@@ -561,46 +672,77 @@ export default {
 
     function closeLabOrderModal() {
       showLabOrderModal.value = false
+      labTestsGeneration += 1
+      labTestsController?.abort()
+      labTestsController = null
+      loadingLabTests.value = false
     }
 
     async function fetchLabTests() {
+      if (componentUnmounted) return
+      labTestsGeneration += 1
+      const requestGeneration = labTestsGeneration
+      labTestsController?.abort()
+      const controller = new AbortController()
+      labTestsController = controller
       loadingLabTests.value = true
       try {
-        const { data } = await axios.get('/api/laboratory/tests')
+        const { data } = await axios.get('/api/laboratory/tests', { signal: controller.signal })
+        if (componentUnmounted || controller.signal.aborted || requestGeneration !== labTestsGeneration) return
         availableLabTests.value = Array.isArray(data) ? data : (data.data || data.tests || [])
       } catch {
-        toast.error('Failed to load lab tests.')
+        if (!componentUnmounted && !controller.signal.aborted && requestGeneration === labTestsGeneration) {
+          toast.error('Failed to load lab tests.')
+        }
       } finally {
-        loadingLabTests.value = false
+        if (!componentUnmounted && requestGeneration === labTestsGeneration && labTestsController === controller) {
+          loadingLabTests.value = false
+          labTestsController = null
+        }
       }
     }
 
     async function submitLabOrder() {
+      const recordId = Number(record.value?.id)
+      if (!recordId) return
       if (!labOrderForm.test_ids.length) {
         toast.warning('Please select at least one lab test.')
         return
       }
+
+      const requestRecordGeneration = recordRequestGeneration
+      const submissionGeneration = ++labOrderSubmissionGeneration
+      const isCurrentRequest = () => (
+        !componentUnmounted &&
+        submissionGeneration === labOrderSubmissionGeneration &&
+        requestRecordGeneration === recordRequestGeneration &&
+        Number(route.params.id) === recordId &&
+        Number(record.value?.id) === recordId
+      )
       submittingLabOrder.value = true
       try {
         await axios.post('/api/laboratory/orders', {
           patient_id: record.value.patient_id,
-          medical_record_id: record.value.id,
+          doctor_id: record.value.doctor_id,
+          medical_record_id: recordId,
           test_ids: labOrderForm.test_ids,
           priority: labOrderForm.priority,
           clinical_notes: labOrderForm.clinical_notes
         })
+        if (!isCurrentRequest()) return
         toast.success('Lab order submitted successfully.')
         closeLabOrderModal()
         await fetchRecord()
       } catch (err) {
+        if (!isCurrentRequest()) return
         toast.error(err.response?.data?.message || 'Failed to submit lab order.')
       } finally {
-        submittingLabOrder.value = false
+        if (submissionGeneration === labOrderSubmissionGeneration) submittingLabOrder.value = false
       }
     }
 
     // Close dropdowns on outside click
-    function handleOutsideClick(e) {
+    function handleOutsideClick() {
       prescriptionForm.items.forEach(item => {
         if (item.showDropdown) {
           item.showDropdown = false
@@ -608,18 +750,38 @@ export default {
       })
     }
 
-    onMounted(() => {
+    watch(() => route.params.id, () => {
+      prescriptionSubmissionGeneration += 1
+      labOrderSubmissionGeneration += 1
+      submittingPrescription.value = false
+      submittingLabOrder.value = false
+      closePrescriptionModal()
+      closeLabOrderModal()
       fetchRecord()
+    }, { immediate: true })
+    onMounted(() => {
       document.addEventListener('click', handleOutsideClick)
     })
 
     onBeforeUnmount(() => {
+      componentUnmounted = true
+      recordRequestGeneration += 1
+      prescriptionSubmissionGeneration += 1
+      labOrderSubmissionGeneration += 1
+      recordController?.abort()
+      recordController = null
+      clearMedicineSearches()
+      labTestsGeneration += 1
+      labTestsController?.abort()
+      labTestsController = null
       document.removeEventListener('click', handleOutsideClick)
     })
 
     return {
       record,
       loading,
+      error,
+      fetchRecord,
       parsedVitals,
       canCreatePrescription,
       canCreateLabOrder,
@@ -666,14 +828,14 @@ export default {
   justify-content: center;
   padding: 80px 0;
   gap: 16px;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .spinner {
   width: 36px;
   height: 36px;
-  border: 3px solid #e2e8f0;
-  border-top-color: #0d9488;
+  border: 3px solid var(--gray-200);
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -695,11 +857,11 @@ export default {
 
 .record-title h2 {
   font-size: 20px;
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 .text-muted {
-  color: #94a3b8;
+  color: var(--text-subtle);
   font-size: 13px;
 }
 
@@ -713,17 +875,17 @@ export default {
   display: flex;
   justify-content: space-between;
   padding: 6px 0;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--gray-100);
   font-size: 14px;
 }
 
 .info-row label {
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .info-row span {
   font-weight: 500;
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 .vitals-grid {
@@ -754,39 +916,39 @@ export default {
 }
 
 .vital-red {
-  background: #fef2f2;
+  background: var(--danger-bg);
   border: 1px solid #fecaca;
 }
-.vital-red .vital-label { color: #dc2626; }
-.vital-red .vital-value { color: #dc2626; }
+.vital-red .vital-label { color: var(--danger-fg); }
+.vital-red .vital-value { color: var(--danger-fg); }
 
 .vital-orange {
-  background: #fff7ed;
+  background: var(--warning-bg);
   border: 1px solid #fed7aa;
 }
-.vital-orange .vital-label { color: #ea580c; }
-.vital-orange .vital-value { color: #ea580c; }
+.vital-orange .vital-label { color: var(--warning-fg); }
+.vital-orange .vital-value { color: var(--warning-fg); }
 
 .vital-blue {
-  background: #eff6ff;
+  background: var(--info-bg);
   border: 1px solid #bfdbfe;
 }
-.vital-blue .vital-label { color: #2563eb; }
-.vital-blue .vital-value { color: #2563eb; }
+.vital-blue .vital-label { color: var(--info-fg); }
+.vital-blue .vital-value { color: var(--info-fg); }
 
 .vital-green {
-  background: #f0fdf4;
+  background: var(--success-bg);
   border: 1px solid #bbf7d0;
 }
-.vital-green .vital-label { color: #16a34a; }
-.vital-green .vital-value { color: #16a34a; }
+.vital-green .vital-label { color: var(--success-fg); }
+.vital-green .vital-value { color: var(--success-fg); }
 
 .vital-teal {
-  background: #f0fdfa;
+  background: var(--brand-50);
   border: 1px solid #99f6e4;
 }
-.vital-teal .vital-label { color: #0d9488; }
-.vital-teal .vital-value { color: #0d9488; }
+.vital-teal .vital-label { color: var(--primary); }
+.vital-teal .vital-value { color: var(--primary); }
 
 .clinical-section {
   margin-bottom: 16px;
@@ -794,20 +956,20 @@ export default {
 
 .clinical-section h4 {
   font-size: 14px;
-  color: #0d9488;
+  color: var(--primary);
   margin-bottom: 6px;
   font-weight: 600;
 }
 
 .clinical-section p {
   font-size: 14px;
-  color: #334155;
+  color: var(--gray-700);
   line-height: 1.6;
   white-space: pre-wrap;
 }
 
 .diagnosis {
-  background: #fef2f2;
+  background: var(--danger-bg);
   padding: 8px 12px;
   border-radius: 6px;
   border-left: 3px solid #ef4444;
@@ -827,10 +989,10 @@ export default {
 }
 
 .prescription-card {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   padding: 14px;
-  background: #fafffe;
+  background: var(--gray-50);
 }
 
 .rx-header {
@@ -842,23 +1004,23 @@ export default {
 
 .rx-number {
   font-weight: 600;
-  color: #0d9488;
+  color: var(--primary);
   font-size: 14px;
 }
 
 .rx-date {
   margin-left: auto;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-subtle);
 }
 
 .rx-body {
   font-size: 14px;
-  color: #334155;
+  color: var(--gray-700);
 }
 
 .rx-summary {
-  color: #475569;
+  color: var(--gray-600);
   margin-bottom: 8px;
 }
 
@@ -874,30 +1036,30 @@ export default {
   gap: 8px;
   font-size: 13px;
   padding: 4px 0;
-  border-bottom: 1px dashed #f1f5f9;
+  border-bottom: 1px dashed var(--gray-100);
 }
 
 .rx-med {
   font-weight: 600;
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 .rx-detail {
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .rx-notes {
   margin-top: 8px;
   font-size: 13px;
-  color: #64748b;
+  color: var(--text-muted);
   font-style: italic;
 }
 
 .lab-order-card {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   padding: 14px;
-  background: #fafffe;
+  background: var(--gray-50);
 }
 
 .lo-header {
@@ -909,15 +1071,15 @@ export default {
 
 .lo-order-number {
   font-weight: 600;
-  color: #2563eb;
+  color: var(--info-fg);
   font-size: 14px;
 }
 
 .lo-priority {
   font-size: 12px;
   text-transform: capitalize;
-  color: #64748b;
-  background: #f1f5f9;
+  color: var(--text-muted);
+  background: var(--gray-100);
   padding: 2px 8px;
   border-radius: 4px;
 }
@@ -925,17 +1087,17 @@ export default {
 .lo-date {
   margin-left: auto;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-subtle);
 }
 
 .lo-body {
   font-size: 14px;
-  color: #334155;
+  color: var(--gray-700);
 }
 
 .lo-tests {
   font-weight: 500;
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 .lo-tests-list {
@@ -946,8 +1108,8 @@ export default {
 }
 
 .lo-test-tag {
-  background: #eff6ff;
-  color: #2563eb;
+  background: var(--info-bg);
+  color: var(--info-fg);
   font-size: 12px;
   padding: 3px 10px;
   border-radius: 12px;
@@ -957,12 +1119,12 @@ export default {
 .lo-notes {
   margin-top: 8px;
   font-size: 13px;
-  color: #64748b;
+  color: var(--text-muted);
   font-style: italic;
 }
 
 .empty-state {
-  color: #94a3b8;
+  color: var(--text-subtle);
   font-size: 14px;
   text-align: center;
   padding: 20px;
@@ -985,7 +1147,7 @@ export default {
 }
 
 .modal-content {
-  background: white;
+  background: var(--white);
   border-radius: 12px;
   width: 90%;
   max-height: 85vh;
@@ -1008,12 +1170,12 @@ export default {
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--gray-200);
 }
 
 .modal-header h3 {
   font-size: 18px;
-  color: #1e293b;
+  color: var(--gray-800);
   margin: 0;
 }
 
@@ -1021,13 +1183,13 @@ export default {
   background: none;
   border: none;
   font-size: 24px;
-  color: #94a3b8;
+  color: var(--text-subtle);
   cursor: pointer;
   line-height: 1;
 }
 
 .modal-close:hover {
-  color: #475569;
+  color: var(--gray-600);
 }
 
 .modal-body {
@@ -1041,7 +1203,7 @@ export default {
   justify-content: flex-end;
   gap: 10px;
   padding: 16px 20px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--gray-200);
 }
 
 .form-group {
@@ -1052,24 +1214,24 @@ export default {
   display: block;
   font-size: 13px;
   font-weight: 600;
-  color: #374151;
+  color: var(--gray-700);
   margin-bottom: 4px;
 }
 
 .form-control {
   width: 100%;
   padding: 8px 12px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--gray-300);
   border-radius: 6px;
   font-size: 14px;
-  color: #1e293b;
-  background: white;
+  color: var(--gray-800);
+  background: var(--white);
   box-sizing: border-box;
 }
 
 .form-control:focus {
   outline: none;
-  border-color: #0d9488;
+  border-color: var(--focus-ring);
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
 
@@ -1103,16 +1265,16 @@ select.form-control {
 
 .items-header h4 {
   font-size: 15px;
-  color: #1e293b;
+  color: var(--gray-800);
   margin: 0;
 }
 
 .prescription-item-form {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   padding: 14px;
   margin-bottom: 12px;
-  background: #fafffe;
+  background: var(--gray-50);
 }
 
 .item-header {
@@ -1125,7 +1287,7 @@ select.form-control {
 .item-number {
   font-weight: 600;
   font-size: 13px;
-  color: #0d9488;
+  color: var(--primary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -1139,8 +1301,8 @@ select.form-control {
   top: 100%;
   left: 0;
   right: 0;
-  background: white;
-  border: 1px solid #d1d5db;
+  background: var(--white);
+  border: 1px solid var(--gray-300);
   border-top: none;
   border-radius: 0 0 6px 6px;
   max-height: 180px;
@@ -1159,17 +1321,17 @@ select.form-control {
 }
 
 .medicine-option:hover {
-  background: #f0fdfa;
+  background: var(--brand-50);
 }
 
 .med-name {
   font-weight: 500;
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 .med-generic {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-subtle);
 }
 
 .lab-tests-checklist {
@@ -1178,7 +1340,7 @@ select.form-control {
   gap: 6px;
   max-height: 300px;
   overflow-y: auto;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 6px;
   padding: 8px;
 }
@@ -1194,27 +1356,27 @@ select.form-control {
 }
 
 .lab-test-checkbox:hover {
-  background: #f8fafc;
+  background: var(--gray-50);
 }
 
 .lab-test-checkbox input[type="checkbox"] {
-  accent-color: #0d9488;
+  accent-color: var(--primary);
 }
 
 .test-name {
-  color: #1e293b;
+  color: var(--gray-800);
   font-weight: 500;
 }
 
 .test-category {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-subtle);
   margin-left: auto;
 }
 
 .loading-small {
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--text-subtle);
   padding: 10px;
 }
 
@@ -1223,18 +1385,18 @@ select.form-control {
   align-items: center;
   justify-content: center;
   padding: 8px 16px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--gray-300);
   border-radius: 6px;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  background: white;
-  color: #374151;
+  background: var(--white);
+  color: var(--gray-700);
   transition: all 0.15s;
 }
 
 .btn:hover {
-  background: #f8fafc;
+  background: var(--gray-50);
 }
 
 .btn:disabled {
@@ -1250,7 +1412,7 @@ select.form-control {
 .btn-primary {
   background: #0d9488;
   color: white;
-  border-color: #0d9488;
+  border-color: var(--focus-ring);
 }
 
 .btn-primary:hover {
@@ -1260,7 +1422,7 @@ select.form-control {
 .btn-danger {
   background: #ef4444;
   color: white;
-  border-color: #ef4444;
+  border-color: var(--danger);
 }
 
 .btn-danger:hover {
@@ -1277,28 +1439,28 @@ select.form-control {
 }
 
 .badge-success {
-  background: #dcfce7;
-  color: #16a34a;
+  background: var(--success-bg);
+  color: var(--success-fg);
 }
 
 .badge-warning {
-  background: #fef9c3;
-  color: #ca8a04;
+  background: var(--warning-bg);
+  color: var(--warning-fg);
 }
 
 .badge-info {
-  background: #e0f2fe;
-  color: #0284c7;
+  background: var(--info-bg);
+  color: var(--info-fg);
 }
 
 .badge-danger {
-  background: #fee2e2;
-  color: #dc2626;
+  background: var(--danger-bg);
+  color: var(--danger-fg);
 }
 
 .badge-gray {
-  background: #f1f5f9;
-  color: #64748b;
+  background: var(--gray-100);
+  color: var(--text-muted);
 }
 
 @media (max-width: 768px) {

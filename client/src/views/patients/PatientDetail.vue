@@ -5,6 +5,11 @@
       <p>Loading patient details...</p>
     </div>
 
+    <div v-else-if="error" class="loading-state">
+      <p>{{ error }}</p>
+      <button class="btn btn-primary" @click="loadPatient">Retry</button>
+    </div>
+
     <template v-else-if="patient">
       <div class="detail-header">
         <button class="btn btn-sm" @click="$router.back()">&larr; Back</button>
@@ -15,7 +20,17 @@
             <span class="text-muted">MRN: {{ patient.mrn }} | {{ patient.gender }} | DOB: {{ formatDate(patient.date_of_birth) }}</span>
           </div>
         </div>
-        <button class="btn btn-primary" @click="showEditModal = true">Edit Profile</button>
+        <div class="header-actions">
+          <button
+            v-if="canResetPortalPin"
+            class="btn btn-outline"
+            :disabled="resettingPortalPin"
+            @click="resetPortalPin"
+          >
+            {{ resettingPortalPin ? 'Resetting…' : 'Reset Portal PIN' }}
+          </button>
+          <button class="btn btn-primary" @click="openEditModal">Edit Profile</button>
+        </div>
       </div>
 
       <div class="detail-grid">
@@ -51,6 +66,14 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <div v-if="newPortalPin" class="portal-pin-notice" role="status">
+        <div>
+          <strong>New portal PIN: {{ newPortalPin }}</strong>
+          <span>Share it securely with the patient. It will not be shown again.</span>
+        </div>
+        <button class="btn btn-sm btn-secondary" @click="newPortalPin = ''">Dismiss</button>
       </div>
 
       <div class="card" style="margin-top:20px">
@@ -126,50 +149,250 @@
         </div>
       </div>
     </template>
+
+    <Teleport to="body">
+      <div v-if="showEditModal" class="modal-overlay" @click.self="closeEditModal">
+        <form class="modal" @submit.prevent="savePatient">
+          <div class="modal-header">
+            <h3>Edit Patient Profile</h3>
+            <button type="button" class="modal-close" @click="closeEditModal">&times;</button>
+          </div>
+          <div class="modal-body edit-grid">
+            <label>First name<input v-model.trim="editForm.first_name" required /></label>
+            <label>Last name<input v-model.trim="editForm.last_name" required /></label>
+            <label>Date of birth<input v-model="editForm.date_of_birth" type="date" :max="today" required /></label>
+            <label>Gender<select v-model="editForm.gender" required><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select></label>
+            <label>Blood type<select v-model="editForm.blood_type"><option value="">Unknown</option><option v-for="type in bloodTypes" :key="type">{{ type }}</option></select></label>
+            <label>Phone<input v-model.trim="editForm.phone" type="tel" inputmode="numeric" pattern="[0-9]*" :maxlength="PHONE_MAX_DIGITS" placeholder="Digits only" /></label>
+            <label class="full">Email<input v-model.trim="editForm.email" type="email" /></label>
+            <label class="full">Address<input v-model.trim="editForm.address" /></label>
+            <label>Emergency contact<input v-model.trim="editForm.emergency_contact_name" /></label>
+            <label>Emergency phone<input v-model.trim="editForm.emergency_contact_phone" type="tel" inputmode="numeric" pattern="[0-9]*" :maxlength="PHONE_MAX_DIGITS" placeholder="Digits only" /></label>
+            <label>Insurance provider<input v-model.trim="editForm.insurance_provider" /></label>
+            <label>Insurance number<input v-model.trim="editForm.insurance_number" /></label>
+            <label class="full">Allergies<textarea v-model="editForm.allergies" rows="2" /></label>
+            <label class="full">Chronic conditions<textarea v-model="editForm.chronic_conditions" rows="2" /></label>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="closeEditModal">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="saving">{{ saving ? 'Saving…' : 'Save Changes' }}</button>
+          </div>
+        </form>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
+import { useAuthStore } from '../../store/auth'
 import { formatDate, formatTime, formatCurrency, getStatusColor } from '../../utils/helpers'
+import { PHONE_MAX_DIGITS } from '../../utils/phone'
+
+const emptyEditForm = () => ({
+  first_name: '', last_name: '', date_of_birth: '', gender: 'other', blood_type: '',
+  phone: '', email: '', address: '', emergency_contact_name: '', emergency_contact_phone: '',
+  insurance_provider: '', insurance_number: '', allergies: '', chronic_conditions: ''
+})
 
 export default {
   name: 'PatientDetail',
   setup() {
     const route = useRoute()
     const toast = useToast()
+    const auth = useAuthStore()
     const patient = ref(null)
     const history = ref({ appointments: [], medical_records: [], prescriptions: [], bills: [] })
     const tab = ref('records')
     const showEditModal = ref(false)
     const loading = ref(true)
+    const saving = ref(false)
+    const error = ref('')
+    const editForm = ref(emptyEditForm())
+    const resettingPortalPin = ref(false)
+    const newPortalPin = ref('')
+    const canResetPortalPin = computed(() => (
+      ['admin', 'receptionist'].includes(auth.userRole) && patient.value?.status === 'active'
+    ))
+    const today = new Date().toISOString().slice(0, 10)
+    const bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+    let patientRequestGeneration = 0
+    let patientSaveGeneration = 0
+    let portalPinRequestGeneration = 0
+    let patientController = null
+    let componentUnmounted = false
 
-    onMounted(async () => {
+    const loadPatient = async () => {
       const id = route.params.id
+      const requestGeneration = ++patientRequestGeneration
+      patientController?.abort()
+      const controller = new AbortController()
+      patientController = controller
+      loading.value = true
+      error.value = ''
+      patient.value = null
+      history.value = { appointments: [], medical_records: [], prescriptions: [], bills: [] }
+      newPortalPin.value = ''
       try {
-        const [pRes, hRes] = await Promise.all([
-          axios.get(`/api/patients/${id}`),
-          axios.get(`/api/patients/${id}/history`)
-        ])
-        patient.value = pRes.data
-        history.value = hRes.data
-      } catch (e) {
-        toast.error('Failed to load patient details.')
+        const patientResponse = await axios.get(`/api/patients/${id}`, { signal: controller.signal })
+        if (
+          componentUnmounted ||
+          controller.signal.aborted ||
+          requestGeneration !== patientRequestGeneration ||
+          String(route.params.id) !== String(id)
+        ) return
+        patient.value = patientResponse.data
+        try {
+          const historyResponse = await axios.get(`/api/patients/${id}/history`, { signal: controller.signal })
+          if (
+            componentUnmounted ||
+            controller.signal.aborted ||
+            requestGeneration !== patientRequestGeneration ||
+            String(route.params.id) !== String(id)
+          ) return
+          history.value = historyResponse.data
+        } catch (requestError) {
+          if (
+            componentUnmounted ||
+            controller.signal.aborted ||
+            requestGeneration !== patientRequestGeneration ||
+            axios.isCancel(requestError)
+          ) return
+          toast.warning('Patient loaded, but medical history could not be retrieved.')
+        }
+      } catch (requestError) {
+        if (
+          componentUnmounted ||
+          controller.signal.aborted ||
+          requestGeneration !== patientRequestGeneration ||
+          axios.isCancel(requestError)
+        ) return
+        error.value = requestError.response?.data?.message || 'Failed to load patient details.'
       } finally {
-        loading.value = false
+        if (
+          !componentUnmounted &&
+          requestGeneration === patientRequestGeneration &&
+          patientController === controller
+        ) {
+          loading.value = false
+          patientController = null
+        }
       }
+    }
+
+    const openEditModal = () => {
+      if (!patient.value) return
+      editForm.value = {
+        first_name: patient.value.first_name || '', last_name: patient.value.last_name || '',
+        date_of_birth: patient.value.date_of_birth || '', gender: patient.value.gender || 'other',
+        blood_type: patient.value.blood_type || '', phone: patient.value.phone || '',
+        email: patient.value.email || '', address: patient.value.address || '',
+        emergency_contact_name: patient.value.emergency_contact_name || '',
+        emergency_contact_phone: patient.value.emergency_contact_phone || '',
+        insurance_provider: patient.value.insurance_provider || '',
+        insurance_number: patient.value.insurance_number || '',
+        allergies: patient.value.allergies || '', chronic_conditions: patient.value.chronic_conditions || ''
+      }
+      showEditModal.value = true
+    }
+
+    const closeEditModal = () => { showEditModal.value = false }
+    const savePatient = async () => {
+      if (!patient.value || saving.value) return
+      const patientId = patient.value.id
+      const requestGeneration = ++patientSaveGeneration
+      const isCurrentRequest = () => (
+        !componentUnmounted &&
+        requestGeneration === patientSaveGeneration &&
+        String(route.params.id) === String(patientId) &&
+        Number(patient.value?.id) === Number(patientId)
+      )
+      saving.value = true
+      try {
+        const { data } = await axios.put(`/api/patients/${patientId}`, editForm.value)
+        if (!isCurrentRequest()) return
+        patient.value = data
+        showEditModal.value = false
+        toast.success('Patient updated successfully.')
+      } catch (requestError) {
+        if (isCurrentRequest()) {
+          toast.error(requestError.response?.data?.message || 'Failed to update patient.')
+        }
+      } finally {
+        if (isCurrentRequest()) saving.value = false
+      }
+    }
+
+    const resetPortalPin = async () => {
+      if (!patient.value || patient.value.status !== 'active' || resettingPortalPin.value) return
+      const patientId = patient.value.id
+      const confirmed = window.confirm(`Reset the portal PIN for ${patient.value.first_name} ${patient.value.last_name}? The current PIN and all active portal sessions will stop working immediately.`)
+      if (!confirmed) return
+
+      const requestGeneration = ++portalPinRequestGeneration
+      const isCurrentRequest = () => (
+        !componentUnmounted &&
+        requestGeneration === portalPinRequestGeneration &&
+        String(route.params.id) === String(patientId) &&
+        Number(patient.value?.id) === Number(patientId)
+      )
+      resettingPortalPin.value = true
+      newPortalPin.value = ''
+      try {
+        const { data } = await axios.post(`/api/patients/${patientId}/portal-pin`)
+        if (!isCurrentRequest()) return
+        newPortalPin.value = data.plain_pin
+        patient.value.portal_pin_provisioned = true
+        toast.success('Portal PIN reset successfully.')
+      } catch (requestError) {
+        if (isCurrentRequest()) {
+          toast.error(requestError.response?.data?.message || 'Failed to reset portal PIN.')
+        }
+      } finally {
+        if (isCurrentRequest()) resettingPortalPin.value = false
+      }
+    }
+
+    onMounted(loadPatient)
+    watch(() => route.params.id, () => {
+      patientSaveGeneration += 1
+      saving.value = false
+      portalPinRequestGeneration += 1
+      resettingPortalPin.value = false
+      showEditModal.value = false
+      patientController?.abort()
+      patientController = null
+      loadPatient()
+    })
+    onBeforeUnmount(() => {
+      componentUnmounted = true
+      patientRequestGeneration += 1
+      patientSaveGeneration += 1
+      portalPinRequestGeneration += 1
+      patientController?.abort()
+      patientController = null
     })
 
-    return { patient, history, tab, showEditModal, loading, formatDate, formatTime, formatCurrency, getStatusColor }
+    return {
+      patient, history, tab, showEditModal, loading, saving, error, editForm,
+      resettingPortalPin, newPortalPin, canResetPortalPin,
+      today, bloodTypes, formatDate, formatTime, formatCurrency, getStatusColor,
+      loadPatient, openEditModal, closeEditModal, savePatient, resetPortalPin,
+      PHONE_MAX_DIGITS
+    }
   }
 }
 </script>
 
 <style scoped>
 .detail-header { display: flex; align-items: center; gap: 20px; margin-bottom: 24px; }
+.header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.portal-pin-notice { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 20px; padding: 14px 16px; border: 1px solid var(--brand-200); border-radius: 10px; background: var(--brand-50); }
+.portal-pin-notice div { display: grid; gap: 4px; }
+.portal-pin-notice span { color: var(--gray-600); font-size: 12px; }
 .patient-title { display: flex; align-items: center; gap: 16px; flex: 1; }
 .patient-avatar-large {
   width: 56px; height: 56px; background: #0d9488; color: white;
@@ -182,28 +405,34 @@ export default {
 .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .info-grid .full-width { grid-column: 1 / -1; }
 .info-item { display: flex; flex-direction: column; gap: 4px; }
-.info-item label { font-size: 11px; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-.info-item span { font-size: 14px; color: #1e293b; }
-.tabs { display: flex; gap: 0; border-bottom: 2px solid #e2e8f0; margin-bottom: 16px; }
+.info-item label { font-size: 11px; color: var(--text-subtle); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+.info-item span { font-size: 14px; color: var(--gray-800); }
+.tabs { display: flex; gap: 0; border-bottom: 2px solid var(--gray-200); margin-bottom: 16px; }
 .tabs button {
   padding: 10px 20px; border: none; background: none; cursor: pointer;
-  font-size: 14px; color: #64748b; border-bottom: 2px solid transparent;
+  font-size: 14px; color: var(--text-muted); border-bottom: 2px solid transparent;
   margin-bottom: -2px; transition: all 0.2s;
 }
-.tabs button:hover { color: #475569; }
-.tabs button.active { color: #0d9488; border-bottom-color: #0d9488; font-weight: 600; }
+.tabs button:hover { color: var(--gray-600); }
+.tabs button.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
 .tab-content { min-height: 100px; }
-.empty-tab { text-align: center; padding: 40px 20px; color: #94a3b8; }
+.empty-tab { text-align: center; padding: 40px 20px; color: var(--text-subtle); }
 .empty-tab .empty-icon { font-size: 32px; display: block; margin-bottom: 8px; }
 
-.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: #64748b; }
-.spinner { width: 40px; height: 40px; border: 4px solid #e2e8f0; border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
+.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; color: var(--text-muted); }
+.spinner { width: 40px; height: 40px; border: 4px solid var(--gray-200); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.text-muted { color: #94a3b8; font-size: 12px; }
-.text-danger { color: #ef4444; }
+.text-muted { color: var(--text-subtle); font-size: 12px; }
+.text-danger { color: var(--danger-fg); }
+.edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.edit-grid label { display: grid; gap: 6px; color: var(--gray-600); font-size: 13px; font-weight: 600; }
+.edit-grid .full { grid-column: 1 / -1; }
+.edit-grid input, .edit-grid select, .edit-grid textarea { width: 100%; }
 @media (max-width: 768px) {
   .detail-grid { grid-template-columns: 1fr; }
+  .edit-grid { grid-template-columns: 1fr; }
+  .edit-grid .full { grid-column: auto; }
   .info-grid { grid-template-columns: 1fr; }
   .detail-header { flex-wrap: wrap; gap: 12px; }
   .tabs { overflow-x: auto; white-space: nowrap; }

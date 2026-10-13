@@ -28,6 +28,6 @@ export default {
 }
 .loading-text {
   font-size: 14px;
-  color: #64748b;
+  color: var(--text-muted);
 }
 </style>

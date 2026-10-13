@@ -6,6 +6,7 @@
 
     <div class="login-container">
       <div class="login-left">
+        <div class="login-pattern" aria-hidden="true"></div>
         <div class="login-brand">
           <div class="brand-badge">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -50,6 +51,10 @@
           </span>
           <span class="foot-note">&copy; 2026 MediCare</span>
         </div>
+        <div class="login-footnote">
+          <span class="foot-dot"></span>
+          Role-based access &middot; Authenticated sessions
+        </div>
       </div>
 
       <div class="login-right">
@@ -71,10 +76,21 @@
 
           <div class="form-group" :class="{ 'has-error': passwordTouched && !password }">
             <label>Password</label>
-            <input
-              type="password" v-model="password" placeholder="Enter your password"
-              @blur="passwordTouched = true"
-            />
+            <div class="input-wrap">
+              <input
+                :type="showPassword ? 'text' : 'password'"
+                v-model="password" placeholder="Enter your password"
+                @blur="passwordTouched = true"
+              />
+              <button
+                type="button" class="reveal"
+                @click="showPassword = !showPassword"
+                :aria-label="showPassword ? 'Hide password' : 'Show password'"
+                :title="showPassword ? 'Hide password' : 'Show password'"
+              >
+                <span v-html="showPassword ? eyeOffIcon : eyeIcon"></span>
+              </button>
+            </div>
             <span class="field-error" v-if="passwordTouched && !password">Password is required</span>
           </div>
 
@@ -82,6 +98,10 @@
             <span v-if="loading" class="btn-spinner"></span>
             {{ loading ? 'Signing in...' : 'Sign In' }}
           </button>
+
+          <div class="form-links">
+            <router-link to="/forgot-password">Forgot password?</router-link>
+          </div>
 
           <div class="demo-accounts">
             <p class="demo-title">Quick demo access</p>
@@ -103,14 +123,22 @@
 
 <script>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../store/auth'
 import { useToast } from '../../store/toast'
+
+const svg = (body) =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+
+const brandIcon = svg('<path d="M12 6.5v11M6.5 12h11"/>')
+const eyeIcon = svg('<path d="M2.2 12S5.6 5.5 12 5.5 21.8 12 21.8 12 18.4 18.5 12 18.5 2.2 12 2.2 12Z"/><circle cx="12" cy="12" r="3.1"/>')
+const eyeOffIcon = svg('<path d="M9.9 5.7A9.6 9.6 0 0 1 12 5.5c6.4 0 9.8 6.5 9.8 6.5a17.6 17.6 0 0 1-3.4 4.2"/><path d="M6.4 7.4A17.4 17.4 0 0 0 2.2 12S5.6 18.5 12 18.5a9.7 9.7 0 0 0 4.2-.9"/><path d="M9.9 9.9a3.1 3.1 0 0 0 4.3 4.3"/><path d="M3 3l18 18"/>')
 
 export default {
   name: 'Login',
   setup() {
     const router = useRouter()
+    const route = useRoute()
     const authStore = useAuthStore()
     const toast = useToast()
     const email = ref('')
@@ -118,6 +146,7 @@ export default {
     const loading = ref(false)
     const emailTouched = ref(false)
     const passwordTouched = ref(false)
+    const showPassword = ref(false)
 
     const handleLogin = async () => {
       emailTouched.value = true
@@ -132,7 +161,10 @@ export default {
       try {
         await authStore.login(email.value, password.value)
         toast.success('Login successful!')
-        router.push('/dashboard')
+        const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
+          ? route.query.redirect
+          : '/dashboard'
+        router.push(redirect)
       } catch (e) {
         toast.error(e.response?.data?.message || 'Login failed. Please check your credentials.')
       } finally {
@@ -147,7 +179,10 @@ export default {
       passwordTouched.value = false
     }
 
-    return { email, password, loading, emailTouched, passwordTouched, handleLogin, fillDemo }
+    return {
+      email, password, loading, emailTouched, passwordTouched, showPassword,
+      handleLogin, fillDemo, brandIcon, eyeIcon, eyeOffIcon
+    }
   }
 }
 </script>

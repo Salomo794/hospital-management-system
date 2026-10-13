@@ -9,7 +9,7 @@
           </div>
         </div>
       </div>
-      <button class="btn btn-primary" @click="showNewModal = true" :disabled="!selectedPatient">+ New Record</button>
+      <button v-if="authStore.can('doctor', 'admin')" class="btn btn-primary" @click="openNewModal" :disabled="!selectedPatient">+ New Record</button>
     </div>
 
     <div v-if="selectedPatient" class="selected-patient-banner">
@@ -39,7 +39,7 @@
         <div v-else class="empty-state">
           <div class="empty-icon">&#x1F4CB;</div>
           <p>No medical records found for this patient.</p>
-          <span class="empty-hint">Click "+ New Record" to create the first record.</span>
+          <span v-if="authStore.can('doctor', 'admin')" class="empty-hint">Click "+ New Record" to create the first record.</span>
         </div>
       </template>
     </div>
@@ -51,11 +51,11 @@
     </div>
 
     <!-- New Record Modal -->
-    <div class="modal-overlay" v-if="showNewModal" @click.self="showNewModal = false">
+    <div class="modal-overlay" v-if="showNewModal" @click.self="closeNewModal">
       <div class="modal modal-lg">
         <div class="modal-header">
           <h3>New Medical Record</h3>
-          <button class="modal-close" @click="showNewModal = false">&times;</button>
+          <button class="modal-close" @click="closeNewModal">&times;</button>
         </div>
         <div class="modal-body">
           <form @submit.prevent="createRecord">
@@ -63,6 +63,9 @@
               <label>Appointment (optional)</label>
               <select v-model="recordForm.appointment_id">
                 <option value="">None</option>
+                <option v-for="appointment in appointments" :key="appointment.id" :value="appointment.id">
+                  {{ formatDate(appointment.appointment_date) }} at {{ appointment.appointment_time?.slice(0, 5) }} · Dr. {{ appointment.doctor_first_name }} {{ appointment.doctor_last_name }}
+                </option>
               </select>
             </div>
             <div class="form-group">
@@ -96,7 +99,7 @@
               <textarea v-model="recordForm.notes" rows="2" placeholder="Additional notes..."></textarea>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" @click="showNewModal = false">Cancel</button>
+              <button type="button" class="btn btn-secondary" @click="closeNewModal">Cancel</button>
               <button type="submit" class="btn btn-primary" :disabled="saving">
                 <span v-if="saving" class="spinner-sm"></span>
                 {{ saving ? 'Saving...' : 'Create Record' }}
@@ -110,26 +113,31 @@
 </template>
 
 <script>
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
+import { useAuthStore } from '../../store/auth'
 import { formatDate, getStatusColor } from '../../utils/helpers'
 
 export default {
   name: 'EMR',
   setup() {
     const router = useRouter()
+    const route = useRoute()
     const toast = useToast()
+    const authStore = useAuthStore()
     const search = ref('')
     const patientResults = ref([])
     const selectedPatient = ref(null)
     const records = ref([])
+    const appointments = ref([])
     const showNewModal = ref(false)
     const saving = ref(false)
     const loadingPatients = ref(false)
     const loadingRecords = ref(false)
     let timeout = null
+    let searchRequestId = 0
 
     const vitalSigns = ref({ bp: '', temp: '', pulse: '', weight: '' })
     const recordForm = ref({
@@ -140,27 +148,34 @@ export default {
     const searchPatients = () => {
       clearTimeout(timeout)
       timeout = setTimeout(async () => {
+        const requestId = ++searchRequestId
         if (search.value.length < 2) { patientResults.value = []; return }
         loadingPatients.value = true
         try {
           const { data } = await axios.get('/api/patients', { params: { search: search.value, limit: 5 } })
-          patientResults.value = data.patients
+          if (requestId === searchRequestId) patientResults.value = data.patients
         } catch (e) {
           toast.error('Failed to search patients')
         } finally {
-          loadingPatients.value = false
+          if (requestId === searchRequestId) loadingPatients.value = false
         }
       }, 300)
     }
 
-    const selectPatient = async (p) => {
+    const selectPatient = async p => {
       selectedPatient.value = p
       search.value = ''
       patientResults.value = []
+      records.value = []
+      appointments.value = []
       loadingRecords.value = true
       try {
-        const { data } = await axios.get(`/api/emr/patient/${p.id}`)
-        records.value = data
+        const [recordsResponse, appointmentsResponse] = await Promise.all([
+          axios.get(`/api/emr/patient/${p.id}`),
+          axios.get('/api/appointments', { params: { patient_id: p.id, limit: 100 } })
+        ])
+        records.value = recordsResponse.data
+        appointments.value = appointmentsResponse.data.appointments.filter(item => ['scheduled', 'in_progress'].includes(item.status))
       } catch (e) {
         toast.error('Failed to load medical records')
       } finally {
@@ -168,12 +183,23 @@ export default {
       }
     }
 
+    const openNewModal = () => {
+      recordForm.value = {
+        appointment_id: '', chief_complaint: '', history_of_present_illness: '',
+        physical_examination: '', diagnosis: '', treatment_plan: '', notes: ''
+      }
+      vitalSigns.value = { bp: '', temp: '', pulse: '', weight: '' }
+      showNewModal.value = true
+    }
+
+    const closeNewModal = () => { showNewModal.value = false }
+
     const createRecord = async () => {
       saving.value = true
       try {
         const payload = { ...recordForm.value, patient_id: selectedPatient.value.id, vital_signs: vitalSigns.value }
         const { data } = await axios.post('/api/emr', payload)
-        showNewModal.value = false
+        closeNewModal()
         toast.success('Medical record created successfully')
         router.push(`/emr/${data.id}`)
       } catch (e) {
@@ -183,7 +209,27 @@ export default {
       }
     }
 
-    return { search, patientResults, selectedPatient, records, showNewModal, saving, loadingPatients, loadingRecords, vitalSigns, recordForm, searchPatients, selectPatient, createRecord, formatDate, getStatusColor }
+    onUnmounted(() => {
+      clearTimeout(timeout)
+    })
+
+    onMounted(async () => {
+      const patientId = route.query.patient_id
+      if (!patientId) return
+      try {
+        const { data } = await axios.get(`/api/patients/${encodeURIComponent(patientId)}`)
+        await selectPatient(data)
+      } catch (e) {
+        toast.error('Unable to load the selected patient')
+      }
+    })
+
+    return {
+      search, patientResults, selectedPatient, records, appointments, showNewModal,
+      saving, loadingPatients, loadingRecords, vitalSigns, recordForm, authStore,
+      searchPatients, selectPatient, openNewModal, closeNewModal, createRecord,
+      formatDate, getStatusColor
+    }
   }
 }
 </script>
@@ -191,24 +237,24 @@ export default {
 <style scoped>
 .page-header { display: flex; justify-content: space-between; margin-bottom: 20px; gap: 16px; }
 .search-bar { position: relative; flex: 1; max-width: 400px; }
-.search-bar input { width: 100%; padding: 10px 16px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; }
-.search-results { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.search-bar input { width: 100%; padding: 10px 16px; border: 1px solid var(--gray-200); border-radius: 8px; font-size: 14px; }
+.search-results { position: absolute; top: 100%; left: 0; right: 0; background: var(--white); border: 1px solid var(--gray-200); border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
 .result-item { padding: 10px 14px; cursor: pointer; font-size: 14px; }
-.result-item:hover { background: #f0fdfa; }
-.selected-patient-banner { background: #f0fdfa; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #99f6e4; }
+.result-item:hover { background: var(--brand-50); }
+.selected-patient-banner { background: var(--brand-50); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #99f6e4; }
 .modal-lg { max-width: 700px; }
-.modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #64748b; }
+.modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-muted); }
 
 .loading-container { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 40px 20px; }
-.spinner { width: 36px; height: 36px; border: 3px solid #e2e8f0; border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; }
+.spinner { width: 36px; height: 36px; border: 3px solid var(--gray-200); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
 .spinner-sm { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 6px; vertical-align: middle; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.loading-text { font-size: 14px; color: #94a3b8; }
+.loading-text { font-size: 14px; color: var(--text-subtle); }
 
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 20px; text-align: center; }
 .empty-icon { font-size: 48px; line-height: 1; }
-.empty-state p { font-size: 15px; color: #475569; margin: 0; }
-.empty-hint { font-size: 13px; color: #94a3b8; }
+.empty-state p { font-size: 15px; color: var(--gray-600); margin: 0; }
+.empty-hint { font-size: 13px; color: var(--text-subtle); }
 .full-page-empty { padding: 80px 20px; }
 
 /* Responsive */

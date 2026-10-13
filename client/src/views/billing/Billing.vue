@@ -2,14 +2,14 @@
   <div class="billing-page">
     <div class="page-header">
       <div class="search-filters">
-        <select v-model="statusFilter" @change="loadBills">
+        <select v-model="statusFilter" @change="page = 1; loadBills()">
           <option value="">All Status</option>
           <option value="pending">Pending</option>
           <option value="partial">Partial</option>
           <option value="paid">Paid</option>
         </select>
-        <input type="date" v-model="fromDate" @change="loadBills" />
-        <input type="date" v-model="toDate" @change="loadBills" />
+        <input type="date" v-model="fromDate" @change="page = 1; loadBills()" />
+        <input type="date" v-model="toDate" @change="page = 1; loadBills()" />
       </div>
       <button class="btn btn-primary" @click="openNewBillModal">+ New Bill</button>
     </div>
@@ -31,7 +31,7 @@
 
     <div class="card">
       <div class="card-header">
-        <h3>Bills ({{ bills.length }})</h3>
+        <h3>Bills ({{ total }})</h3>
       </div>
 
       <div v-if="loading" class="loading-state">
@@ -79,6 +79,11 @@
           <p>No bills match your current filters. Try adjusting the filters or create a new bill.</p>
         </div>
       </template>
+      <div class="pagination" v-if="total > limit">
+        <button class="btn btn-sm" :disabled="page <= 1" @click="page--; loadBills()">Previous</button>
+        <span>Page {{ page }} of {{ Math.ceil(total / limit) }}</span>
+        <button class="btn btn-sm" :disabled="page >= Math.ceil(total / limit)" @click="page++; loadBills()">Next</button>
+      </div>
     </div>
 
     <div class="modal-overlay" v-if="showBillModal" @click.self="closeModal">
@@ -119,7 +124,7 @@
             <label>Bill Items</label>
             <div class="bill-items">
               <div class="bill-item" v-for="(item, index) in billForm.items" :key="index">
-                <input v-model="item.description" type="text" placeholder="Description" class="input-desc" />
+                <input v-model="item.description" type="text" placeholder="Description" class="input-desc" required />
                 <select v-model="item.category">
                   <option value="consultation">Consultation</option>
                   <option value="medicine">Medicine</option>
@@ -129,7 +134,7 @@
                   <option value="other">Other</option>
                 </select>
                 <input v-model.number="item.quantity" type="number" min="1" placeholder="Qty" class="input-num" />
-                <input v-model.number="item.unit_price" type="number" min="0" step="0.01" placeholder="Unit Price" class="input-price" />
+                <input v-model.number="item.unit_price" type="number" min="0" step="0.01" placeholder="Unit Price" class="input-price" required />
                 <button class="btn-remove" @click="removeItem(index)" :disabled="billForm.items.length <= 1">&times;</button>
               </div>
             </div>
@@ -165,11 +170,9 @@
             <div class="form-group">
               <label>Payment Method</label>
               <select v-model="billForm.payment_method">
-                <option value="cash">Cash</option>
-                <option value="card">Card</option>
-                <option value="insurance">Insurance</option>
-                <option value="online">Online</option>
-                <option value="bank_transfer">Bank Transfer</option>
+                <option v-for="method in paymentMethods" :key="method.value" :value="method.value">
+                  {{ method.label }}
+                </option>
               </select>
             </div>
             <div class="form-group">
@@ -199,6 +202,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { formatDate, formatCurrency, getStatusColor } from '../../utils/helpers'
+import { fetchPaymentMethods } from '../../utils/paymentMethods'
 import { useToast } from '../../store/toast'
 
 export default {
@@ -207,6 +211,10 @@ export default {
     const toast = useToast()
 
     const bills = ref([])
+    const total = ref(0)
+    const page = ref(1)
+    const limit = ref(20)
+    const summary = ref({ unpaid_count: 0, pending_amount: 0, collected_today: 0 })
     const loading = ref(false)
     const statusFilter = ref('')
     const fromDate = ref('')
@@ -215,6 +223,11 @@ export default {
     const showBillModal = ref(false)
     const submitting = ref(false)
     const patientResults = ref([])
+    const paymentMethods = ref([])
+
+    const loadPaymentMethods = async () => {
+      paymentMethods.value = await fetchPaymentMethods()
+    }
 
     const billForm = reactive({
       patient_id: null,
@@ -228,38 +241,39 @@ export default {
       notes: ''
     })
 
+    const finiteNonNegative = (value) => {
+      const number = Number(value)
+      return Number.isFinite(number) && number >= 0 ? number : 0
+    }
     const subtotal = computed(() =>
-      billForm.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0)
+      billForm.items.reduce((sum, item) => sum + (finiteNonNegative(item.quantity) * finiteNonNegative(item.unit_price)), 0)
     )
-    const taxAmount = computed(() => Math.max(0, (subtotal.value - (billForm.discount || 0)) * 0.10))
-    const netAmount = computed(() => Math.max(0, subtotal.value - (billForm.discount || 0) + taxAmount.value))
+    const taxAmount = computed(() => Math.max(0, (subtotal.value - finiteNonNegative(billForm.discount)) * 0.10))
+    const netAmount = computed(() => Math.max(0, subtotal.value - finiteNonNegative(billForm.discount) + taxAmount.value))
 
-    const totalPending = computed(() =>
-      bills.value
-        .filter(b => b.payment_status !== 'paid')
-        .reduce((s, b) => s + (parseFloat(b.net_amount) - parseFloat(b.paid_amount)), 0)
-    )
-    const totalCollectedToday = computed(() => {
-      const today = new Date().toISOString().slice(0, 10)
-      return bills.value
-        .filter(b => b.created_at && b.created_at.slice(0, 10) === today && b.payment_status === 'paid')
-        .reduce((s, b) => s + parseFloat(b.paid_amount), 0)
-    })
-    const unpaidCount = computed(() => bills.value.filter(b => b.payment_status !== 'paid').length)
+    const totalPending = computed(() => Number(summary.value.pending_amount) || 0)
+    const totalCollectedToday = computed(() => Number(summary.value.collected_today) || 0)
+    const unpaidCount = computed(() => Number(summary.value.unpaid_count) || 0)
 
     let searchTimeout = null
+    let patientSearchRequest = 0
     const searchPatients = () => {
       clearTimeout(searchTimeout)
       if (!billForm.patientSearch || billForm.patientSearch.length < 2) {
+        patientSearchRequest += 1
         patientResults.value = []
         return
       }
+      const requestId = ++patientSearchRequest
+      const query = billForm.patientSearch
       searchTimeout = setTimeout(async () => {
         try {
-          const { data } = await axios.get('/api/patients', { params: { search: billForm.patientSearch } })
-          patientResults.value = data.patients || data || []
+          const { data } = await axios.get('/api/patients', { params: { search: query } })
+          if (requestId === patientSearchRequest && billForm.patientSearch === query) {
+            patientResults.value = data.patients || (Array.isArray(data) ? data : [])
+          }
         } catch {
-          patientResults.value = []
+          if (requestId === patientSearchRequest) patientResults.value = []
         }
       }, 300)
     }
@@ -313,6 +327,22 @@ export default {
         toast.error('Please select a patient')
         return
       }
+      const invalidItem = billForm.items.find(item => {
+        const quantity = Number(item.quantity)
+        const unitPrice = Number(item.unit_price)
+        return !String(item.description || '').trim() || !String(item.category || '').trim() ||
+          !Number.isInteger(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0
+      })
+      if (invalidItem) {
+        toast.error('Complete every bill item with a description, category, positive quantity, and non-negative price.')
+        return
+      }
+      const subtotalValue = subtotal.value
+      const discountValue = finiteNonNegative(billForm.discount)
+      if (discountValue > subtotalValue) {
+        toast.error('Discount cannot exceed the subtotal.')
+        return
+      }
       submitting.value = true
       try {
         await axios.post('/api/billing', {
@@ -320,10 +350,10 @@ export default {
           items: billForm.items.map(i => ({
             description: i.description,
             category: i.category,
-            quantity: i.quantity,
-            unit_price: i.unit_price
+            quantity: Number(i.quantity),
+            unit_price: Number(i.unit_price)
           })),
-          discount: billForm.discount || 0,
+          discount: discountValue,
           tax: taxAmount.value,
           payment_method: billForm.payment_method,
           due_date: billForm.due_date || null,
@@ -339,26 +369,40 @@ export default {
       }
     }
 
+    let billsRequestId = 0
     const loadBills = async () => {
+      const requestId = ++billsRequestId
       loading.value = true
       try {
-        const params = {}
+        const params = { page: page.value, limit: limit.value }
         if (statusFilter.value) params.status = statusFilter.value
         if (fromDate.value) params.from_date = fromDate.value
         if (toDate.value) params.to_date = toDate.value
-        const { data } = await axios.get('/api/billing', { params })
-        bills.value = data.bills
+        const [billResponse, summaryResponse] = await Promise.all([
+          axios.get('/api/billing', { params }),
+          axios.get('/api/billing/summary')
+        ])
+        if (requestId !== billsRequestId) return
+        bills.value = billResponse.data.bills
+        total.value = billResponse.data.total
+        summary.value = summaryResponse.data
       } catch {
         toast.error('Failed to load bills')
       } finally {
-        loading.value = false
+        if (requestId === billsRequestId) loading.value = false
       }
     }
 
-    onMounted(loadBills)
+    onMounted(() => {
+      loadBills()
+      loadPaymentMethods()
+    })
 
     return {
       bills,
+      total,
+      page,
+      limit,
       loading,
       statusFilter,
       fromDate,
@@ -370,6 +414,7 @@ export default {
       submitting,
       billForm,
       patientResults,
+      paymentMethods,
       subtotal,
       taxAmount,
       netAmount,
@@ -411,7 +456,7 @@ export default {
 .search-filters select,
 .search-filters input {
   padding: 10px 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   font-size: 14px;
 }
@@ -424,16 +469,16 @@ export default {
 }
 
 .stat-card {
-  background: white;
+  background: var(--white);
   padding: 20px;
   border-radius: 12px;
   text-align: center;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
-.stat-pending .stat-value { color: #ef4444; }
-.stat-collected .stat-value { color: #10b981; }
-.stat-unpaid .stat-value { color: #f59e0b; }
+.stat-pending .stat-value { color: var(--danger-fg); }
+.stat-collected .stat-value { color: var(--success-fg); }
+.stat-unpaid .stat-value { color: var(--warning-fg); }
 
 .stat-value {
   font-size: 24px;
@@ -442,17 +487,17 @@ export default {
 
 .stat-label {
   font-size: 13px;
-  color: #64748b;
+  color: var(--text-muted);
   margin-top: 4px;
 }
 
-.text-danger { color: #ef4444; }
-.text-success { color: #10b981; }
+.text-danger { color: var(--danger-fg); }
+.text-success { color: var(--success-fg); }
 .text-mono { font-family: monospace; font-size: 13px; }
-.text-muted { color: #94a3b8; text-align: center; padding: 20px; }
+.text-muted { color: var(--text-subtle); text-align: center; padding: 20px; }
 
 .card {
-  background: white;
+  background: var(--white);
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   overflow: hidden;
@@ -460,7 +505,7 @@ export default {
 
 .card-header {
   padding: 16px 20px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--gray-200);
 }
 
 .card-header h3 {
@@ -474,14 +519,14 @@ export default {
   justify-content: center;
   gap: 12px;
   padding: 48px;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .spinner {
   width: 24px;
   height: 24px;
-  border: 3px solid #e2e8f0;
-  border-top-color: #0d9488;
+  border: 3px solid var(--gray-200);
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
@@ -499,14 +544,14 @@ export default {
 .data-table td {
   padding: 12px 16px;
   text-align: left;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--gray-100);
   font-size: 14px;
 }
 
 .data-table th {
-  background: #f8fafc;
+  background: var(--gray-50);
   font-weight: 600;
-  color: #475569;
+  color: var(--gray-600);
 }
 
 .badge {
@@ -517,11 +562,11 @@ export default {
   text-transform: capitalize;
 }
 
-.badge-success { background: #d1fae5; color: #065f46; }
-.badge-warning { background: #fef3c7; color: #92400e; }
-.badge-danger { background: #fee2e2; color: #991b1b; }
-.badge-info { background: #dbeafe; color: #1e40af; }
-.badge-gray { background: #f1f5f9; color: #475569; }
+.badge-success { background: var(--success-bg); color: var(--success-fg); }
+.badge-warning { background: var(--warning-bg); color: var(--warning-fg); }
+.badge-danger { background: var(--danger-bg); color: var(--danger-fg); }
+.badge-info { background: var(--info-bg); color: var(--info-fg); }
+.badge-gray { background: var(--gray-100); color: var(--gray-600); }
 
 .btn {
   padding: 8px 16px;
@@ -543,18 +588,18 @@ export default {
 
 .btn-outline {
   background: transparent;
-  border: 1px solid #e2e8f0;
-  color: #475569;
+  border: 1px solid var(--gray-200);
+  color: var(--gray-600);
 }
 
-.btn-outline:hover { background: #f8fafc; }
+.btn-outline:hover { background: var(--gray-50); }
 
 .btn-sm { padding: 6px 12px; font-size: 13px; }
 
 .empty-state {
   text-align: center;
   padding: 48px 24px;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .empty-icon {
@@ -564,7 +609,7 @@ export default {
 
 .empty-state h4 {
   margin: 0 0 8px;
-  color: #334155;
+  color: var(--gray-700);
 }
 
 .empty-state p {
@@ -583,7 +628,7 @@ export default {
 }
 
 .modal {
-  background: white;
+  background: var(--white);
   border-radius: 16px;
   width: 100%;
   max-width: 720px;
@@ -598,7 +643,7 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 20px 24px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--gray-200);
 }
 
 .modal-header h3 { margin: 0; }
@@ -608,11 +653,11 @@ export default {
   border: none;
   font-size: 24px;
   cursor: pointer;
-  color: #64748b;
+  color: var(--text-muted);
   padding: 0 4px;
 }
 
-.modal-close:hover { color: #1e293b; }
+.modal-close:hover { color: var(--gray-800); }
 
 .modal-body {
   padding: 24px;
@@ -624,7 +669,7 @@ export default {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 24px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--gray-200);
 }
 
 .form-group {
@@ -635,7 +680,7 @@ export default {
   display: block;
   font-size: 13px;
   font-weight: 600;
-  color: #475569;
+  color: var(--gray-600);
   margin-bottom: 6px;
 }
 
@@ -644,7 +689,7 @@ export default {
 .form-group textarea {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   font-size: 14px;
   box-sizing: border-box;
@@ -669,8 +714,8 @@ export default {
   top: 100%;
   left: 0;
   right: 0;
-  background: white;
-  border: 1px solid #e2e8f0;
+  background: var(--white);
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   max-height: 200px;
   overflow-y: auto;
@@ -685,14 +730,14 @@ export default {
 }
 
 .search-result-item:hover {
-  background: #f1f5f9;
+  background: var(--gray-100);
 }
 
 .selected-patient {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #eff6ff;
+  background: var(--info-bg);
   border: 1px solid #bfdbfe;
   border-radius: 8px;
   padding: 8px 12px;
@@ -705,7 +750,7 @@ export default {
   border: none;
   font-size: 18px;
   cursor: pointer;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .bill-items {
@@ -723,7 +768,7 @@ export default {
 .bill-item input,
 .bill-item select {
   padding: 8px 10px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 6px;
   font-size: 13px;
 }
@@ -734,9 +779,9 @@ export default {
 .input-price { flex: 1.2; }
 
 .btn-remove {
-  background: #fee2e2;
+  background: var(--danger-bg);
   border: none;
-  color: #991b1b;
+  color: var(--danger-fg);
   width: 32px;
   height: 32px;
   border-radius: 6px;
@@ -745,7 +790,7 @@ export default {
   flex-shrink: 0;
 }
 
-.btn-remove:hover { background: #fecaca; }
+.btn-remove:hover { background: var(--danger-bg-hover); }
 .btn-remove:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .btn-add-item {
@@ -761,7 +806,7 @@ export default {
 }
 
 .totals-display {
-  background: #f8fafc;
+  background: var(--gray-50);
   border-radius: 8px;
   padding: 16px;
 }
@@ -774,7 +819,7 @@ export default {
 }
 
 .total-net {
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--gray-200);
   margin-top: 8px;
   padding-top: 8px;
   font-weight: 700;

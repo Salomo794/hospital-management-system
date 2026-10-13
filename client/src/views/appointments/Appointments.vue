@@ -5,14 +5,17 @@
         <select v-model="statusFilter" @change="page = 1; loadAppointments()">
           <option value="">All Status</option>
           <option value="scheduled">Scheduled</option>
-          <option value="confirmed">Confirmed</option>
           <option value="in_progress">In Progress</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
         </select>
         <input type="date" v-model="dateFilter" @change="page = 1; loadAppointments()" />
+        <select v-model="doctorFilter" @change="page = 1; loadAppointments()">
+          <option value="">All Doctors</option>
+          <option v-for="doctor in doctors" :key="doctor.id" :value="doctor.id">Dr. {{ doctor.first_name }} {{ doctor.last_name }}</option>
+        </select>
       </div>
-      <button class="btn btn-primary" @click="showModal = true">+ New Appointment</button>
+      <button class="btn btn-primary" @click="openCreateModal">+ New Appointment</button>
     </div>
 
     <div class="card">
@@ -51,16 +54,13 @@
               <td><span class="badge" :class="'badge-' + getStatusColor(a.status)">{{ a.status?.replace('_', ' ') }}</span></td>
               <td>
                 <div class="btn-group">
-                  <button v-if="a.status === 'scheduled'" class="btn btn-sm btn-success" @click="updateStatus(a.id, 'confirmed')">
-                    Confirm
-                  </button>
-                  <button v-if="a.status === 'confirmed'" class="btn btn-sm btn-primary" @click="updateStatus(a.id, 'in_progress')">
+                  <button v-if="a.status === 'scheduled'" class="btn btn-sm btn-primary" @click="updateStatus(a.id, 'in_progress')">
                     Start
                   </button>
                   <button v-if="a.status === 'in_progress'" class="btn btn-sm btn-success" @click="updateStatus(a.id, 'completed')">
                     Complete
                   </button>
-                  <button v-if="a.status !== 'cancelled' && a.status !== 'completed'" class="btn btn-sm btn-danger" @click="confirmCancel(a.id)">
+                  <button v-if="authStore.can('admin', 'receptionist', 'doctor') && a.status !== 'cancelled' && a.status !== 'completed'" class="btn btn-sm btn-danger" @click="confirmCancel(a.id)">
                     Cancel
                   </button>
                 </div>
@@ -88,11 +88,11 @@
     </div>
 
     <!-- New Appointment Modal -->
-    <div class="modal-overlay" v-if="showModal" @click.self="showModal = false">
+    <div class="modal-overlay" v-if="showModal" @click.self="closeModal">
       <div class="modal">
         <div class="modal-header">
           <h3>Book Appointment</h3>
-          <button class="modal-close" @click="showModal = false">&times;</button>
+          <button class="modal-close" @click="closeModal">&times;</button>
         </div>
         <div class="modal-body">
           <div class="alert alert-danger" v-if="formError">{{ formError }}</div>
@@ -149,7 +149,9 @@
                 <option value="consultation">Consultation</option>
                 <option value="follow_up">Follow-up</option>
                 <option value="emergency">Emergency</option>
-                <option value="telemedicine">Telemedicine</option>
+                <option value="procedure">Procedure</option>
+                <option value="vaccination">Vaccination</option>
+                <option value="other">Other</option>
               </select>
             </div>
             <div class="form-group">
@@ -157,7 +159,7 @@
               <textarea v-model="form.reason" rows="2" placeholder="Reason for visit..."></textarea>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" @click="showModal = false">Cancel</button>
+              <button type="button" class="btn btn-secondary" @click="closeModal">Cancel</button>
               <button type="submit" class="btn btn-primary" :disabled="saving">
                 <div v-if="saving" class="spinner-small"></div>
                 {{ saving ? 'Booking...' : 'Book Appointment' }}
@@ -171,17 +173,21 @@
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { useConfirm } from '../../store/confirm'
+import { useAuthStore } from '../../store/auth'
 import { formatDate, formatTime, getStatusColor } from '../../utils/helpers'
 
 export default {
   name: 'Appointments',
   setup() {
     const toast = useToast()
+    const route = useRoute()
     const { confirm } = useConfirm()
+    const authStore = useAuthStore()
 
     const appointments = ref([])
     const doctors = ref([])
@@ -190,6 +196,7 @@ export default {
     const limit = ref(20)
     const statusFilter = ref('')
     const dateFilter = ref('')
+    const doctorFilter = ref('')
     const showModal = ref(false)
     const saving = ref(false)
     const formError = ref('')
@@ -200,7 +207,7 @@ export default {
     const loadingSlots = ref(false)
     const searchingPatients = ref(false)
 
-    const today = computed(() => new Date().toISOString().split('T')[0])
+    const today = ref(new Date().toISOString().slice(0, 10))
 
     const defaultForm = () => ({
       patient_id: null,
@@ -214,19 +221,47 @@ export default {
 
     const form = ref(defaultForm())
 
+    const openCreateModal = (patient = null) => {
+      slotRequestId += 1
+      today.value = new Date().toISOString().slice(0, 10)
+      form.value = defaultForm()
+      if (authStore.userRole === 'doctor') form.value.doctor_id = authStore.user?.id || ''
+      if (patient) {
+        form.value.patient_id = patient.id
+        form.value.patientName = `${patient.first_name || ''} ${patient.last_name || ''}`.trim()
+      }
+      patientSearch.value = ''
+      patientResults.value = []
+      availableSlots.value = []
+      formError.value = ''
+      showModal.value = true
+    }
+
+    let slotRequestId = 0
+    const closeModal = () => {
+      slotRequestId += 1
+      showModal.value = false
+      formError.value = ''
+      availableSlots.value = []
+    }
+
+    let appointmentRequestId = 0
     const loadAppointments = async () => {
+      const requestId = ++appointmentRequestId
       loadingAppointments.value = true
       try {
         const params = { page: page.value, limit: limit.value }
         if (statusFilter.value) params.status = statusFilter.value
         if (dateFilter.value) params.date = dateFilter.value
+        if (doctorFilter.value) params.doctor_id = doctorFilter.value
         const { data } = await axios.get('/api/appointments', { params })
+        if (requestId !== appointmentRequestId) return
         appointments.value = data.appointments
         total.value = data.total
       } catch (e) {
         toast.error('Failed to load appointments')
       } finally {
-        loadingAppointments.value = false
+        if (requestId === appointmentRequestId) loadingAppointments.value = false
       }
     }
 
@@ -239,7 +274,9 @@ export default {
       }
     }
 
+    let patientRequestId = 0
     const searchPatients = async () => {
+      const requestId = ++patientRequestId
       if (patientSearch.value.length < 2) {
         patientResults.value = []
         return
@@ -247,11 +284,11 @@ export default {
       searchingPatients.value = true
       try {
         const { data } = await axios.get('/api/patients', { params: { search: patientSearch.value, limit: 5 } })
-        patientResults.value = data.patients
+        if (requestId === patientRequestId) patientResults.value = data.patients
       } catch (e) {
         toast.error('Failed to search patients')
       } finally {
-        searchingPatients.value = false
+        if (requestId === patientRequestId) searchingPatients.value = false
       }
     }
 
@@ -268,20 +305,23 @@ export default {
     }
 
     const loadSlots = async () => {
-      if (!form.value.doctor_id || !form.value.appointment_date) {
-        availableSlots.value = []
-        form.value.appointment_time = ''
+      const requestId = ++slotRequestId
+      const doctorId = form.value.doctor_id
+      const appointmentDate = form.value.appointment_date
+      availableSlots.value = []
+      form.value.appointment_time = ''
+      if (!doctorId || !appointmentDate) {
+        loadingSlots.value = false
         return
       }
       loadingSlots.value = true
-      form.value.appointment_time = ''
       try {
-        const { data } = await axios.get(`/api/appointments/slots/${form.value.doctor_id}`, { params: { date: form.value.appointment_date } })
-        availableSlots.value = data.slots
+        const { data } = await axios.get(`/api/appointments/slots/${doctorId}`, { params: { date: appointmentDate } })
+        if (requestId === slotRequestId) availableSlots.value = data.slots
       } catch (e) {
-        toast.error('Failed to load available slots')
+        if (requestId === slotRequestId) toast.error('Failed to load available slots')
       } finally {
-        loadingSlots.value = false
+        if (requestId === slotRequestId) loadingSlots.value = false
       }
     }
 
@@ -294,7 +334,7 @@ export default {
       formError.value = ''
       try {
         await axios.post('/api/appointments', form.value)
-        showModal.value = false
+        closeModal()
         toast.success('Appointment booked successfully')
         form.value = defaultForm()
         patientSearch.value = ''
@@ -330,22 +370,43 @@ export default {
     const clearFilters = () => {
       statusFilter.value = ''
       dateFilter.value = ''
+      doctorFilter.value = ''
       page.value = 1
       loadAppointments()
     }
 
-    onMounted(() => {
-      loadAppointments()
-      loadDoctors()
+    onMounted(async () => {
+      doctorFilter.value = route.query.doctor_id ? String(route.query.doctor_id) : ''
+      await Promise.all([loadAppointments(), loadDoctors()])
+
+      const appointmentId = route.query.appointment_id
+      if (appointmentId) {
+        try {
+          const { data } = await axios.get(`/api/appointments/${encodeURIComponent(appointmentId)}`)
+          appointments.value = [data]
+          total.value = 1
+        } catch {
+          toast.error('Unable to load the selected appointment')
+        }
+      }
+
+      const patientId = route.query.patient_id
+      if (!patientId) return
+      try {
+        const { data } = await axios.get(`/api/patients/${encodeURIComponent(patientId)}`)
+        openCreateModal(data)
+      } catch (e) {
+        toast.error('Unable to load the selected patient')
+      }
     })
 
     return {
       appointments, doctors, total, page, limit,
-      statusFilter, dateFilter, showModal, saving, formError,
+      statusFilter, dateFilter, doctorFilter, showModal, saving, formError, authStore,
       patientSearch, patientResults, availableSlots, today, form,
       loadingAppointments, loadingSlots, searchingPatients,
       loadAppointments, searchPatients, selectPatient, clearPatient,
-      loadSlots, createAppointment, updateStatus, confirmCancel, clearFilters,
+      loadSlots, openCreateModal, closeModal, createAppointment, updateStatus, confirmCancel, clearFilters,
       formatDate, formatTime, getStatusColor
     }
   }
@@ -369,17 +430,17 @@ export default {
 .filter-group select,
 .filter-group input {
   padding: 10px 16px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   font-size: 14px;
-  background: white;
+  background: var(--white);
   transition: border-color 0.2s;
 }
 
 .filter-group select:focus,
 .filter-group input:focus {
   outline: none;
-  border-color: #0d9488;
+  border-color: var(--focus-ring);
 }
 
 .text-mono {
@@ -403,15 +464,15 @@ export default {
   align-items: center;
   justify-content: center;
   padding: 48px 20px;
-  color: #64748b;
+  color: var(--text-muted);
   gap: 12px;
 }
 
 .spinner {
   width: 36px;
   height: 36px;
-  border: 3px solid #e2e8f0;
-  border-top-color: #0d9488;
+  border: 3px solid var(--gray-200);
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -419,8 +480,8 @@ export default {
 .spinner-small {
   width: 16px;
   height: 16px;
-  border: 2px solid #e2e8f0;
-  border-top-color: #0d9488;
+  border: 2px solid var(--gray-200);
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   display: inline-block;
@@ -435,7 +496,7 @@ export default {
 .empty-state {
   text-align: center;
   padding: 48px 20px;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .empty-icon {
@@ -445,7 +506,7 @@ export default {
 
 .empty-state h4 {
   margin: 0 0 8px;
-  color: #334155;
+  color: var(--gray-700);
 }
 
 .empty-state p {
@@ -459,7 +520,7 @@ export default {
   align-items: center;
   gap: 16px;
   padding: 16px;
-  border-top: 1px solid #f1f5f9;
+  border-top: 1px solid var(--gray-100);
 }
 
 /* Modal */
@@ -468,17 +529,17 @@ export default {
   border: none;
   font-size: 24px;
   cursor: pointer;
-  color: #64748b;
+  color: var(--text-muted);
   transition: color 0.2s;
 }
 
 .modal-close:hover {
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 /* Search */
 .search-results {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   max-height: 150px;
   overflow-y: auto;
@@ -493,12 +554,12 @@ export default {
 }
 
 .result-item:hover {
-  background: #f0fdfa;
+  background: var(--brand-50);
 }
 
 .selected-item {
   padding: 8px 12px;
-  background: #f0fdfa;
+  background: var(--brand-50);
   border: 1px solid #99f6e4;
   border-radius: 6px;
   margin-top: 4px;
@@ -509,7 +570,7 @@ export default {
 }
 
 .selected-label {
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .btn-clear {
@@ -517,18 +578,18 @@ export default {
   border: none;
   font-size: 18px;
   cursor: pointer;
-  color: #94a3b8;
+  color: var(--text-subtle);
   padding: 0 4px;
   transition: color 0.2s;
 }
 
 .btn-clear:hover {
-  color: #ef4444;
+  color: var(--danger-fg);
 }
 
 .search-hint {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-subtle);
   padding: 6px 0;
   display: flex;
   align-items: center;

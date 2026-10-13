@@ -7,21 +7,21 @@
         <button :class="{ active: view === 'interactions' }" @click="view = 'interactions'; loadInteractionView()">Interactions</button>
       </div>
       <div class="header-actions">
-        <button class="btn btn-outline" @click="openDispenseModal" v-if="view === 'medicines'">Dispense</button>
-        <button class="btn btn-primary" @click="showAddModal = true" v-if="view === 'medicines'">+ Add Medicine</button>
+        <button v-if="view === 'medicines' && authStore.can('admin', 'pharmacist')" class="btn btn-outline" @click="openDispenseModal">Dispense</button>
+        <button class="btn btn-primary" @click="openAddModal" v-if="view === 'medicines'">+ Add Medicine</button>
       </div>
     </div>
 
     <div v-if="view === 'medicines'">
       <div class="search-filters">
-        <input type="text" v-model="search" placeholder="Search medicines..." @input="loadMedicines" />
-        <select v-model="categoryFilter" @change="loadMedicines">
+        <input type="text" v-model="search" placeholder="Search medicines..." @input="debouncedSearch" />
+        <select v-model="categoryFilter" @change="page = 1; loadMedicines()">
           <option value="">All Categories</option>
           <option>Analgesic</option><option>Antibiotic</option><option>Antihistamine</option>
           <option>Cardiovascular</option><option>Diabetes</option><option>Gastrointestinal</option>
           <option>Respiratory</option><option>Vitamins</option><option>Other</option>
         </select>
-        <label class="checkbox-label"><input type="checkbox" v-model="lowStockOnly" @change="loadMedicines" /> Low Stock Only</label>
+        <label class="checkbox-label"><input type="checkbox" v-model="lowStockOnly" @change="page = 1; loadMedicines()" /> Low Stock Only</label>
       </div>
       <div class="card">
         <div v-if="loadingMedicines" class="loading-container">
@@ -56,6 +56,11 @@
             <span class="empty-hint">Add a medicine or adjust your search filters.</span>
           </div>
         </template>
+      </div>
+      <div class="pagination" v-if="total > limit">
+        <button class="btn btn-sm" :disabled="page <= 1" @click="page--; loadMedicines()">Previous</button>
+        <span>Page {{ page }} of {{ Math.ceil(total / limit) }}</span>
+        <button class="btn btn-sm" :disabled="page >= Math.ceil(total / limit)" @click="page++; loadMedicines()">Next</button>
       </div>
     </div>
 
@@ -123,7 +128,7 @@
             <p class="interaction-hint">Select at least two medicines to screen for potential drug-drug interactions.</p>
             <div class="interaction-picker">
               <label class="picker-item" v-for="m in medicines" :key="m.id">
-                <input type="checkbox" :value="m.id" v-model="selectedIds" />
+                <input type="checkbox" :value="m.id" v-model="selectedIds" @change="clearInteractionResults" />
                 <span>{{ m.name }}</span>
                 <span class="picker-generic" v-if="m.generic_name">{{ m.generic_name }}</span>
               </label>
@@ -153,9 +158,9 @@
         </div>
       </template>
     </div>
-    <div class="modal-overlay" v-if="showAddModal" @click.self="showAddModal = false">
+    <div class="modal-overlay" v-if="showAddModal" @click.self="closeAddModal">
       <div class="modal">
-        <div class="modal-header"><h3>Add New Medicine</h3><button class="modal-close" @click="showAddModal = false">&times;</button></div>
+        <div class="modal-header"><h3>Add New Medicine</h3><button class="modal-close" @click="closeAddModal">&times;</button></div>
         <div class="modal-body">
           <form @submit.prevent="addMedicine">
             <div class="form-row">
@@ -182,7 +187,7 @@
               <div class="form-group"><label>Expiry Date</label><input type="date" v-model="medForm.expiry_date" /></div>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" @click="showAddModal = false">Cancel</button>
+              <button type="button" class="btn btn-secondary" @click="closeAddModal">Cancel</button>
               <button type="submit" class="btn btn-primary" :disabled="savingMedicine">
                 <span v-if="savingMedicine" class="spinner-sm"></span>
                 {{ savingMedicine ? 'Adding...' : 'Add Medicine' }}
@@ -228,7 +233,7 @@
                     Rx #{{ item.prescription_id }} &mdash; {{ item.patient_name }} ({{ item.patient_mrn }})
                   </span>
                 </div>
-                <div class="rx-qty">Qty: {{ item.quantity_prescribed }}</div>
+                <div class="rx-qty">Remaining: {{ item.quantity_remaining ?? item.quantity_prescribed }}</div>
               </div>
             </div>
             <div v-else-if="prescriptionSearch.length >= 2" class="empty-state">
@@ -268,11 +273,13 @@
                   type="number"
                   v-model.number="dispenseForm.quantity"
                   min="1"
-                  :max="selectedPrescriptionItem?.quantity_prescribed || 9999"
+                  step="1"
+                  :max="selectedPrescriptionItem?.quantity_remaining || selectedPrescriptionItem?.quantity_prescribed || 1"
                   required
+                  @input="onDispenseQuantityChange"
                 />
                 <span class="field-hint" v-if="selectedPrescriptionItem">
-                  Prescribed: {{ selectedPrescriptionItem.quantity_prescribed }}
+                  Prescribed: {{ selectedPrescriptionItem.quantity_prescribed }} · Remaining: {{ selectedPrescriptionItem.quantity_remaining ?? selectedPrescriptionItem.quantity_prescribed }}
                 </span>
               </div>
               <div class="modal-footer">
@@ -281,13 +288,13 @@
                   v-if="safetyWarnings.length"
                   type="button"
                   class="btn btn-danger"
-                  :disabled="dispensing || !dispenseForm.quantity"
+                  :disabled="dispensing || !dispenseQuantityValid"
                   @click="dispenseMedicineAction(true)"
                 >
                   <span v-if="dispensing" class="spinner-sm"></span>
                   {{ dispensing ? 'Dispensing...' : 'Dispense Anyway' }}
                 </button>
-                <button v-else type="submit" class="btn btn-primary" :disabled="dispensing || !dispenseForm.quantity">
+                <button v-else type="submit" class="btn btn-primary" :disabled="dispensing || !dispenseQuantityValid">
                   <span v-if="dispensing" class="spinner-sm"></span>
                   {{ dispensing ? 'Dispensing...' : 'Dispense' }}
                 </button>
@@ -304,14 +311,19 @@
 import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
-import { formatDate, formatCurrency } from '../../utils/helpers'
+import { useAuthStore } from '../../store/auth'
+import { formatDate, formatCurrency, debounce, hasAllergy } from '../../utils/helpers'
 
 export default {
   name: 'Pharmacy',
   setup() {
     const toast = useToast()
+    const authStore = useAuthStore()
     const view = ref('medicines')
     const medicines = ref([])
+    const total = ref(0)
+    const page = ref(1)
+    const limit = ref(20)
     const search = ref('')
     const categoryFilter = ref('')
     const lowStockOnly = ref(false)
@@ -321,7 +333,7 @@ export default {
     const loadingMedicines = ref(false)
     const loadingAlerts = ref(false)
     const savingMedicine = ref(false)
-    const medForm = ref({ name: '', generic_name: '', category: '', manufacturer: '', unit_price: 0, cost_price: 0, stock_quantity: 0, unit: 'tablet', min_stock_level: 10, expiry_date: '' })
+    const medForm = ref({ name: '', generic_name: '', category: 'Analgesic', manufacturer: '', unit_price: 0, cost_price: 0, stock_quantity: 0, unit: 'tablet', min_stock_level: 10, expiry_date: '' })
 
     const showDispenseModal = ref(false)
     const dispensing = ref(false)
@@ -330,8 +342,18 @@ export default {
     const prescriptionItems = ref([])
     const filteredPrescriptionItems = ref([])
     const selectedPrescriptionItem = ref(null)
-    const dispenseForm = ref({ prescription_item_id: null, quantity: 1 })
+    const dispenseForm = ref({ prescription_item_id: null, quantity: 1, request_id: '' })
     const safetyWarnings = ref([])
+    const dispenseQuantityValid = computed(() => {
+      const quantity = Number(dispenseForm.value.quantity)
+      const remaining = Number(selectedPrescriptionItem.value?.quantity_remaining ?? selectedPrescriptionItem.value?.quantity_prescribed)
+      return Boolean(selectedPrescriptionItem.value) && Number.isInteger(quantity) && quantity > 0 && quantity <= remaining
+    })
+
+    const newRequestId = () => {
+      if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+      return `dispense-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    }
 
     const loadingInteractions = ref(false)
     const interactionSummary = ref({ summary: { mild: 0, moderate: 0, severe: 0, contraindicated: 0 }, total: 0 })
@@ -351,11 +373,10 @@ export default {
 
     const loadInteractionView = async () => {
       loadingInteractions.value = true
-      interactionResults.value = []
-      checkedIds.value = []
+      clearInteractionResults()
       try {
         const [medsRes, summaryRes] = await Promise.all([
-          axios.get('/api/pharmacy/medicines', { params: { limit: 200 } }),
+          axios.get('/api/pharmacy/medicines', { params: { limit: 100 } }),
           axios.get('/api/pharmacy/interactions/summary')
         ])
         medicines.value = medsRes.data.medicines || []
@@ -367,40 +388,69 @@ export default {
       }
     }
 
+    let interactionRequestId = 0
+    const clearInteractionResults = () => {
+      interactionRequestId += 1
+      checkingInteractions.value = false
+      interactionResults.value = []
+      checkedIds.value = []
+    }
+
     const checkInteractions = async () => {
+      const ids = [...selectedIds.value]
+      if (ids.length < 2) return
+      const requestId = ++interactionRequestId
       checkingInteractions.value = true
       interactionResults.value = []
       try {
-        const { data } = await axios.post('/api/pharmacy/interactions/check', { medicineIds: selectedIds.value })
+        const { data } = await axios.post('/api/pharmacy/interactions/check', { medicineIds: ids })
+        if (requestId !== interactionRequestId) return
         interactionResults.value = data.interactions
         checkedIds.value = data.checkedIds
       } catch (e) {
-        toast.error(e.response?.data?.message || 'Error checking interactions')
+        if (requestId === interactionRequestId) toast.error(e.response?.data?.message || 'Error checking interactions')
       } finally {
-        checkingInteractions.value = false
+        if (requestId === interactionRequestId) checkingInteractions.value = false
       }
     }
 
-    const noAllergy = (text) => {
-      if (!text) return true
-      return ['none', 'n/a', 'na', 'nil', 'nkda'].includes(String(text).trim().toLowerCase())
-    }
+    const noAllergy = text => !hasAllergy(text)
 
+    let medicinesRequestId = 0
     const loadMedicines = async () => {
+      const requestId = ++medicinesRequestId
       loadingMedicines.value = true
       try {
-        const params = {}
+        const params = { page: page.value, limit: limit.value }
         if (search.value) params.search = search.value
         if (categoryFilter.value) params.category = categoryFilter.value
         if (lowStockOnly.value) params.low_stock = 'true'
         const { data } = await axios.get('/api/pharmacy/medicines', { params })
+        if (requestId !== medicinesRequestId) return
         medicines.value = data.medicines
+        total.value = data.total
       } catch (e) {
         toast.error('Failed to load medicines')
       } finally {
-        loadingMedicines.value = false
+        if (requestId === medicinesRequestId) loadingMedicines.value = false
       }
     }
+
+    const debouncedSearch = debounce(() => {
+      page.value = 1
+      loadMedicines()
+    })
+
+    const openAddModal = () => {
+      medForm.value = {
+        name: '', generic_name: '', category: 'Analgesic', manufacturer: '',
+        unit_price: 0, cost_price: 0, stock_quantity: 0, unit: 'tablet',
+        min_stock_level: 10, expiry_date: ''
+      }
+      showAddModal.value = true
+    }
+
+    const closeAddModal = () => { showAddModal.value = false }
 
     const loadAlerts = async () => {
       loadingAlerts.value = true
@@ -419,7 +469,7 @@ export default {
       savingMedicine.value = true
       try {
         await axios.post('/api/pharmacy/medicines', medForm.value)
-        showAddModal.value = false
+        closeAddModal()
         toast.success('Medicine added successfully')
         loadMedicines()
       } catch (e) {
@@ -434,7 +484,7 @@ export default {
       prescriptionSearch.value = ''
       filteredPrescriptionItems.value = []
       selectedPrescriptionItem.value = null
-      dispenseForm.value = { prescription_item_id: null, quantity: 1 }
+      dispenseForm.value = { prescription_item_id: null, quantity: 1, request_id: newRequestId() }
       safetyWarnings.value = []
       loadingPrescriptions.value = true
       try {
@@ -461,7 +511,8 @@ export default {
 
     const selectPrescriptionItem = (item) => {
       selectedPrescriptionItem.value = item
-      dispenseForm.value = { prescription_item_id: item.id, quantity: 1 }
+      const remaining = Number(item.quantity_remaining ?? item.quantity_prescribed)
+      dispenseForm.value = { prescription_item_id: item.id, quantity: remaining, request_id: newRequestId() }
       safetyWarnings.value = []
     }
 
@@ -472,13 +523,37 @@ export default {
       filteredPrescriptionItems.value = []
     }
 
+    const onDispenseQuantityChange = () => {
+      // A new quantity is a new operation and must not reuse an idempotency
+      // key belonging to a previous request.
+      dispenseForm.value.request_id = newRequestId()
+      safetyWarnings.value = []
+    }
+
     const dispenseMedicineAction = async (acknowledge = false) => {
+      const item = selectedPrescriptionItem.value
+      const quantity = Number(dispenseForm.value.quantity)
+      const remaining = Number(item?.quantity_remaining ?? item?.quantity_prescribed)
+      if (!dispenseForm.value.prescription_item_id || !item) {
+        toast.error('Please select a prescription item.')
+        return
+      }
+      if (!Number.isInteger(quantity) || quantity <= 0) {
+        toast.error('Quantity must be a positive whole number.')
+        return
+      }
+      if (!Number.isFinite(remaining) || quantity > remaining) {
+        toast.error(`Only ${Number.isFinite(remaining) ? remaining : 0} unit(s) remain to be dispensed.`)
+        return
+      }
+      if (!dispenseForm.value.request_id) dispenseForm.value.request_id = newRequestId()
       dispensing.value = true
       if (!acknowledge) safetyWarnings.value = []
       try {
         const { data } = await axios.post('/api/pharmacy/dispense', {
           prescription_item_id: dispenseForm.value.prescription_item_id,
-          quantity: dispenseForm.value.quantity,
+          quantity,
+          request_id: dispenseForm.value.request_id,
           acknowledge_warnings: acknowledge
         })
         if (data.warnings && data.warnings.length) {
@@ -503,17 +578,17 @@ export default {
 
     onMounted(loadMedicines)
     return {
-      view, medicines, search, categoryFilter, lowStockOnly, showAddModal, lowStock, expired, medForm,
-      loadingMedicines, loadingAlerts, savingMedicine,
-      loadMedicines, loadAlerts, addMedicine, formatDate, formatCurrency,
+      view, medicines, total, page, limit, search, categoryFilter, lowStockOnly, showAddModal, lowStock, expired, medForm,
+      loadingMedicines, loadingAlerts, savingMedicine, authStore,
+      loadMedicines, debouncedSearch, loadAlerts, openAddModal, closeAddModal, addMedicine, formatDate, formatCurrency,
       showDispenseModal, dispensing, loadingPrescriptions, prescriptionSearch,
       filteredPrescriptionItems, selectedPrescriptionItem, dispenseForm,
-      safetyWarnings, noAllergy,
+      safetyWarnings, noAllergy, dispenseQuantityValid,
       openDispenseModal, closeDispenseModal, filterPrescriptionItems, selectPrescriptionItem,
-      dispenseMedicineAction,
+      onDispenseQuantityChange, dispenseMedicineAction,
       loadingInteractions, interactionSummary, selectedIds, checkingInteractions, interactionResults,
       checkedIds, severityKeys, groupedResults, severityLabel, sevBadge,
-      loadInteractionView, checkInteractions
+      loadInteractionView, checkInteractions, clearInteractionResults
     }
   }
 }
@@ -523,70 +598,70 @@ export default {
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .header-actions { display: flex; gap: 8px; }
 .tabs-inline { display: flex; gap: 0; }
-.tabs-inline button { padding: 10px 20px; border: 1px solid #e2e8f0; background: white; cursor: pointer; font-size: 14px; }
+.tabs-inline button { padding: 10px 20px; border: 1px solid var(--gray-200); background: var(--white); cursor: pointer; font-size: 14px; }
 .tabs-inline button:first-child { border-radius: 8px 0 0 8px; }
 .tabs-inline button:last-child { border-radius: 0 8px 8px 0; }
-.tabs-inline button.active { background: #0d9488; color: white; border-color: #0d9488; }
+.tabs-inline button.active { background: #0d9488; color: white; border-color: var(--focus-ring); }
 .search-filters { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; }
-.search-filters input { padding: 10px 16px; border: 1px solid #e2e8f0; border-radius: 8px; width: 250px; font-size: 14px; }
-.search-filters select { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; }
+.search-filters input { padding: 10px 16px; border: 1px solid var(--gray-200); border-radius: 8px; width: 250px; font-size: 14px; }
+.search-filters select { padding: 10px 12px; border: 1px solid var(--gray-200); border-radius: 8px; font-size: 14px; }
 .checkbox-label { font-size: 14px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .alerts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-.alert-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
+.alert-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--gray-100); }
 .alert-info { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
-.text-danger { color: #ef4444; }
-.modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #64748b; }
+.text-danger { color: var(--danger-fg); }
+.modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-muted); }
 
 .loading-container { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 40px 20px; }
-.spinner { width: 36px; height: 36px; border: 3px solid #e2e8f0; border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; }
+.spinner { width: 36px; height: 36px; border: 3px solid var(--gray-200); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
 .spinner-sm { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 6px; vertical-align: middle; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.loading-text { font-size: 14px; color: #94a3b8; }
+.loading-text { font-size: 14px; color: var(--text-subtle); }
 
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 40px 20px; text-align: center; }
 .empty-icon { font-size: 48px; line-height: 1; }
-.empty-state p { font-size: 15px; color: #475569; margin: 0; }
-.empty-hint { font-size: 13px; color: #94a3b8; }
+.empty-state p { font-size: 15px; color: var(--gray-600); margin: 0; }
+.empty-hint { font-size: 13px; color: var(--text-subtle); }
 
-.prescription-list { max-height: 280px; overflow-y: auto; margin: 12px 0; border: 1px solid #e2e8f0; border-radius: 8px; }
-.prescription-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; cursor: pointer; border-bottom: 1px solid #f1f5f9; transition: background 0.15s; }
+.prescription-list { max-height: 280px; overflow-y: auto; margin: 12px 0; border: 1px solid var(--gray-200); border-radius: 8px; }
+.prescription-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; cursor: pointer; border-bottom: 1px solid var(--gray-100); transition: background 0.15s; }
 .prescription-item:last-child { border-bottom: none; }
-.prescription-item:hover { background: #f0fdfa; }
-.prescription-item.selected { background: #ccfbf1; border-color: #99f6e4; }
+.prescription-item:hover { background: var(--brand-50); }
+.prescription-item.selected { background: var(--brand-100); border-color: var(--brand-200); }
 .rx-info { display: flex; flex-direction: column; gap: 2px; }
-.rx-meta { font-size: 12px; color: #64748b; }
-.rx-qty { font-size: 13px; color: #475569; white-space: nowrap; margin-left: 12px; }
-.selected-rx-banner { background: #f0fdfa; padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #99f6e4; font-size: 14px; }
-.field-hint { display: block; margin-top: 4px; font-size: 12px; color: #64748b; }
+.rx-meta { font-size: 12px; color: var(--text-muted); }
+.rx-qty { font-size: 13px; color: var(--gray-600); white-space: nowrap; margin-left: 12px; }
+.selected-rx-banner { background: var(--brand-50); padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #99f6e4; font-size: 14px; }
+.field-hint { display: block; margin-top: 4px; font-size: 12px; color: var(--text-muted); }
 
 .interaction-summary { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 .summary-chip { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 20px; font-size: 12px; font-weight: 500; }
 .chip-contraindicated { background: #7f1d1d; color: #fff; }
-.chip-severe { background: #fef2f2; color: #dc2626; }
-.chip-moderate { background: #fffbeb; color: #d97706; }
-.chip-mild { background: #eff6ff; color: #2563eb; }
-.summary-total { font-size: 13px; color: #64748b; margin-left: auto; }
-.interaction-hint { font-size: 13px; color: #64748b; margin: 0 0 12px; }
-.interaction-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-height: 260px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }
-.picker-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #334155; cursor: pointer; padding: 6px 8px; border-radius: 6px; }
-.picker-item:hover { background: #f8fafc; }
-.picker-generic { font-size: 11px; color: #94a3b8; }
+.chip-severe { background: var(--danger-bg); color: var(--danger-fg); }
+.chip-moderate { background: var(--warning-bg); color: var(--warning-fg); }
+.chip-mild { background: var(--info-bg); color: var(--info-fg); }
+.summary-total { font-size: 13px; color: var(--text-muted); margin-left: auto; }
+.interaction-hint { font-size: 13px; color: var(--text-muted); margin: 0 0 12px; }
+.interaction-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-height: 260px; overflow-y: auto; border: 1px solid var(--gray-200); border-radius: 8px; padding: 12px; }
+.picker-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--gray-700); cursor: pointer; padding: 6px 8px; border-radius: 6px; }
+.picker-item:hover { background: var(--gray-50); }
+.picker-generic { font-size: 11px; color: var(--text-subtle); }
 .interaction-results { margin-top: 16px; display: flex; flex-direction: column; gap: 14px; }
 .result-group h4 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
-.sev-contraindicated { color: #7f1d1d; }
-.sev-severe { color: #dc2626; }
-.sev-moderate { color: #d97706; }
-.sev-mild { color: #2563eb; }
-.interaction-item { border: 1px solid #e2e8f0; border-left: 4px solid #94a3b8; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: white; }
-.interaction-pair { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; color: #1e293b; }
-.pair-sep { color: #94a3b8; }
-.interaction-desc { font-size: 13px; color: #475569; margin-top: 6px; }
-.interaction-mgmt { font-size: 12px; color: #64748b; margin-top: 6px; }
+.sev-contraindicated { color: var(--danger-fg); }
+.sev-severe { color: var(--danger-fg); }
+.sev-moderate { color: var(--warning-fg); }
+.sev-mild { color: var(--info-fg); }
+.interaction-item { border: 1px solid var(--gray-200); border-left: 4px solid var(--gray-400); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: var(--white); }
+.interaction-pair { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; color: var(--gray-800); }
+.pair-sep { color: var(--text-subtle); }
+.interaction-desc { font-size: 13px; color: var(--gray-600); margin-top: 6px; }
+.interaction-mgmt { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
 .interaction-clear { padding: 24px; }
 .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; text-transform: capitalize; }
-.badge-danger { background: #fef2f2; color: #dc2626; }
-.badge-warning { background: #fffbeb; color: #d97706; }
-.badge-info { background: #eff6ff; color: #2563eb; }
+.badge-danger { background: var(--danger-bg); color: var(--danger-fg); }
+.badge-warning { background: var(--warning-bg); color: var(--warning-fg); }
+.badge-info { background: var(--info-bg); color: var(--info-fg); }
 
 @media (max-width: 768px) {
   .alerts-grid { grid-template-columns: 1fr; }

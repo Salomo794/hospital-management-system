@@ -14,7 +14,7 @@ export default {
   name: 'StatsCard',
   props: {
     icon: { type: String, default: '' },
-    iconBg: { type: String, default: '#f0fdfa' },
+    iconBg: { type: String, default: 'var(--brand-50)' },
     value: { type: [String, Number], default: 0 },
     label: { type: String, default: '' },
     change: { type: String, default: '' },

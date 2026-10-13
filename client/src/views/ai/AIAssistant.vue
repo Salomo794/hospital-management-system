@@ -12,14 +12,9 @@
           <div class="message-content">
             <div class="message-text">Hello! I'm your AI Hospital Assistant. I can help you find patient information, check schedules, and more. Try asking me:</div>
             <div class="quick-actions">
-              <button @click="sendMessage('Show today\'s appointments')">Today's Appointments</button>
-              <button @click="sendMessage('Show pending tasks')">Pending Tasks</button>
-              <button @click="sendMessage('Show revenue this month')">Monthly Revenue</button>
-              <button @click="sendMessage('find patient Smith')">Find Patient</button>
-              <button @click="sendMessage('Ward status and bed occupancy')">Ward Status</button>
-              <button @click="sendMessage('interaction between Warfarin and Aspirin')">Drug Interaction</button>
-              <button @click="sendMessage('allergies of Maria Garcia')">Patient Allergies</button>
-              <button @click="sendMessage('Check low stock medicines')">Low Stock</button>
+              <button v-for="action in quickActions" :key="action.label" @click="sendMessage(action.message)">
+                {{ action.label }}
+              </button>
             </div>
           </div>
         </div>
@@ -29,7 +24,7 @@
           <div class="message-avatar" v-if="msg.role === 'system'">&#129302;</div>
           <div class="message-avatar user-avatar" v-else>&#128100;</div>
           <div class="message-content">
-            <div class="message-text" v-html="formatMessage(msg.text)"></div>
+            <div class="message-text">{{ msg.text }}</div>
             <div class="message-data" v-if="msg.data">
               <table class="data-table" v-if="Array.isArray(msg.data) && msg.data.length">
                 <thead>
@@ -83,15 +78,30 @@
 </template>
 
 <script>
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
+import { useAuthStore } from '../../store/auth'
 import { formatDateTime } from '../../utils/helpers'
 
 export default {
   name: 'AIAssistant',
   setup() {
     const toast = useToast()
+    const authStore = useAuthStore()
+    const clinicalRoles = ['admin', 'receptionist', 'doctor', 'nurse']
+    const operationsRoles = ['admin', 'receptionist', 'doctor', 'nurse']
+    const quickActions = computed(() => [
+      { label: "Today's Appointments", message: "Show today's appointments", roles: operationsRoles },
+      { label: 'Pending Tasks', message: 'Show pending tasks', roles: operationsRoles },
+      { label: 'Monthly Revenue', message: 'Show revenue this month', roles: ['admin'] },
+      { label: 'Find Patient', message: 'find patient Smith', roles: clinicalRoles },
+      { label: 'Ward Status', message: 'Ward status and bed occupancy', roles: operationsRoles },
+      { label: 'Drug Interaction', message: 'interaction between Warfarin and Aspirin', roles: ['admin', 'doctor', 'nurse', 'pharmacist'] },
+      { label: 'Abnormal Lab Results', message: 'abnormal lab results', roles: ['admin', 'doctor', 'nurse', 'lab_technician'] },
+      { label: 'Patient Allergies', message: 'allergies of Maria Garcia', roles: clinicalRoles },
+      { label: 'Low Stock', message: 'Check low stock medicines', roles: ['admin', 'pharmacist'] }
+    ].filter(action => authStore.can(...action.roles)))
     const messages = ref([])
     const input = ref('')
     const loading = ref(false)
@@ -119,15 +129,15 @@ export default {
         const { data } = await axios.post('/api/ai/chat', { message: msg })
         messages.value.push({ role: 'system', text: data.response, data: data.data, timestamp: new Date() })
       } catch (e) {
-        toast.error('Failed to get a response. Please try again.')
-        messages.value.push({ role: 'system', text: 'Sorry, I encountered an error. Please try again.', timestamp: new Date() })
+        const responseText = e.response?.data?.response || e.response?.data?.message || 'Sorry, I encountered an error. Please try again.'
+        toast.error(responseText)
+        messages.value.push({ role: 'system', text: responseText, timestamp: new Date() })
       } finally {
         loading.value = false
       }
       scrollToBottom()
     }
 
-    const formatMessage = (text) => text ? text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>') : ''
     const formatKey = (key) => key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
     const formatValue = (val) => {
       if (val === null || val === undefined) return '-'
@@ -142,7 +152,7 @@ export default {
       chatInput.value?.focus()
     })
 
-    return { messages, input, loading, chatContainer, chatInput, sendMessage, formatMessage, formatKey, formatValue, formatTime }
+    return { messages, input, loading, chatContainer, chatInput, quickActions, sendMessage, formatKey, formatValue, formatTime }
   }
 }
 </script>
@@ -154,32 +164,32 @@ export default {
 .message { display: flex; gap: 12px; max-width: 80%; }
 .message.user { align-self: flex-end; flex-direction: row-reverse; }
 .message-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
-.message.system .message-avatar { background: #f0fdfa; }
+.message.system .message-avatar { background: var(--brand-50); }
 .user-avatar { background: #0d9488 !important; color: white; font-size: 14px; }
-.message-content { background: #f8fafc; padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.6; position: relative; }
+.message-content { background: var(--gray-50); padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.6; position: relative; }
 .message.user .message-content { background: #0d9488; color: white; }
 .message-text { white-space: pre-wrap; }
-.message-time { font-size: 11px; color: #94a3b8; margin-top: 8px; text-align: right; }
+.message-time { font-size: 11px; color: var(--text-subtle); margin-top: 8px; text-align: right; }
 .message.user .message-time { color: rgba(255,255,255,0.7); }
 .quick-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.quick-actions button { padding: 6px 14px; border: 1px solid #0d9488; background: white; color: #0d9488; border-radius: 20px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
+.quick-actions button { padding: 6px 14px; border: 1px solid var(--focus-ring); background: var(--white); color: var(--primary); border-radius: 20px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
 .quick-actions button:hover { background: #0d9488; color: white; }
 .message-data { margin-top: 12px; }
 .message-data .data-table { font-size: 12px; }
-.data-object { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; background: white; padding: 10px; border-radius: 8px; }
+.data-object { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; background: var(--white); padding: 10px; border-radius: 8px; }
 .data-row { display: flex; gap: 8px; font-size: 13px; }
-.data-key { color: #64748b; font-weight: 500; min-width: 120px; }
-.data-val { color: #1e293b; }
-.empty-chat { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; color: #94a3b8; text-align: center; padding: 40px; }
+.data-key { color: var(--text-muted); font-weight: 500; min-width: 120px; }
+.data-val { color: var(--gray-800); }
+.empty-chat { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; color: var(--text-subtle); text-align: center; padding: 40px; }
 .empty-chat .empty-icon { font-size: 48px; margin-bottom: 12px; }
 .typing-indicator { display: flex; gap: 4px; padding: 4px 0; }
-.typing-indicator span { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; animation: typing 1.4s infinite; }
+.typing-indicator span { width: 8px; height: 8px; border-radius: 50%; background: var(--gray-400); animation: typing 1.4s infinite; }
 .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
 .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes typing { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
-.chat-input { display: flex; gap: 8px; padding: 16px 20px; border-top: 1px solid #e2e8f0; background: white; }
-.chat-input input { flex: 1; padding: 12px 16px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; outline: none; }
-.chat-input input:focus { border-color: #0d9488; }
+.chat-input { display: flex; gap: 8px; padding: 16px 20px; border-top: 1px solid var(--gray-200); background: var(--white); }
+.chat-input input { flex: 1; padding: 12px 16px; border: 1px solid var(--gray-200); border-radius: 8px; font-size: 14px; outline: none; }
+.chat-input input:focus { border-color: var(--focus-ring); }
 .chat-input .btn { padding: 12px 20px; font-size: 16px; }
 
 /* Responsive */

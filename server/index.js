@@ -1,9 +1,13 @@
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+const crypto = require('crypto');
+const { loadEnvironment } = require('./config/environment');
+loadEnvironment();
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const pool = require('./config/database');
 
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
@@ -13,26 +17,70 @@ const appointmentRoutes = require('./routes/appointments');
 const emrRoutes = require('./routes/emr');
 const prescriptionRoutes = require('./routes/prescriptions');
 const pharmacyRoutes = require('./routes/pharmacy');
+const procurementRoutes = require('./routes/procurement');
 const laboratoryRoutes = require('./routes/laboratory');
 const billingRoutes = require('./routes/billing');
+const auditRoutes = require('./routes/audit');
+const { readProvenance, startupWarning } = require('./utils/safetyProvenance');
 const reportRoutes = require('./routes/reports');
 const notificationRoutes = require('./routes/notifications');
 const admissionRoutes = require('./routes/admissions');
 const aiRoutes = require('./routes/ai');
 const smartRoutes = require('./routes/smart');
 const portalRoutes = require('./routes/portal');
+const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const DEFAULT_PORT = 5000;
+const JWT_PLACEHOLDER = 'change_this_to_a_secure_random_string';
 
-// Middleware
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET === JWT_PLACEHOLDER || process.env.JWT_SECRET.length < 32) {
+  throw new Error('[security] JWT_SECRET must be set to a unique random value of at least 32 characters.');
+}
+
+const developmentOrigins = new Set(['http://localhost:3000', 'http://127.0.0.1:3000']);
+const configuredOrigins = new Set(
+  String(process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean)
+);
+const allowedOrigins = process.env.NODE_ENV === 'production'
+  ? configuredOrigins
+  : new Set([...developmentOrigins, ...configuredOrigins]);
+
+app.disable('x-powered-by');
 app.use(helmet());
-app.use(cors());
-app.use(morgan('dev'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+    return callback(new Error('Origin is not allowed by CORS'));
+  },
+  credentials: false,
+}));
 
-// API Routes
+morgan.token('safe-url', req => req.path);
+if (process.env.NODE_ENV !== 'test') {
+  app.use(morgan(':method :safe-url :status :res[content-length] - :response-time ms'));
+}
+// Paystack signs webhooks with an HMAC over the exact bytes it sent, so the
+// body has to be kept before the JSON parser re-serialises it. Only this one
+// path is captured; buffering every request body would waste memory for no gain.
+const RAW_BODY_PATHS = new Set(['/api/billing/mobile-money/webhook']);
+
+app.use(express.json({
+  limit: process.env.JSON_LIMIT || '1mb',
+  verify(req, res, buffer) {
+    if (RAW_BODY_PATHS.has(req.path)) req.rawBody = Buffer.from(buffer);
+  },
+}));
+app.use(express.urlencoded({ extended: true, limit: process.env.JSON_LIMIT || '1mb' }));
+app.use((req, res, next) => {
+  req.requestId = req.header('X-Request-ID') || crypto.randomUUID();
+  res.setHeader('X-Request-ID', req.requestId);
+  next();
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/patients', patientRoutes);
@@ -41,8 +89,10 @@ app.use('/api/appointments', appointmentRoutes);
 app.use('/api/emr', emrRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/pharmacy', pharmacyRoutes);
+app.use('/api/procurement', procurementRoutes);
 app.use('/api/laboratory', laboratoryRoutes);
 app.use('/api/billing', billingRoutes);
+app.use('/api/audit', auditRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/admissions', admissionRoutes);
@@ -50,26 +100,63 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/smart', smartRoutes);
 app.use('/api/portal', portalRoutes);
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+app.get('/api/health', async (req, res, next) => {
+  try {
+    await pool.isReady();
+    res.json({ status: 'OK', timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(503).json({ status: 'UNAVAILABLE', message: error.message });
+  }
 });
 
-// JSON 404 for unknown API routes
-app.use('/api', (req, res) => {
-  res.status(404).json({ message: `Route not found: ${req.method} ${req.originalUrl}` });
-});
+app.use('/api', notFound);
 
-// Serve Vue.js frontend in production
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../client/dist')));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../client/dist/index.html'));
+  const clientDist = path.join(__dirname, '../client/dist');
+  app.use(express.static(clientDist));
+  app.get('*', (req, res, next) => {
+    res.sendFile(path.join(clientDist, 'index.html'), error => {
+      if (error) next(error);
+    });
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`Hospital Management System API running on port ${PORT}`);
-});
+app.use(errorHandler);
+
+function startServer({ port = process.env.PORT || DEFAULT_PORT } = {}) {
+  const server = app.listen(port, () => {
+    console.log(`Hospital Management System API running on port ${port}`);
+    // Said out loud on every start, not buried in a settings page. A deployment
+    // running on the demonstration interaction data has to be impossible to miss.
+    readProvenance(pool)
+      .then(startupWarning)
+      .catch(() => {
+        // A failure to read the provenance must not stop the server coming up:
+        // refusing to start would take patient-facing systems offline.
+      });
+  });
+
+  server.on('error', error => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`[startup] Port ${port} is already in use. Stop the existing server or set PORT to a free port.`);
+    } else {
+      console.error('[startup] Unable to start server:', error.message);
+    }
+    process.exitCode = 1;
+  });
+
+  return server;
+}
+
+if (require.main === module) {
+  pool.isReady()
+    .then(() => startServer())
+    .catch(error => {
+      console.error(`[startup] ${error.message}`);
+      process.exitCode = 1;
+    });
+}
 
 module.exports = app;
+module.exports.startServer = startServer;
+module.exports.pool = pool;

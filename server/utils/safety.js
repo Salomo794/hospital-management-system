@@ -1,4 +1,5 @@
 const pool = require('../config/database');
+const { readProvenance } = require('./safetyProvenance');
 
 // Allergy strings are free-text, comma/semicolon separated (e.g. "Penicillin, Morphine").
 const IGNORED_ALLERGY_TOKENS = ['none', 'n/a', 'na', 'nil', 'nkda', 'no known allergies', 'no known drug allergies'];
@@ -42,19 +43,26 @@ function checkAllergies(patient, medicines) {
   return warnings;
 }
 
-async function checkInteractions(medicineIds) {
+function runQuery(queryExecutor, sql, params = []) {
+  if (typeof queryExecutor === 'function') return queryExecutor(sql, params);
+  return queryExecutor.query(sql, params);
+}
+
+async function checkInteractions(medicineIds, queryExecutor = pool) {
   const ids = [...new Set((medicineIds || []).map(Number).filter(Boolean))];
   if (ids.length < 2) return [];
   const placeholders = ids.map(() => '?').join(',');
-  const [rows] = await pool.query(
+  const [rows] = await runQuery(
+    queryExecutor,
     `SELECT di.severity, di.description, di.clinical_management,
        ma.id as medicine_a_id, ma.name as medicine_a,
        mb.id as medicine_b_id, mb.name as medicine_b
      FROM drug_interactions di
      JOIN medicines ma ON di.medicine_a_id = ma.id
      JOIN medicines mb ON di.medicine_b_id = mb.id
-     WHERE di.medicine_a_id IN (${placeholders}) AND di.medicine_b_id IN (${placeholders})`,
-    [...ids, ...ids]
+     WHERE (di.medicine_a_id IN (${placeholders}) AND di.medicine_b_id IN (${placeholders}))
+        OR (di.medicine_b_id IN (${placeholders}) AND di.medicine_a_id IN (${placeholders}))`,
+    [...ids, ...ids, ...ids, ...ids]
   );
   return rows.map((r) => ({
     type: 'interaction',
@@ -69,26 +77,44 @@ async function checkInteractions(medicineIds) {
   }));
 }
 
-async function evaluateSafety(patientId, medicineIds) {
-  const ids = [...new Set((medicineIds || []).map(Number).filter(Boolean))];
+async function evaluateSafety(patientId, medicineIds, queryExecutor = pool) {
+  const requestedIds = (medicineIds || [])
+    .map(value => Number(value))
+    .filter(value => Number.isInteger(value) && value > 0);
   let patient = null;
-  let medicines = [];
+  let existingMedicineIds = [];
   if (patientId) {
-    const [p] = await pool.query(
+    const [p] = await runQuery(
+      queryExecutor,
       'SELECT id, first_name, last_name, allergies FROM patients WHERE id = ?',
       [patientId]
     );
     patient = p[0] || null;
+    // Include medications the patient is already taking. Checking only the
+    // newly submitted list can miss an interaction with an active prescription.
+    const [activePrescriptions] = await runQuery(
+      queryExecutor,
+      `SELECT DISTINCT pi.medicine_id
+       FROM prescription_items pi
+       JOIN prescriptions pr ON pr.id = pi.prescription_id
+       WHERE pr.patient_id = ? AND pr.status = 'active'
+         AND pi.dispensed_quantity < pi.quantity`,
+      [patientId]
+    );
+    existingMedicineIds = activePrescriptions.map(row => Number(row.medicine_id)).filter(Number.isInteger);
   }
+  const ids = [...new Set([...existingMedicineIds, ...requestedIds])];
+  let medicines = [];
   if (ids.length) {
     const placeholders = ids.map(() => '?').join(',');
-    const [m] = await pool.query(
+    const [m] = await runQuery(
+      queryExecutor,
       `SELECT id, name, generic_name FROM medicines WHERE id IN (${placeholders})`,
       ids
     );
     medicines = m;
   }
-  const warnings = [...checkAllergies(patient, medicines), ...(await checkInteractions(ids))];
+  const warnings = [...checkAllergies(patient, medicines), ...(await checkInteractions(ids, queryExecutor))];
   warnings.sort((a, b) => (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9));
   const blocking = warnings.some((w) => w.type === 'allergy' || w.severity === 'contraindicated');
   return {
@@ -101,6 +127,11 @@ async function evaluateSafety(patientId, medicineIds) {
       : null,
     warnings,
     blocking,
+    // Travels with the result so a caller cannot render a clean screen without
+    // also being told what the check was actually run against. Allergy matching
+    // is done against the patient's own record and is always meaningful;
+    // interaction coverage is what the caveat is about.
+    provenance: await readProvenance(queryExecutor),
   };
 }
 

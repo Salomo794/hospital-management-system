@@ -2,8 +2,7 @@
   <div class="doctors-page">
     <div class="page-header">
       <div class="header-left">
-        <h2>Doctors</h2>
-        <span class="doctor-count" v-if="!loading">{{ doctors.length }} doctor{{ doctors.length !== 1 ? 's' : '' }}</span>
+        <span class="doctor-count" v-if="!loading">{{ total }} doctor{{ total !== 1 ? 's' : '' }}</span>
       </div>
       <div class="header-right">
         <div class="search-bar">
@@ -15,7 +14,7 @@
           />
         </div>
         <div class="filter-group">
-          <select v-model="specialtyFilter" @change="loadDoctors">
+          <select v-model="specialtyFilter" @change="page = 1; loadDoctors()">
             <option value="">All Specialties</option>
             <option v-for="s in specialties" :key="s.id" :value="s.id">{{ s.name }}</option>
           </select>
@@ -59,8 +58,14 @@
       </div>
     </div>
 
+    <div class="pagination" v-if="!loading && total > limit">
+      <button class="btn btn-sm" :disabled="page <= 1" @click="page--; loadDoctors()">Previous</button>
+      <span>Page {{ page }} of {{ Math.ceil(total / limit) }}</span>
+      <button class="btn btn-sm" :disabled="page >= Math.ceil(total / limit)" @click="page++; loadDoctors()">Next</button>
+    </div>
+
     <!-- Empty State -->
-    <div v-else class="empty-state">
+    <div v-if="!loading && !doctors.length" class="empty-state">
       <div class="empty-icon">👨‍⚕️</div>
       <h4>No doctors found</h4>
       <p v-if="search || specialtyFilter">
@@ -87,30 +92,38 @@ export default {
   setup() {
     const toast = useToast()
     const doctors = ref([])
+    const total = ref(0)
+    const page = ref(1)
+    const limit = ref(20)
     const specialties = ref([])
     const search = ref('')
     const specialtyFilter = ref('')
     const loading = ref(false)
     let searchTimeout = null
+    let requestId = 0
 
     const loadDoctors = async () => {
+      const currentRequest = ++requestId
       loading.value = true
       try {
-        const params = {}
+        const params = { page: page.value, limit: limit.value }
         if (search.value) params.search = search.value
         if (specialtyFilter.value) params.specialty_id = specialtyFilter.value
         const { data } = await axios.get('/api/doctors', { params })
+        if (currentRequest !== requestId) return
         doctors.value = data.doctors
+        total.value = data.total
       } catch (e) {
         toast.error('Failed to load doctors')
       } finally {
-        loading.value = false
+        if (currentRequest === requestId) loading.value = false
       }
     }
 
     const debouncedSearch = () => {
       clearTimeout(searchTimeout)
       searchTimeout = setTimeout(() => {
+        page.value = 1
         loadDoctors()
       }, 300)
     }
@@ -118,6 +131,7 @@ export default {
     const clearFilters = () => {
       search.value = ''
       specialtyFilter.value = ''
+      page.value = 1
       loadDoctors()
     }
 
@@ -137,7 +151,7 @@ export default {
     })
 
     return {
-      doctors, specialties, search, specialtyFilter, loading,
+      doctors, total, page, limit, specialties, search, specialtyFilter, loading,
       loadDoctors, debouncedSearch, clearFilters, formatCurrency
     }
   }
@@ -151,22 +165,28 @@ export default {
   margin-bottom: 24px;
   gap: 16px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .header-left {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
 }
 
 .header-left h2 {
   margin: 0;
-  color: #1e293b;
+  color: var(--gray-800);
 }
 
 .doctor-count {
-  font-size: 14px;
-  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-bg);
+  padding: 5px 12px;
+  border-radius: 20px;
+  white-space: nowrap;
 }
 
 .header-right {
@@ -177,7 +197,7 @@ export default {
 
 .search-bar input {
   padding: 10px 16px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   width: 280px;
   font-size: 14px;
@@ -186,22 +206,22 @@ export default {
 
 .search-bar input:focus {
   outline: none;
-  border-color: #0d9488;
+  border-color: var(--focus-ring);
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
 
 .filter-group select {
   padding: 10px 16px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gray-200);
   border-radius: 8px;
   font-size: 14px;
-  background: white;
+  background: var(--white);
   transition: border-color 0.2s;
 }
 
 .filter-group select:focus {
   outline: none;
-  border-color: #0d9488;
+  border-color: var(--focus-ring);
 }
 
 /* Loading State */
@@ -211,15 +231,15 @@ export default {
   align-items: center;
   justify-content: center;
   padding: 64px 20px;
-  color: #64748b;
+  color: var(--text-muted);
   gap: 12px;
 }
 
 .spinner {
   width: 36px;
   height: 36px;
-  border: 3px solid #e2e8f0;
-  border-top-color: #0d9488;
+  border: 3px solid var(--gray-200);
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -236,13 +256,13 @@ export default {
 }
 
 .doctor-card {
-  background: white;
+  background: var(--white);
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   text-align: center;
   transition: transform 0.2s, box-shadow 0.2s;
-  border: 1px solid #f1f5f9;
+  border: 1px solid var(--gray-100);
 }
 
 .doctor-card:hover {
@@ -267,12 +287,12 @@ export default {
 
 .doctor-card h3 {
   font-size: 16px;
-  color: #1e293b;
+  color: var(--gray-800);
   margin: 0 0 4px;
 }
 
 .specialty {
-  color: #0d9488;
+  color: var(--primary);
   font-size: 13px;
   font-weight: 500;
   margin: 0 0 12px;
@@ -287,7 +307,7 @@ export default {
 
 .detail-item {
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-muted);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -300,7 +320,7 @@ export default {
 
 .detail-item.fee {
   font-weight: 600;
-  color: #0d9488;
+  color: var(--primary);
   font-size: 14px;
 }
 
@@ -322,7 +342,7 @@ export default {
 .empty-state {
   text-align: center;
   padding: 64px 20px;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .empty-icon {
@@ -332,7 +352,7 @@ export default {
 
 .empty-state h4 {
   margin: 0 0 8px;
-  color: #334155;
+  color: var(--gray-700);
 }
 
 .empty-state p {

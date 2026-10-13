@@ -1,8 +1,7 @@
 <template>
   <div class="ward-page">
     <div class="page-header">
-      <h2>Ward &amp; Admission Management</h2>
-      <div class="header-actions">
+      <div class="header-actions ml-auto">
         <button class="btn btn-outline" @click="loadAll">Refresh</button>
         <button class="btn btn-primary" @click="openAdmitModal" v-if="canAdmit">+ Admit Patient</button>
       </div>
@@ -103,14 +102,13 @@
         </div>
         <div class="card-body">
           <div class="search-filters">
-            <input type="text" v-model="search" placeholder="Search patient / MRN / bed..." @keyup.enter="loadAdmissions" />
-            <select v-model="statusFilter" @change="loadAdmissions">
+            <input type="text" v-model="search" placeholder="Search patient / MRN / bed..." @keyup.enter="page = 1; loadAdmissions" />
+            <select v-model="statusFilter" @change="page = 1; loadAdmissions()">
               <option value="">All Statuses</option>
               <option value="admitted">Admitted</option>
-              <option value="transferred">Transferred</option>
               <option value="discharged">Discharged</option>
             </select>
-            <select v-model="wardFilter" @change="loadAdmissions">
+            <select v-model="wardFilter" @change="page = 1; loadAdmissions()">
               <option value="">All Wards</option>
               <option v-for="w in wards" :key="w.ward" :value="w.ward">{{ w.ward }}</option>
             </select>
@@ -147,15 +145,20 @@
             <span class="empty-hint">Adjust filters or admit a new patient.</span>
           </div>
         </div>
+        <div class="pagination" v-if="totalAdmissions > limit">
+          <button class="btn btn-sm" :disabled="page <= 1" @click="page--; loadAdmissions()">Previous</button>
+          <span>Page {{ page }} of {{ Math.ceil(totalAdmissions / limit) }}</span>
+          <button class="btn btn-sm" :disabled="page >= Math.ceil(totalAdmissions / limit)" @click="page++; loadAdmissions()">Next</button>
+        </div>
       </div>
     </template>
 
     <!-- Admit Modal -->
-    <div class="modal-overlay" v-if="showAdmitModal" @click.self="showAdmitModal = false">
+    <div class="modal-overlay" v-if="showAdmitModal" @click.self="closeAdmitModal">
       <div class="modal modal-lg">
         <div class="modal-header">
           <h3>Admit Patient</h3>
-          <button class="modal-close" @click="showAdmitModal = false">&times;</button>
+          <button class="modal-close" @click="closeAdmitModal">&times;</button>
         </div>
         <div class="modal-body">
           <form @submit.prevent="submitAdmission">
@@ -199,7 +202,7 @@
                 <label>Triage Severity</label>
                 <select v-model="admitForm.triage_severity">
                   <option value="">None</option>
-                  <option value="minor">Minor</option>
+                  <option value="low">Minor</option>
                   <option value="moderate">Moderate</option>
                   <option value="high">High</option>
                   <option value="critical">Critical</option>
@@ -223,7 +226,7 @@
               <textarea v-model="admitForm.notes" rows="2"></textarea>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" @click="showAdmitModal = false">Cancel</button>
+              <button type="button" class="btn btn-secondary" @click="closeAdmitModal">Cancel</button>
               <button type="submit" class="btn btn-primary" :disabled="savingAdmission">
                 <span v-if="savingAdmission" class="spinner-sm"></span>
                 {{ savingAdmission ? 'Admitting...' : 'Confirm Admission' }}
@@ -237,7 +240,7 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { useAuthStore } from '../../store/auth'
@@ -250,7 +253,7 @@ export default {
     const authStore = useAuthStore()
 
     const canAdmit = ['admin', 'doctor', 'nurse', 'receptionist'].includes(authStore.userRole)
-    const canDischarge = ['admin', 'doctor', 'nurse'].includes(authStore.userRole)
+    const canDischarge = ['admin', 'doctor', 'nurse', 'receptionist'].includes(authStore.userRole)
 
     const wards = ref([])
     const totals = ref({})
@@ -259,6 +262,8 @@ export default {
 
     const admissions = ref([])
     const totalAdmissions = ref(0)
+    const page = ref(1)
+    const limit = ref(20)
     const loadingAdmissions = ref(false)
     const search = ref('')
     const statusFilter = ref('')
@@ -270,35 +275,97 @@ export default {
     const patients = ref([])
     const filteredPatients = ref([])
     const patientSearch = ref('')
-    const admitForm = ref({ patient_id: '', doctor_id: '', ward: '', bed_number: '', diagnosis: '', treatment_plan: '', notes: '', chief_complaint: '', triage_severity: '' })
+    const emptyAdmitForm = () => ({ patient_id: '', doctor_id: '', ward: '', bed_number: '', diagnosis: '', treatment_plan: '', notes: '', chief_complaint: '', triage_severity: '' })
+    const admitForm = ref(emptyAdmitForm())
+
+    let wardsRequestId = 0
+    let admissionsRequestId = 0
+    let patientListRequestId = 0
+    let patientSearchRequestId = 0
+    let patientSearchTimeout = null
+    let patientSearchController = null
+    let patientsRequestController = null
+    let componentUnmounted = false
+
+    const clearPatientSearch = () => {
+      if (patientSearchTimeout) clearTimeout(patientSearchTimeout)
+      patientSearchTimeout = null
+      patientListRequestId += 1
+      patientSearchRequestId += 1
+      patientSearchController?.abort()
+      patientSearchController = null
+      patientsRequestController?.abort()
+      patientsRequestController = null
+    }
+
+    const closeAdmitModal = () => {
+      showAdmitModal.value = false
+      patientSearch.value = ''
+      filteredPatients.value = []
+      clearPatientSearch()
+    }
 
     const loadWards = async () => {
+      if (componentUnmounted) return
+      const requestId = ++wardsRequestId
       loadingWards.value = true
       try {
         const { data } = await axios.get('/api/admissions/wards')
-        wards.value = data.wards
-        totals.value = data.totals
-      } catch (e) {
-        toast.error('Failed to load ward data')
+        if (componentUnmounted || requestId !== wardsRequestId) return
+        wards.value = data.wards || []
+        totals.value = data.totals || {}
+        if (selectedBed.value) {
+          const selected = wards.value.find(ward => ward.ward === selectedBed.value.ward)
+            ?.beds.find(bed => bed.bed === selectedBed.value.bed)
+          if (!selected || selected.status !== 'occupied') {
+            selectedBed.value = null
+          } else {
+            const sameAdmission = selected.admissionId != null
+              && String(selected.admissionId) === String(selectedBed.value.admissionId)
+            const samePatient = selected.patientId != null
+              && String(selected.patientId) === String(selectedBed.value.patientId)
+            selectedBed.value = sameAdmission && samePatient
+              ? { ...selected, ward: selectedBed.value.ward }
+              : null
+          }
+        }
+      } catch {
+        if (!componentUnmounted && requestId === wardsRequestId) toast.error('Failed to load ward data')
       } finally {
-        loadingWards.value = false
+        if (!componentUnmounted && requestId === wardsRequestId) loadingWards.value = false
       }
     }
 
     const loadAdmissions = async () => {
+      if (componentUnmounted) return
+      const requestId = ++admissionsRequestId
       loadingAdmissions.value = true
       try {
-        const params = {}
+        const params = { page: page.value, limit: limit.value }
         if (statusFilter.value) params.status = statusFilter.value
         if (wardFilter.value) params.ward = wardFilter.value
         if (search.value) params.search = search.value
         const { data } = await axios.get('/api/admissions', { params })
-        admissions.value = data.admissions
-        totalAdmissions.value = data.total
-      } catch (e) {
-        toast.error('Failed to load admissions')
+        if (componentUnmounted || requestId !== admissionsRequestId) return
+
+        const total = Number(data.total || 0)
+        const totalPages = Math.max(1, Math.ceil(total / Math.max(Number(limit.value) || 1, 1)))
+        const safePage = Math.min(Math.max(Number(page.value) || 1, 1), totalPages)
+        totalAdmissions.value = total
+        if (safePage !== page.value) {
+          page.value = safePage
+          await loadAdmissions()
+          return
+        }
+        admissions.value = data.admissions || []
+      } catch {
+        if (!componentUnmounted && requestId === admissionsRequestId) {
+          admissions.value = []
+          totalAdmissions.value = 0
+          toast.error('Failed to load admissions')
+        }
       } finally {
-        loadingAdmissions.value = false
+        if (!componentUnmounted && requestId === admissionsRequestId) loadingAdmissions.value = false
       }
     }
 
@@ -311,37 +378,82 @@ export default {
     }
 
     const openAdmitModal = async () => {
+      clearPatientSearch()
       showAdmitModal.value = true
       patientSearch.value = ''
-      admitForm.value = { patient_id: '', doctor_id: '', ward: '', bed_number: '', diagnosis: '', treatment_plan: '', notes: '', chief_complaint: '', triage_severity: '' }
-      patientSearch.value = ''
       filteredPatients.value = patients.value
+      admitForm.value = emptyAdmitForm()
+
       if (!doctors.value.length) {
         try {
           const { data } = await axios.get('/api/doctors')
-          doctors.value = data.doctors || data
-        } catch (e) {
-          toast.error('Failed to load doctors')
+          if (!componentUnmounted && showAdmitModal.value) doctors.value = data.doctors || data
+        } catch {
+          if (!componentUnmounted && showAdmitModal.value) toast.error('Failed to load doctors')
         }
       }
       if (!patients.value.length) {
+        const requestId = ++patientListRequestId
+        const controller = new AbortController()
+        patientsRequestController = controller
         try {
-          const { data } = await axios.get('/api/patients', { params: { limit: 200 } })
+          const { data } = await axios.get('/api/patients', {
+            params: { status: 'active', limit: 100 },
+            signal: controller.signal
+          })
+          if (
+            componentUnmounted ||
+            controller.signal.aborted ||
+            requestId !== patientListRequestId ||
+            !showAdmitModal.value
+          ) return
           patients.value = data.patients || []
-          filteredPatients.value = patients.value
-        } catch (e) {
-          toast.error('Failed to load patients')
+          if (patientSearch.value.trim().length < 2) filteredPatients.value = patients.value
+        } catch {
+          if (!componentUnmounted && requestId === patientListRequestId && !controller.signal.aborted && showAdmitModal.value) {
+            toast.error('Failed to load patients')
+          }
+        } finally {
+          if (patientsRequestController === controller) patientsRequestController = null
         }
       }
     }
 
     const filterPatients = () => {
-      const q = patientSearch.value.toLowerCase()
-      if (!q) { filteredPatients.value = patients.value; return }
-      filteredPatients.value = patients.value.filter(p =>
-        (p.first_name + ' ' + p.last_name).toLowerCase().includes(q) ||
-        (p.mrn || '').toLowerCase().includes(q)
-      )
+      if (patientSearchTimeout) clearTimeout(patientSearchTimeout)
+      patientSearchController?.abort()
+      patientSearchController = null
+      const query = patientSearch.value.trim()
+      const requestId = ++patientSearchRequestId
+      if (query.length < 2) {
+        filteredPatients.value = patients.value
+        return
+      }
+
+      const controller = new AbortController()
+      patientSearchController = controller
+      patientSearchTimeout = setTimeout(async () => {
+        patientSearchTimeout = null
+        try {
+          const { data } = await axios.get('/api/patients', {
+            params: { search: query, status: 'active', limit: 20 },
+            signal: controller.signal
+          })
+          if (
+            !componentUnmounted &&
+            !controller.signal.aborted &&
+            requestId === patientSearchRequestId &&
+            showAdmitModal.value &&
+            query === patientSearch.value.trim()
+          ) filteredPatients.value = data.patients || []
+        } catch {
+          if (!componentUnmounted && requestId === patientSearchRequestId && !controller.signal.aborted) {
+            filteredPatients.value = []
+          }
+        } finally {
+          if (patientSearchController === controller) patientSearchController = null
+        }
+      }, 300)
     }
 
     const submitAdmission = async () => {
@@ -349,8 +461,8 @@ export default {
       try {
         await axios.post('/api/admissions', admitForm.value)
         toast.success('Patient admitted successfully')
-        showAdmitModal.value = false
-        loadAll()
+        closeAdmitModal()
+        await loadAll()
       } catch (e) {
         toast.error(e.response?.data?.message || 'Error admitting patient')
       } finally {
@@ -364,19 +476,25 @@ export default {
         await axios.post(`/api/admissions/${id}/discharge`)
         toast.success('Admission discharged')
         selectedBed.value = null
-        loadAll()
+        await loadAll()
       } catch (e) {
         toast.error(e.response?.data?.message || 'Error discharging admission')
       }
     }
 
     onMounted(loadAll)
+    onUnmounted(() => {
+      componentUnmounted = true
+      wardsRequestId += 1
+      admissionsRequestId += 1
+      clearPatientSearch()
+    })
 
     return {
-      wards, totals, loadingWards, selectedBed, admissions, totalAdmissions, loadingAdmissions,
+      wards, totals, loadingWards, selectedBed, admissions, totalAdmissions, page, limit, loadingAdmissions,
       search, statusFilter, wardFilter, canAdmit, canDischarge,
       showAdmitModal, savingAdmission, doctors, patients, filteredPatients, patientSearch, admitForm,
-      loadAll, loadAdmissions, selectBed, openAdmitModal, filterPatients, submitAdmission,
+      loadAll, loadAdmissions, selectBed, openAdmitModal, closeAdmitModal, filterPatients, submitAdmission,
       dischargeAdmission, getStatusColor, getStatusLabel
     }
   }
@@ -385,65 +503,65 @@ export default {
 
 <style scoped>
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.page-header h2 { margin: 0; font-size: 20px; color: #1e293b; }
+.page-header h2 { margin: 0; font-size: 20px; color: var(--gray-800); }
 .header-actions { display: flex; gap: 8px; }
 
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
-.stats-card { background: white; border-radius: 12px; padding: 20px; display: flex; align-items: center; gap: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.stats-card { background: var(--white); border-radius: 12px; padding: 20px; display: flex; align-items: center; gap: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
 .stats-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
-.stats-value { font-size: 22px; font-weight: 700; color: #1e293b; }
-.stats-label { font-size: 13px; color: #64748b; }
+.stats-value { font-size: 22px; font-weight: 700; color: var(--gray-800); }
+.stats-label { font-size: 13px; color: var(--text-muted); }
 
 .wards-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 24px; }
 .ward-card .card-body { padding: 16px 20px; }
-.occupancy-bar { height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; margin-bottom: 14px; }
+.occupancy-bar { height: 8px; background: var(--gray-200); border-radius: 4px; overflow: hidden; margin-bottom: 14px; }
 .occupancy-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
 .bed-grid { display: flex; flex-wrap: wrap; gap: 8px; }
 .bed {
   width: 38px; height: 38px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: 600; cursor: default; transition: transform 0.15s;
 }
-.bed { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
-.bed.occupied { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; cursor: pointer; }
+.bed { background: var(--success-bg); color: var(--success-fg); border: 1px solid #a7f3d0; }
+.bed.occupied { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid #fecaca; cursor: pointer; }
 .bed.occupied:hover { transform: scale(1.08); }
 .ward-foot { margin-top: 14px; font-size: 12px; }
-.text-muted { color: #94a3b8; }
+.text-muted { color: var(--text-subtle); }
 
 .selected-bed-card { margin-bottom: 24px; }
 .selected-bed-body { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .bed-detail-item { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
-.detail-label { font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600; }
+.detail-label { font-size: 11px; color: var(--text-subtle); text-transform: uppercase; font-weight: 600; }
 .bed-actions { display: flex; align-items: flex-end; }
 
 .search-filters { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
-.search-filters input { padding: 10px 16px; border: 1px solid #e2e8f0; border-radius: 8px; width: 250px; font-size: 14px; }
-.search-filters select { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; }
+.search-filters input { padding: 10px 16px; border: 1px solid var(--gray-200); border-radius: 8px; width: 250px; font-size: 14px; }
+.search-filters select { padding: 10px 12px; border: 1px solid var(--gray-200); border-radius: 8px; font-size: 14px; }
 
 .loading-container { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 40px 20px; }
-.spinner { width: 36px; height: 36px; border: 3px solid #e2e8f0; border-top-color: #0d9488; border-radius: 50%; animation: spin 0.8s linear infinite; }
+.spinner { width: 36px; height: 36px; border: 3px solid var(--gray-200); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
 .spinner-sm { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 6px; vertical-align: middle; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.loading-text { font-size: 14px; color: #94a3b8; }
+.loading-text { font-size: 14px; color: var(--text-subtle); }
 
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 40px 20px; text-align: center; }
 .empty-icon { font-size: 48px; line-height: 1; }
-.empty-state p { font-size: 15px; color: #475569; margin: 0; }
-.empty-hint { font-size: 13px; color: #94a3b8; }
+.empty-state p { font-size: 15px; color: var(--gray-600); margin: 0; }
+.empty-hint { font-size: 13px; color: var(--text-subtle); }
 
 .btn { padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.2s; cursor: pointer; border: none; }
 .btn:hover { opacity: 0.85; }
 .btn-primary { background: #0d9488; color: white; }
-.btn-secondary { background: #e2e8f0; color: #334155; }
+.btn-secondary { background: var(--gray-200); color: var(--gray-700); }
 .btn-danger { background: #ef4444; color: white; }
-.btn-outline { border: 1px solid #e2e8f0; background: white; color: #475569; }
+.btn-outline { border: 1px solid var(--gray-200); background: var(--white); color: var(--gray-600); }
 .btn-sm { font-size: 12px; padding: 5px 12px; }
 
 .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; }
-.badge-success { background: #ecfdf5; color: #059669; }
-.badge-warning { background: #fffbeb; color: #d97706; }
-.badge-danger { background: #fef2f2; color: #dc2626; }
-.badge-info { background: #eff6ff; color: #2563eb; }
-.badge-gray { background: #f8fafc; color: #64748b; }
+.badge-success { background: var(--success-bg); color: var(--success-fg); }
+.badge-warning { background: var(--warning-bg); color: var(--warning-fg); }
+.badge-danger { background: var(--danger-bg); color: var(--danger-fg); }
+.badge-info { background: var(--info-bg); color: var(--info-fg); }
+.badge-gray { background: var(--gray-50); color: var(--text-muted); }
 
 .mt-2 { margin-top: 8px; }
 

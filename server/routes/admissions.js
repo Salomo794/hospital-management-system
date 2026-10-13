@@ -1,279 +1,282 @@
 const express = require('express');
 const router = express.Router();
-const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { WARDS, wardCapacity, wardCapacityOrDefault } = require('../config/wards');
+const { ApiError, asyncHandler, getPagination, parseInteger, withTransaction } = require('../utils/http');
+const { randomUUID, randomToken } = require('../utils/ids');
 
-// Ward configuration: name -> total bed capacity
-const WARDS = {
-  'General Medicine': 20,
-  'Surgery': 12,
-  'ICU': 10,
-  'Pediatrics': 10,
-  'Maternity': 14,
-  'Ward A': 20,
-  'Ward B': 20
-};
+const ADMISSION_ROLES = ['admin', 'doctor', 'nurse', 'receptionist'];
+const TRIAGE_LEVELS = ['low', 'moderate', 'high', 'critical'];
+const ADMISSION_STATUSES = ['admitted', 'discharged'];
 
-// Capacity for any ward (configured or discovered in data) defaults to 20 beds
-const wardCapacity = ward => WARDS[ward] || 20;
+const pad = number => String(number).padStart(2, '0');
 
-const pad = n => String(n).padStart(2, '0');
+function parseBedNumber(value, total) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const text = String(value).trim();
+  if (!/^\d{1,2}$/.test(text)) return undefined;
+  const number = Number(text);
+  if (!Number.isInteger(number) || number < 1 || number > total) return undefined;
+  return pad(number);
+}
 
-// Helper: resolve a free bed number inside a ward, honor existing occupied beds
-async function findFreeBed(conn, ward) {
-  const total = wardCapacity(ward);
-  const [rows] = await conn.query(
+async function findFreeBed(connection, ward) {
+  const total = wardCapacityOrDefault(ward);
+  const [rows] = await connection.query(
     "SELECT bed_number FROM admissions WHERE ward = ? AND status = 'admitted' ORDER BY bed_number",
     [ward]
   );
-  const used = new Set(rows.map(r => r.bed_number));
-  for (let i = 1; i <= total; i++) {
-    const bed = pad(i);
+  const used = new Set(rows.map(row => row.bed_number));
+  for (let index = 1; index <= total; index += 1) {
+    const bed = pad(index);
     if (!used.has(bed)) return bed;
   }
   return null;
 }
 
-// List admissions (filters: status, ward, search)
-router.get('/', authenticate, async (req, res) => {
-  try {
-    const { status, ward, search, page = 1, limit = 50 } = req.query;
-    const offset = (page - 1) * limit;
-    const params = [];
-    let where = 'WHERE 1=1';
-    if (status) { where += ' AND a.status = ?'; params.push(status); }
-    if (ward) { where += ' AND a.ward = ?'; params.push(ward); }
-    if (search) {
-      where += ' AND (p.first_name LIKE ? OR p.last_name LIKE ? OR p.mrn LIKE ? OR a.admission_number LIKE ? OR a.bed_number LIKE ?)';
-      const like = `%${search}%`;
-      params.push(like, like, like, like, like);
-    }
-    const [countRes] = await pool.query(
-      `SELECT COUNT(*) as total FROM admissions a
-       JOIN patients p ON a.patient_id = p.id
-       JOIN users u ON a.doctor_id = u.id
-       ${where}`,
-      params
-    );
-    const [rows] = await pool.query(
-      `SELECT a.*, p.first_name as patient_first_name, p.last_name as patient_last_name,
-        p.mrn, u.first_name as doctor_first_name, u.last_name as doctor_last_name
-       FROM admissions a
-       JOIN patients p ON a.patient_id = p.id
-       JOIN users u ON a.doctor_id = u.id
-       ${where} ORDER BY a.created_at DESC LIMIT ? OFFSET ?`,
-      [...params, parseInt(limit), parseInt(offset)]
-    );
-    res.json({
-      admissions: rows,
-      total: countRes[0].total,
-      page: parseInt(page),
-      limit: parseInt(limit)
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
+router.get('/', authenticate, authorize(...ADMISSION_ROLES), asyncHandler(async (req, res) => {
+  const { page, limit, offset } = getPagination(req.query, 50);
+  const { status, ward, search } = req.query;
+  if (status && !ADMISSION_STATUSES.includes(status)) throw new ApiError(400, 'Invalid admission status');
+  if (ward && WARDS[ward] === undefined) throw new ApiError(400, 'Invalid ward');
+
+  let where = 'WHERE 1=1';
+  const params = [];
+  if (status) { where += ' AND a.status = ?'; params.push(status); }
+  if (ward) { where += ' AND a.ward = ?'; params.push(ward); }
+  if (search) {
+    where += ' AND (p.first_name LIKE ? OR p.last_name LIKE ? OR p.mrn LIKE ? OR a.admission_number LIKE ? OR a.bed_number LIKE ?)';
+    const term = `%${String(search).trim().slice(0, 100)}%`;
+    params.push(term, term, term, term, term);
   }
-});
 
-// Ward occupancy overview (live bed tracking)
-router.get('/wards', authenticate, async (req, res) => {
-  try {
-    const [admitted] = await pool.query(
-      "SELECT ward, bed_number, patient_id, diagnosis FROM admissions WHERE status = 'admitted'"
+  const [countRows] = await pool.query(
+    `SELECT COUNT(*) as total FROM admissions a
+     JOIN patients p ON a.patient_id = p.id JOIN users u ON a.doctor_id = u.id ${where}`,
+    params
+  );
+  const [rows] = await pool.query(
+    `SELECT a.*, p.first_name as patient_first_name, p.last_name as patient_last_name,
+            p.mrn, u.first_name as doctor_first_name, u.last_name as doctor_last_name
+     FROM admissions a JOIN patients p ON a.patient_id = p.id JOIN users u ON a.doctor_id = u.id
+     ${where} ORDER BY a.created_at DESC LIMIT ? OFFSET ?`,
+    [...params, limit, offset]
+  );
+  res.json({ admissions: rows, total: countRows[0].total, page, limit });
+}));
+
+router.get('/wards', authenticate, authorize(...ADMISSION_ROLES), asyncHandler(async (req, res) => {
+  const [admitted] = await pool.query(
+    "SELECT ward, bed_number, patient_id, diagnosis FROM admissions WHERE status = 'admitted'"
+  );
+  const occupiedByWard = {};
+  admitted.forEach(admission => {
+    if (!occupiedByWard[admission.ward]) occupiedByWard[admission.ward] = [];
+    occupiedByWard[admission.ward].push(admission);
+  });
+  const wardTotals = {};
+  [...Object.keys(WARDS), ...Object.keys(occupiedByWard)].forEach(ward => {
+    wardTotals[ward] = wardCapacityOrDefault(ward);
+  });
+
+  const wards = Object.entries(wardTotals).map(([ward, total]) => {
+    const occupied = occupiedByWard[ward] || [];
+    const beds = [];
+    for (let index = 1; index <= Math.min(total, 40); index += 1) {
+      const bed = pad(index);
+      const admission = occupied.find(item => item.bed_number === bed);
+      beds.push(admission
+        ? { bed, status: 'occupied', admissionId: admission.id, patientId: admission.patient_id, diagnosis: admission.diagnosis }
+        : { bed, status: 'available' });
+    }
+    return {
+      ward,
+      total,
+      occupied: occupied.length,
+      available: total - occupied.length,
+      percentage: total ? Math.round((occupied.length / total) * 100) : 0,
+      beds,
+    };
+  });
+
+  const totalBeds = wards.reduce((sum, ward) => sum + ward.total, 0);
+  const totalOccupied = wards.reduce((sum, ward) => sum + ward.occupied, 0);
+  res.json({
+    wards,
+    totals: {
+      totalBeds,
+      totalOccupied,
+      totalAvailable: totalBeds - totalOccupied,
+      percentage: totalBeds ? Math.round((totalOccupied / totalBeds) * 100) : 0,
+    },
+  });
+}));
+
+router.post('/', authenticate, authorize(...ADMISSION_ROLES), asyncHandler(async (req, res) => {
+  const {
+    patient_id, doctor_id, ward, bed_number, diagnosis, treatment_plan,
+    chief_complaint, triage_severity, notes,
+  } = req.body;
+  const patientId = parseInteger(patient_id, 'patient_id', { min: 1 });
+  const doctorId = parseInteger(doctor_id, 'doctor_id', { min: 1 });
+  if (!ward || WARDS[ward] === undefined) {
+    throw new ApiError(400, `Unknown ward "${ward}". Valid wards: ${Object.keys(WARDS).join(', ')}`);
+  }
+  if (triage_severity && !TRIAGE_LEVELS.includes(triage_severity)) throw new ApiError(400, 'Invalid triage severity');
+
+  const [[patient], [doctor]] = await Promise.all([
+    pool.query('SELECT id FROM patients WHERE id = ? AND status = ?', [patientId, 'active']),
+    pool.query("SELECT id FROM users WHERE id = ? AND role = 'doctor' AND is_active = 1", [doctorId]),
+  ]);
+  if (patient.length === 0) throw new ApiError(400, 'Patient not found or inactive');
+  if (doctor.length === 0) throw new ApiError(400, 'Doctor not found or inactive');
+
+  const created = await withTransaction(pool, async connection => {
+    const [activeAdmissions] = await connection.query(
+      "SELECT id, admission_number FROM admissions WHERE patient_id = ? AND status = 'admitted' LIMIT 1",
+      [patientId]
     );
-    const occupiedByWard = {};
-    admitted.forEach(a => {
-      if (!occupiedByWard[a.ward]) occupiedByWard[a.ward] = [];
-      occupiedByWard[a.ward].push(a);
-    });
-
-    // Combine configured wards with any ward discovered in live data (falls back to default capacity)
-    const wardTotals = {};
-    [...Object.keys(WARDS), ...Object.keys(occupiedByWard)].forEach(w => { wardTotals[w] = wardCapacity(w); });
-
-    const wards = Object.entries(wardTotals).map(([ward, total]) => {
-      const occupied = occupiedByWard[ward] ? occupiedByWard[ward].length : 0;
-      const beds = [];
-      for (let i = 1; i <= Math.min(total, 40); i++) {
-        const bed = pad(i);
-        const adm = (occupiedByWard[ward] || []).find(a => a.bed_number === bed);
-        beds.push(adm ? { bed, status: 'occupied', admissionId: adm.id, patientId: adm.patient_id, diagnosis: adm.diagnosis } : { bed, status: 'available' });
-      }
-      return { ward, total, occupied, available: total - occupied, percentage: Math.round((occupied / total) * 100), beds };
-    });
-
-    const totalBeds = wards.reduce((s, w) => s + w.total, 0);
-    const totalOccupied = wards.reduce((s, w) => s + w.occupied, 0);
-
-    res.json({
-      wards,
-      totals: {
-        totalBeds,
-        totalOccupied,
-        totalAvailable: totalBeds - totalOccupied,
-        percentage: totalBeds ? Math.round((totalOccupied / totalBeds) * 100) : 0
-      }
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// Admit a patient (auto-assigns bed if not provided)
-router.post('/', authenticate, authorize('admin', 'doctor', 'nurse', 'receptionist'), async (req, res) => {
-  try {
-    const { patient_id, doctor_id, ward, bed_number, diagnosis, treatment_plan, notes } = req.body;
-    if (!patient_id || !doctor_id || !ward) {
-      return res.status(400).json({ message: 'patient_id, doctor_id and ward are required' });
-    }
-    if (!wardCapacity(ward)) {
-      return res.status(400).json({ message: `Unknown ward "${ward}".` });
+    if (activeAdmissions.length > 0) {
+      const admissionNumber = activeAdmissions[0].admission_number
+        ? ` (${activeAdmissions[0].admission_number})`
+        : '';
+      throw new ApiError(409, `Patient already has an active admission${admissionNumber}.`);
     }
 
-    const conn = await pool.getConnection();
-    try {
-      const [activeInWard] = await conn.query(
-        "SELECT COUNT(*) as count FROM admissions WHERE ward = ? AND status = 'admitted'",
-        [ward]
-      );
-      const capacity = wardCapacity(ward);
-      if (activeInWard[0].count >= capacity) {
-        return res.status(409).json({ message: `${ward} ward is full (${capacity}/${capacity} beds).` });
-      }
-      const freeBed = bed_number || await findFreeBed(conn, ward);
-      if (!freeBed) {
-        return res.status(409).json({ message: `${ward} ward is full (${capacity}/${capacity} beds).` });
-      }
+    const capacity = wardCapacity(ward);
+    const requestedBed = parseBedNumber(bed_number, capacity);
+    if (requestedBed === undefined) throw new ApiError(400, `Bed must be a number from 01 to ${pad(capacity)}.`);
 
-      const uuid = uuidv4();
-      const admNum = `ADM-${Date.now().toString(36).toUpperCase()}`;
-      const [result] = await conn.query(
-        `INSERT INTO admissions (uuid, admission_number, patient_id, doctor_id, ward, bed_number, diagnosis, treatment_plan, status, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?)`,
-        [uuid, admNum, patient_id, doctor_id, ward, freeBed, diagnosis || null, treatment_plan || null, notes || null]
+    const [occupiedRows] = await connection.query(
+      "SELECT bed_number FROM admissions WHERE ward = ? AND status = 'admitted'",
+      [ward]
+    );
+    if (occupiedRows.length >= capacity) throw new ApiError(409, `${ward} ward is full (${capacity}/${capacity} beds).`);
+    if (requestedBed) {
+      const [occupied] = await connection.query(
+        "SELECT id FROM admissions WHERE ward = ? AND bed_number = ? AND status = 'admitted'",
+        [ward, requestedBed]
       );
-
-      // Notify nursing staff for the ward
-      const [nurses] = await conn.query(
-        "SELECT id FROM users WHERE role = 'nurse' AND is_active = TRUE"
-      );
-      const [patient] = await conn.query('SELECT first_name, last_name FROM patients WHERE id = ?', [patient_id]);
-      const [doctor] = await conn.query('SELECT first_name, last_name FROM users WHERE id = ?', [doctor_id]);
-      for (const nurse of nurses) {
-        await conn.query(
-          `INSERT INTO notifications (user_id, type, title, message, link)
-           VALUES (?, 'admission', 'New admission', ?, '/ward')`,
-          [nurse.id, `${patient[0].first_name} ${patient[0].last_name} admitted to ${ward} (Bed ${freeBed}) under Dr. ${doctor[0].first_name} ${doctor[0].last_name}.`]
-        );
-      }
-
-      const [created] = await conn.query(
-        `SELECT a.*, p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn
-         FROM admissions a JOIN patients p ON a.patient_id = p.id WHERE a.id = ?`,
-        [result.insertId]
-      );
-      res.status(201).json(created[0]);
-    } finally {
-      conn.release();
+      if (occupied.length > 0) throw new ApiError(409, `Bed ${requestedBed} in ${ward} is already occupied.`);
     }
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+    const freeBed = requestedBed || await findFreeBed(connection, ward);
+    if (!freeBed) throw new ApiError(409, `${ward} ward is full.`);
 
-// Update admission (transfer ward/bed, update diagnosis, discharge via status)
-router.put('/:id', authenticate, authorize('admin', 'doctor', 'nurse', 'receptionist'), async (req, res) => {
-  try {
-    const [existing] = await pool.query('SELECT * FROM admissions WHERE id = ?', [req.params.id]);
-    if (existing.length === 0) return res.status(404).json({ message: 'Admission not found' });
-    const adm = existing[0];
-
-    const { ward, bed_number, diagnosis, treatment_plan, notes, status } = req.body;
-    const updates = [];
-    const values = [];
-
-    if (ward && wardCapacity(ward) === undefined) {
-      return res.status(400).json({ message: `Unknown ward "${ward}".` });
-    }
-    const targetWard = ward || adm.ward;
-    const targetBed = bed_number || adm.bed_number;
-
-    // If the ward/bed is changing, verify capacity and bed availability
-    if (ward !== undefined && ward !== adm.ward) {
-      const [activeInTarget] = await pool.query(
-        "SELECT COUNT(*) as count FROM admissions WHERE ward = ? AND status = 'admitted' AND id != ?",
-        [targetWard, adm.id]
+    const [result] = await connection.query(
+      `INSERT INTO admissions
+       (uuid, admission_number, patient_id, doctor_id, ward, bed_number, diagnosis,
+        treatment_plan, chief_complaint, triage_severity, status, notes, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?, datetime('now'))`,
+      [
+        randomUUID(), `ADM-${Date.now().toString(36).toUpperCase()}-${randomToken(5)}`,
+        patientId, doctorId, ward, freeBed, diagnosis || null, treatment_plan || null,
+        chief_complaint || null, triage_severity || null, notes || null,
+      ]
+    );
+    const [nurses] = await connection.query("SELECT id FROM users WHERE role = 'nurse' AND is_active = 1");
+    const [patientDetails] = await connection.query('SELECT first_name, last_name FROM patients WHERE id = ?', [patientId]);
+    const [doctorDetails] = await connection.query('SELECT first_name, last_name FROM users WHERE id = ?', [doctorId]);
+    for (const nurse of nurses) {
+      await connection.query(
+        `INSERT INTO notifications (user_id, type, title, message, link)
+         VALUES (?, 'admission', 'New admission', ?, '/ward')`,
+        [nurse.id, `${patientDetails[0].first_name} ${patientDetails[0].last_name} admitted to ${ward} (Bed ${freeBed}) under Dr. ${doctorDetails[0].first_name} ${doctorDetails[0].last_name}.`]
       );
-      if (activeInTarget[0].count >= wardCapacity(targetWard)) {
-        return res.status(409).json({ message: `${targetWard} ward is full (${wardCapacity(targetWard)}/${wardCapacity(targetWard)} beds).` });
-      }
-      let newBed = bed_number;
-      if (!newBed) {
-        newBed = await findFreeBed(pool, targetWard);
-        if (!newBed) return res.status(409).json({ message: `${targetWard} ward is full.` });
-      }
-      updates.push('ward = ?'); values.push(targetWard);
-      updates.push('bed_number = ?'); values.push(newBed);
-    } else if (bed_number !== undefined && bed_number !== adm.bed_number) {
-      const [conflict] = await pool.query(
-        "SELECT id FROM admissions WHERE ward = ? AND bed_number = ? AND status = 'admitted' AND id != ?",
-        [targetWard, targetBed, adm.id]
-      );
-      if (conflict.length > 0) {
-        return res.status(409).json({ message: `Bed ${targetBed} in ${targetWard} is already occupied.` });
-      }
-      updates.push('bed_number = ?'); values.push(targetBed);
     }
-
-    if (diagnosis !== undefined) { updates.push('diagnosis = ?'); values.push(diagnosis); }
-    if (treatment_plan !== undefined) { updates.push('treatment_plan = ?'); values.push(treatment_plan); }
-    if (notes !== undefined) { updates.push('notes = ?'); values.push(notes); }
-
-    if (status) {
-      if (!['admitted', 'discharged'].includes(status)) {
-        return res.status(400).json({ message: 'Invalid status. Allowed: admitted, discharged' });
-      }
-      updates.push('status = ?');
-      values.push(status);
-      updates.push(status === 'discharged' ? "discharge_date = datetime('now')" : 'discharge_date = NULL');
-    }
-
-    if (updates.length === 0) return res.status(400).json({ message: 'Nothing to update' });
-
-    values.push(req.params.id);
-    await pool.query(`UPDATE admissions SET ${updates.join(', ')} WHERE id = ?`, values);
-
-    const [updated] = await pool.query(
+    const [admission] = await connection.query(
       `SELECT a.*, p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn
        FROM admissions a JOIN patients p ON a.patient_id = p.id WHERE a.id = ?`,
-      [req.params.id]
+      [result.insertId]
     );
-    res.json(updated[0]);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+    return admission[0];
+  });
+  res.status(201).json(created);
+}));
 
-// Quick discharge
-router.post('/:id/discharge', authenticate, authorize('admin', 'doctor', 'nurse', 'receptionist'), async (req, res) => {
-  try {
-    const [existing] = await pool.query('SELECT * FROM admissions WHERE id = ?', [req.params.id]);
-    if (existing.length === 0) return res.status(404).json({ message: 'Admission not found' });
-    if (existing[0].status === 'discharged') {
-      return res.status(400).json({ message: 'Patient is already discharged' });
+router.put('/:id', authenticate, authorize(...ADMISSION_ROLES), asyncHandler(async (req, res) => {
+  const id = parseInteger(req.params.id, 'id', { min: 1 });
+  const updated = await withTransaction(pool, async connection => {
+    const [existingRows] = await connection.query('SELECT * FROM admissions WHERE id = ?', [id]);
+    if (existingRows.length === 0) throw new ApiError(404, 'Admission not found');
+    const admission = existingRows[0];
+    if (req.user.role === 'doctor' && admission.doctor_id !== req.user.id) {
+      throw new ApiError(403, 'You may only update admissions assigned to you.');
     }
-    await pool.query("UPDATE admissions SET status = 'discharged', discharge_date = datetime('now') WHERE id = ?", [req.params.id]);
-    res.json({ message: 'Patient discharged successfully', id: req.params.id });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
+    if (admission.status === 'discharged' && req.body.status === 'admitted') {
+      throw new ApiError(409, 'A discharged admission cannot be reopened');
+    }
+
+    const { ward, bed_number, diagnosis, treatment_plan, chief_complaint, triage_severity, notes, status } = req.body;
+    if (status !== undefined && !ADMISSION_STATUSES.includes(status)) {
+      throw new ApiError(400, 'Invalid admission status');
+    }
+    if (triage_severity !== undefined && triage_severity !== null && !TRIAGE_LEVELS.includes(triage_severity)) {
+      throw new ApiError(400, 'Invalid triage severity');
+    }
+
+    if (ward !== undefined && (ward === null || ward === '' || WARDS[ward] === undefined)) {
+      throw new ApiError(400, `Unknown ward "${ward}". Valid wards: ${Object.keys(WARDS).join(', ')}`);
+    }
+    const targetWard = ward || admission.ward;
+    if (WARDS[targetWard] === undefined) {
+      throw new ApiError(400, `Unknown ward "${targetWard}". Valid wards: ${Object.keys(WARDS).join(', ')}`);
+    }
+    const targetCapacity = wardCapacity(targetWard);
+    const requestedBed = parseBedNumber(bed_number, targetCapacity);
+    if (requestedBed === undefined) throw new ApiError(400, `Bed must be a number from 01 to ${pad(targetCapacity)}.`);
+
+    let targetBed = requestedBed || admission.bed_number;
+    if (ward !== undefined && ward !== admission.ward && !requestedBed) {
+      targetBed = await findFreeBed(connection, targetWard);
+      if (!targetBed) throw new ApiError(409, `${targetWard} ward is full.`);
+    }
+    if (targetBed && (targetWard !== admission.ward || targetBed !== admission.bed_number)) {
+      const [occupied] = await connection.query(
+        `SELECT id FROM admissions WHERE ward = ? AND bed_number = ? AND status = 'admitted' AND id != ?`,
+        [targetWard, targetBed, id]
+      );
+      if (occupied.length > 0) throw new ApiError(409, `Bed ${targetBed} in ${targetWard} is already occupied.`);
+    }
+
+    const updates = [];
+    const values = [];
+    for (const [field, value] of Object.entries({ ward: targetWard, bed_number: targetBed, diagnosis, treatment_plan, chief_complaint, triage_severity, notes })) {
+      if (value !== undefined) {
+        updates.push(`${field} = ?`);
+        values.push(value === '' ? null : value);
+      }
+    }
+    if (status !== undefined) {
+      updates.push('status = ?');
+      values.push(status);
+      updates.push(`discharge_date = ${status === 'discharged' ? "datetime('now')" : 'NULL'}`);
+    }
+    if (updates.length === 0) throw new ApiError(400, 'Nothing to update');
+    values.push(id);
+    const [result] = await connection.query(`UPDATE admissions SET ${updates.join(', ')} WHERE id = ?`, values);
+    if (result.affectedRows !== 1) throw new ApiError(404, 'Admission not found');
+    const [rows] = await connection.query(
+      `SELECT a.*, p.first_name as patient_first_name, p.last_name as patient_last_name, p.mrn
+       FROM admissions a JOIN patients p ON a.patient_id = p.id WHERE a.id = ?`,
+      [id]
+    );
+    return rows[0];
+  });
+  res.json(updated);
+}));
+
+router.post('/:id/discharge', authenticate, authorize(...ADMISSION_ROLES), asyncHandler(async (req, res) => {
+  const id = parseInteger(req.params.id, 'id', { min: 1 });
+  const [existing] = await pool.query('SELECT * FROM admissions WHERE id = ?', [id]);
+  if (existing.length === 0) throw new ApiError(404, 'Admission not found');
+  if (req.user.role === 'doctor' && existing[0].doctor_id !== req.user.id) {
+    throw new ApiError(403, 'You may only discharge admissions assigned to you.');
   }
-});
+  if (existing[0].status === 'discharged') throw new ApiError(409, 'Patient is already discharged');
+  await pool.query("UPDATE admissions SET status = 'discharged', discharge_date = datetime('now') WHERE id = ?", [id]);
+  res.json({ message: 'Patient discharged successfully', id });
+}));
 
 module.exports = router;
 module.exports.WARD_CAPACITY = WARDS;

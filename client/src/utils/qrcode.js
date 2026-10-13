@@ -1,7 +1,7 @@
 // QR code generation wrapper using the vendored qrcode-generator UMD lib.
 // The lib exposes itself on globalThis.qrcode in browsers; we read it lazily.
-import '../../../vendor/qrcode-generator.js'
-// ^ the vendored lib attaches `qrcode` to globalThis when not AMD/CommonJS
+import '../lib/qrcode-generator.js'
+// The vendored library attaches `qrcode` to globalThis when loaded as a browser module.
 
 function loadQR() {
   return globalThis.qrcode || window.qrcode
@@ -44,23 +44,23 @@ export async function renderQR(text, opts = {}) {
 
 /**
  * Build the check-in payload string to encode in a QR code.
- * The payload embeds the patient's MRN + hospital identifier, used
- * by the lobby kiosk and the staff patient-checkin flow.
+ * The payload embeds the patient's UUID, used by the lobby kiosk and
+ * the staff patient-checkin flow.
  */
 export function buildCheckinPayload(patient) {
-  if (!patient) return ''
-  const mrn = patient.mrn || patient.patient_id || ''
-  const name = patient.first_name || patient.patient_first_name || ''
-  return `HMS:CHECKIN:${mrn}:${name}`.toUpperCase()
+  if (!patient || !patient.uuid) return ''
+  // The kiosk resolves the UUID after removing the HMS:CHECKIN: prefix.
+  // Do not append the patient's name: it is display data, not an identifier.
+  return `HMS:CHECKIN:${String(patient.uuid).trim()}`
 }
 
-/** Decode a scanned check-in payload back into { mrn, name }. */
+/** Decode a scanned check-in payload back into the patient identifier. */
 export function parseCheckinPayload(payload) {
   const str = String(payload || '').replace(/\x00/g, '').trim()
   const parts = str.split(':')
   if (parts[0] && parts[0].toUpperCase() === 'HMS' && parts[1] && parts[1].toUpperCase() === 'CHECKIN') {
-    return { mrn: parts[2] || '', name: parts.slice(3).join(':') || '' }
+    return { identifier: parts.slice(2).join(':') || '' }
   }
-  // Fallback: payload could be a raw MRN like "MRN-ABC123"
-  return { mrn: str, name: '' }
+  // Fallback: payload could be a raw MRN, UUID, email or phone number.
+  return { identifier: str }
 }

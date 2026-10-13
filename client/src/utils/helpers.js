@@ -1,32 +1,29 @@
-import dayjs from 'dayjs'
-import relativeTime from 'dayjs/plugin/relativeTime'
+// Timestamps are formatted through utils/datetime.js. The API stores instants in
+// UTC and sends them without a marker, so they have to be read as UTC and shown
+// in the hospital's timezone; doing that inline in every view is how the offset
+// bug spread in the first place.
+import { formatClockTime } from './datetime'
 
-dayjs.extend(relativeTime)
+export {
+  formatDate,
+  formatDateTime,
+  formatTimeOnly,
+  formatClockTime,
+  timeAgo,
+  setDisplayZone,
+  getDisplayZone,
+} from './datetime'
 
-export function formatDate(date) {
-  if (!date) return '-'
-  return dayjs(date).format('MMM D, YYYY')
-}
-
-export function formatDateTime(date) {
-  if (!date) return '-'
-  return dayjs(date).format('MMM D, YYYY h:mm A')
-}
-
+// Appointment and slot times are wall-clock strings rather than instants, so
+// they are trimmed to HH:mm without any timezone conversion.
 export function formatTime(time) {
-  if (!time) return ''
-  const t = String(time)
-  return t.substring(0, 5)
+  return formatClockTime(time)
 }
 
 export function formatCurrency(amount) {
-  if (amount === null || amount === undefined) return '$0.00'
-  return '$' + parseFloat(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-export function timeAgo(date) {
-  if (!date) return ''
-  return dayjs(date).fromNow()
+  const value = Number(amount)
+  if (!Number.isFinite(value)) return '$0.00'
+  return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 export function getStatusColor(status) {
@@ -59,12 +56,21 @@ export function getStatusLabel(status) {
   return status ? status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : ''
 }
 
+export function hasAllergy(value) {
+  if (value === null || value === undefined) return false
+  return !/^(?:\s*none|\s*n\/?a|\s*nil|\s*no known allergies|\s*no allergies)\s*$/i.test(String(value))
+}
+
 export function debounce(fn, delay = 300) {
   let timer
-  return (...args) => {
+  const debounced = (...args) => {
     clearTimeout(timer)
-    timer = setTimeout(() => fn(...args), delay)
+    timer = setTimeout(() => {
+      Promise.resolve(fn(...args)).catch(error => console.error('Debounced callback failed:', error))
+    }, delay)
   }
+  debounced.cancel = () => clearTimeout(timer)
+  return debounced
 }
 
 export function generateMRN() {

@@ -1,14 +1,97 @@
+const { loadEnvironment } = require('./environment');
+loadEnvironment();
+
+const DEMO_FIXTURE_TABLES = [
+  'users',
+  'patients',
+  'specialties',
+  'doctor_profiles',
+  'appointments',
+  'medical_records',
+  'medicines',
+  'prescriptions',
+  'prescription_items',
+  'lab_tests',
+  'lab_orders',
+  'lab_order_items',
+  'bills',
+  'bill_items',
+  'payments',
+  'notifications',
+  'audit_log',
+  'inventory_transactions',
+  'suppliers',
+  'purchase_order_items',
+  'purchase_orders',
+  'admissions',
+  'drug_interactions',
+  'checkins',
+];
+
+function assertDemoSeedAllowed() {
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_SEED !== 'true') {
+    throw new Error('Demo seeding is disabled in production. Set ALLOW_DEMO_SEED=true only for an isolated demo database.');
+  }
+}
+
+// Keep this check ahead of the database import so a production CLI invocation
+// cannot open or create the configured database before it is rejected.
+if (require.main === module) {
+  assertDemoSeedAllowed();
+}
+
 const bcrypt = require('bcryptjs');
-const { v4: uuidv4 } = require('uuid');
-const pool = require('./database');
+const { randomUUID, generateAccessCode, generatePortalPin } = require('../utils/ids');
+
+let pool;
+function getPool() {
+  if (!pool) pool = require('./database');
+  return pool;
+}
+
+async function assertDemoFixtureTablesEmpty(conn) {
+  const [tableRows] = await conn.query("SELECT name FROM sqlite_master WHERE type = 'table'");
+  const existingTables = new Set(tableRows.map(row => row.name));
+  const populatedTables = [];
+  for (const table of DEMO_FIXTURE_TABLES.filter(name => existingTables.has(name))) {
+    const [rows] = await conn.query(`SELECT COUNT(*) AS count FROM "${table}"`);
+    const count = Number(rows[0]?.count || 0);
+    if (count > 0) populatedTables.push(`${table} (${count} rows)`);
+  }
+
+  if (populatedTables.length > 0) {
+    throw new Error(
+      'Demo seed requires an empty application database; refusing to add demo fixtures to existing data. '
+      + `Non-empty tables: ${populatedTables.join(', ')}. `
+      + 'Set DB_PATH to a fresh empty SQLite file (or back up and clear the existing database), '
+      + 'then run db:setup and db:seed again.'
+    );
+  }
+
+  const missingTables = DEMO_FIXTURE_TABLES.filter(table => !existingTables.has(table));
+  if (missingTables.length > 0) {
+    throw new Error(
+      `Demo seed requires a complete database schema. Missing tables: ${missingTables.join(', ')}. `
+      + 'Run npm run db:setup before npm run db:seed.'
+    );
+  }
+}
 
 async function seed() {
-  const conn = await pool.getConnection();
+  assertDemoSeedAllowed();
+  const activePool = getPool();
+  const conn = await activePool.getConnection();
   try {
-    await conn.beginTransaction();
-    console.log('Seeding database (SQLite)...');
+    await assertDemoFixtureTablesEmpty(conn);
+    const hashedPassword = await bcrypt.hash(
+      'password123',
+      process.env.NODE_ENV === 'test' ? 4 : 10
+    );
+    const portalPinHashCost = process.env.NODE_ENV === 'test' ? 4 : 12;
 
-    const hashedPassword = await bcrypt.hash('password123', 10);
+    await conn.beginTransaction();
+    const demoPortalCredentials = [];
+    console.log('Seeding database (SQLite)...');
 
     // --- Specialties ---
     const [specRows] = await conn.query('SELECT id FROM specialties LIMIT 1');
@@ -43,7 +126,7 @@ async function seed() {
         { first_name: 'Tom', last_name: 'Wilson', email: 'labtech@hospital.com', role: 'lab_technician' },
       ];
       for (const u of users) {
-        const uuid = uuidv4();
+        const uuid = randomUUID();
         const [result] = await conn.query(
           `INSERT INTO users (uuid, email, password, role, first_name, last_name, phone, is_active)
            VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
@@ -102,12 +185,13 @@ async function seed() {
         { first_name: 'Margaret', last_name: 'Clark', dob: '1940-02-14', gender: 'female', phone: '555-0110', blood: 'A+', insurance: 'Medicare', allergies: 'Penicillin, Morphine', conditions: 'Heart Failure, Diabetes Type 2' },
       ];
       for (const p of patients) {
-        const uuid = uuidv4();
+        const uuid = randomUUID();
         const mrn = `MRN-${uuid.substring(0, 8).toUpperCase()}`;
+        const accessCode = generateAccessCode(mrn);
         const [result] = await conn.query(
-          `INSERT INTO patients (uuid, mrn, first_name, last_name, date_of_birth, gender, phone, blood_type, address, insurance_provider, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
-          [uuid, mrn, p.first_name, p.last_name, p.dob, p.gender, p.phone, p.blood,
+          `INSERT INTO patients (uuid, mrn, access_code, first_name, last_name, date_of_birth, gender, phone, blood_type, address, insurance_provider, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+          [uuid, mrn, accessCode, p.first_name, p.last_name, p.dob, p.gender, p.phone, p.blood,
            `${Math.floor(100 + Math.random() * 9900)} Medical Center Dr`,
            p.insurance, p.allergies, p.conditions,
            `${p.first_name} ${p.last_name === 'Anderson' ? 'Jr.' : 'Sr.'}`,
@@ -122,25 +206,33 @@ async function seed() {
     console.log('  Patients seeded');
 
     // --- Portal self-service PINs ---
-    const hashedPortalPin = bcrypt.hashSync('password123', 4);
-    await conn.query("UPDATE patients SET portal_pin = ? WHERE portal_pin IS NULL OR portal_pin = ''", [hashedPortalPin]);
+    const [patientsWithoutPins] = await conn.query(
+      'SELECT id, mrn FROM patients WHERE portal_pin IS NULL OR portal_pin = ? ORDER BY id',
+      ['']
+    );
+    for (const patient of patientsWithoutPins) {
+      const pin = generatePortalPin();
+      const hashedPin = await bcrypt.hash(pin, portalPinHashCost);
+      await conn.query('UPDATE patients SET portal_pin = ? WHERE id = ?', [hashedPin, patient.id]);
+      demoPortalCredentials.push({ mrn: patient.mrn, pin });
+    }
     console.log('  Portal PINs seeded');
 
     // --- Appointments ---
     const [existingAppts] = await conn.query('SELECT COUNT(*) as count FROM appointments');
     if (existingAppts[0].count === 0) {
-      const types = ['consultation', 'follow_up', 'emergency', 'consultation', 'telemedicine'];
+      const types = ['consultation', 'follow_up', 'emergency', 'procedure', 'other'];
       const statuses = ['scheduled', 'completed', 'cancelled'];
       const reasons = ['Annual checkup', 'Chest pain evaluation', 'Follow-up medication review', 'Routine blood work review', 'New patient consultation'];
       const today = new Date();
       for (let i = 0; i < 15; i++) {
         const dayOffset = Math.floor(i / 3) - 2;
         const apptDate = new Date(today);
-        apptDate.setDate(apptDate.getDate() + dayOffset);
+        apptDate.setUTCDate(apptDate.getUTCDate() + dayOffset);
         const dateStr = apptDate.toISOString().split('T')[0];
         const hour = 9 + (i % 8);
         const minute = i % 2 === 0 ? '00' : '30';
-        const uuid = uuidv4();
+        const uuid = randomUUID();
         const apptNum = `APT-${dateStr.replace(/-/g, '')}-${String(i + 1).padStart(3, '0')}`;
         const doctorId = i % 2 === 0 ? doctorUserId1 : doctorUserId2;
         const statusIdx = dayOffset < 0 ? 1 : (dayOffset === 0 ? 0 : 2);
@@ -149,7 +241,7 @@ async function seed() {
         await conn.query(
           `INSERT INTO appointments (uuid, appointment_number, patient_id, doctor_id, appointment_date, appointment_time, type, status, reason, notes, created_by)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [uuid, apptNum, patientIds[patientIdx], doctorId, dateStr, `${hour}:${minute}:00`,
+          [uuid, apptNum, patientIds[patientIdx % patientIds.length], doctorId, dateStr, `${hour}:${minute}:00`,
            types[i % types.length], statuses[statusIdx], reasons[i % reasons.length],
            i % 3 === 0 ? 'Patient requested morning appointment' : null, userIds[4]]
         );
@@ -168,11 +260,11 @@ async function seed() {
         { patientIdx: 7, complaint: 'Fatigue, weight gain, cold intolerance', diagnosis: 'Hypothyroidism', treatment: 'Levothyroxine 50mcg daily', vitals: { bp: '124/78', temp: '97.8F', pulse: '62', weight: '72kg' } },
       ];
       for (const r of records) {
-        const uuid = uuidv4();
+        const uuid = randomUUID();
         await conn.query(
           `INSERT INTO medical_records (uuid, patient_id, doctor_id, chief_complaint, vital_signs, diagnosis, treatment_plan, status, notes)
            VALUES (?, ?, ?, ?, ?, ?, ?, 'final', ?)`,
-          [uuid, patientIds[r.patientIdx], r.patientIdx % 2 === 0 ? doctorUserId1 : doctorUserId2,
+          [uuid, patientIds[r.patientIdx % patientIds.length], r.patientIdx % 2 === 0 ? doctorUserId1 : doctorUserId2,
            r.complaint, JSON.stringify(r.vitals), r.diagnosis, r.treatment,
            'Patient responds well to treatment. Follow up in 4 weeks.']
         );
@@ -206,14 +298,140 @@ async function seed() {
         { name: 'Salbutamol Inhaler', generic: 'Albuterol', category: 'Other', price: 28.50, cost: 12.00, stock: 80, min: 20, unit: 'inhaler' },
       ];
       for (const m of medicines) {
-        await conn.query(
+        const [medicineResult] = await conn.query(
           `INSERT INTO medicines (name, generic_name, category, unit_price, cost_price, stock_quantity, min_stock_level, unit, expiry_date, is_active)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, date('now', '+18 months'), 1)`,
           [m.name, m.generic, m.category, m.price, m.cost, m.stock, m.min, m.unit]
         );
+        await conn.query(
+          `INSERT INTO inventory_transactions
+           (medicine_id, transaction_type, quantity, notes, performed_by)
+           VALUES (?, 'purchase', ?, 'Opening demo inventory', ?)`,
+          [medicineResult.insertId, m.stock, doctorUserId1]
+        );
       }
     }
     console.log('  Medicines seeded');
+
+    // --- Procurement: suppliers plus orders part-way through the workflow ---
+    const [existingSuppliers] = await conn.query('SELECT COUNT(*) as count FROM suppliers');
+    if (existingSuppliers[0].count === 0) {
+      const adminUserId = userIds[0];
+      const suppliers = [
+        { name: 'Medisource Pharmaceuticals', contact: 'Amara Okafor', email: 'orders@medisource.example', phone: '+1-555-0142', lead: 5, notes: 'Preferred generics supplier. Consignment on antibiotics.' },
+        { name: 'Northgate Medical Supply', contact: 'Daniel Reyes', email: 'sales@northgate.example', phone: '+1-555-0177', lead: 10, notes: 'Cold-chain and device lines.' },
+        { name: 'VitalCare Distributors', contact: 'Priya Raman', email: 'supply@vitalcare.example', phone: '+1-555-0198', lead: 3, notes: 'Fast local delivery for high-consumption lines.' },
+        { name: 'Harbour Diagnostics', contact: 'Tomasz Nowak', email: 'reagents@harbourdiag.example', phone: '+1-555-0210', lead: 14, notes: 'Laboratory reagents and calibrators only.' },
+      ];
+      for (const supplier of suppliers) {
+        await conn.query(
+          `INSERT INTO suppliers (name, contact_name, email, phone, address, lead_time_days, notes, is_active)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+          [supplier.name, supplier.contact, supplier.email, supplier.phone, 'Industrial Park', supplier.lead, supplier.notes]
+        );
+      }
+
+      // One fully received order and one awaiting approval, so a fresh demo
+      // database shows the whole pipeline instead of an empty screen.
+      const [supplierRows] = await conn.query('SELECT id FROM suppliers ORDER BY id');
+      const [medRowsForPo] = await conn.query(
+        'SELECT id, name, cost_price FROM medicines WHERE is_active = 1 ORDER BY id'
+      );
+      const medByName = {};
+      medRowsForPo.forEach(row => { medByName[row.name] = row; });
+      const supplierByIndex = index => supplierRows[index]?.id;
+
+      async function seedOrder({ number, supplierIndex, status, lines, note, expectedDate, submittedOffsetDays, approvedOffsetDays, receivedOffsetDays }) {
+        const usable = lines.filter(line => medByName[line.medicine]);
+        if (usable.length === 0) return;
+        const received = status === 'received';
+        // Timestamps are SQLite expressions rather than bound values, because
+        // datetime('now', ?) is not evaluated in a parameter slot.
+        const [poResult] = await conn.query(
+          `INSERT INTO purchase_orders
+           (uuid, order_number, supplier_id, status, total_amount, ordered_by, approved_by,
+            expected_date, notes, submitted_at, approved_at, received_at)
+           VALUES (?, ?, ?, ?, 0, ?, ?,
+                   CASE WHEN ? IS NULL THEN NULL ELSE date('now', ?) END,
+                   ?,
+                   datetime('now', ?),
+                   CASE WHEN ? THEN datetime('now', ?) ELSE NULL END,
+                   CASE WHEN ? THEN datetime('now', ?) ELSE NULL END)`,
+          [
+            randomUUID(),
+            number,
+            supplierByIndex(supplierIndex),
+            status,
+            doctorUserId1,
+            received ? adminUserId : null,
+            expectedDate || null,
+            expectedDate || null,
+            note,
+            submittedOffsetDays === null ? null : `-${submittedOffsetDays} days`,
+            received ? 1 : 0,
+            approvedOffsetDays === null ? null : `-${approvedOffsetDays} days`,
+            received ? 1 : 0,
+            receivedOffsetDays === null ? null : `-${receivedOffsetDays} days`,
+          ]
+        );
+        for (const line of usable) {
+          const medicine = medByName[line.medicine];
+          const receivedUnits = received ? line.quantity : 0;
+          const [itemResult] = await conn.query(
+            `INSERT INTO purchase_order_items (purchase_order_id, medicine_id, quantity, unit_cost, quantity_received)
+             VALUES (?, ?, ?, ?, ?)`,
+            [poResult.insertId, medicine.id, line.quantity, medicine.cost_price || 0, receivedUnits]
+          );
+          if (receivedUnits > 0) {
+            await conn.query('UPDATE medicines SET stock_quantity = stock_quantity + ? WHERE id = ?', [receivedUnits, medicine.id]);
+            await conn.query(
+              `INSERT INTO inventory_transactions
+               (medicine_id, transaction_type, quantity, reference_number, notes, performed_by)
+               VALUES (?, 'purchase', ?, ?, ?, ?)`,
+              [medicine.id, receivedUnits, `po:${number}:${itemResult.insertId}:${receivedUnits}`, `Received against ${number}`, doctorUserId1]
+            );
+          }
+        }
+        await conn.query(
+          `UPDATE purchase_orders SET total_amount =
+             (SELECT COALESCE(SUM(quantity * unit_cost), 0) FROM purchase_order_items WHERE purchase_order_id = ?)
+           WHERE id = ?`,
+          [poResult.insertId, poResult.insertId]
+        );
+      }
+
+      await seedOrder({
+        number: 'PO-DEMO-0001',
+        supplierIndex: 0,
+        status: 'received',
+        note: 'Quarterly antibiotic top-up.',
+        expectedDate: null,
+        submittedOffsetDays: 16,
+        approvedOffsetDays: 15,
+        receivedOffsetDays: 12,
+        lines: [
+          { medicine: 'Amoxicillin 500mg', quantity: 400 },
+          { medicine: 'Ciprofloxacin 500mg', quantity: 200 },
+          { medicine: 'Diazepam 5mg', quantity: 150 },
+        ],
+      });
+
+      await seedOrder({
+        number: 'PO-DEMO-0002',
+        supplierIndex: 2,
+        status: 'submitted',
+        note: 'Chronic-care top-up awaiting approval.',
+        expectedDate: '+7 days',
+        submittedOffsetDays: 1,
+        approvedOffsetDays: null,
+        receivedOffsetDays: null,
+        lines: [
+          { medicine: 'Salbutamol Inhaler', quantity: 60 },
+          { medicine: 'Levothyroxine 50mcg', quantity: 300 },
+        ],
+      });
+    }
+    console.log('  Procurement seeded');
 
     // --- Prescriptions with items ---
     const [existingRx] = await conn.query('SELECT COUNT(*) as count FROM prescriptions');
@@ -244,12 +462,12 @@ async function seed() {
       ];
       for (let i = 0; i < prescriptions.length; i++) {
         const rx = prescriptions[i];
-        const uuid = uuidv4();
+        const uuid = randomUUID();
         const rxNumber = `RX-${Date.now().toString(36).toUpperCase()}-${i + 1}`;
         const [result] = await conn.query(
           `INSERT INTO prescriptions (uuid, prescription_number, patient_id, doctor_id, notes, status)
            VALUES (?, ?, ?, ?, ?, 'active')`,
-          [uuid, rxNumber, patientIds[rx.patientIdx], rx.doctorId, rx.notes]
+          [uuid, rxNumber, patientIds[rx.patientIdx % patientIds.length], rx.doctorId, rx.notes]
         );
         for (const item of rxItems[i]) {
           const medicineId = medMap[item.medName];
@@ -293,23 +511,23 @@ async function seed() {
     // --- Lab Orders ---
     const [existingLabOrders] = await conn.query('SELECT COUNT(*) as count FROM lab_orders');
     if (existingLabOrders[0].count === 0) {
-      const [labTestRows] = await conn.query('SELECT id FROM lab_tests ORDER BY id LIMIT 5');
+      const [labTestRows] = await conn.query('SELECT id, normal_range, unit FROM lab_tests ORDER BY id LIMIT 5');
       const statuses = ['ordered', 'in_progress', 'completed', 'completed', 'ordered'];
       for (let i = 0; i < 5; i++) {
-        const uuid = uuidv4();
+        const uuid = randomUUID();
         const today = new Date().toISOString().split('T')[0].replace(/-/g, '');
         const orderNum = `LAB-${today}-${String(i + 1).padStart(3, '0')}`;
         const [result] = await conn.query(
           `INSERT INTO lab_orders (uuid, order_number, patient_id, doctor_id, status, priority, clinical_notes)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [uuid, orderNum, patientIds[i], i % 2 === 0 ? doctorUserId1 : doctorUserId2,
+          [uuid, orderNum, patientIds[i % patientIds.length], i % 2 === 0 ? doctorUserId1 : doctorUserId2,
            statuses[i], i === 1 ? 'urgent' : 'routine',
            i === 0 ? 'Fasting required' : null]
         );
         await conn.query(
           `INSERT INTO lab_order_items (lab_order_id, lab_test_id, reference_range, result_unit)
            VALUES (?, ?, ?, ?)`,
-          [result.insertId, labTestRows[i].id, 'See reference range', '']
+          [result.insertId, labTestRows[i].id, labTestRows[i].normal_range || null, labTestRows[i].unit || null]
         );
       }
     }
@@ -328,14 +546,16 @@ async function seed() {
       for (let i = 0; i < billData.length; i++) {
         const bd = billData[i];
         const total = bd.items.reduce((sum, item) => sum + item.price, 0);
-        const paidAmount = bd.paid === 'paid' ? total : (bd.paid === 'partial' ? total * 0.5 : 0);
-        const uuid = uuidv4();
+        const tax = total * 0.1;
+        const netAmount = total + tax;
+        const paidAmount = bd.paid === 'paid' ? netAmount : (bd.paid === 'partial' ? netAmount * 0.5 : 0);
+        const uuid = randomUUID();
         const today = new Date().toISOString().split('T')[0].replace(/-/g, '');
         const billNumber = `BIL-${today}-${String(i + 1).padStart(3, '0')}`;
         const [result] = await conn.query(
           `INSERT INTO bills (uuid, bill_number, patient_id, total_amount, discount, tax, net_amount, paid_amount, payment_status, payment_method, notes, created_by)
            VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
-          [uuid, billNumber, patientIds[bd.patientIdx], total, total * 0.1, total + total * 0.1,
+          [uuid, billNumber, patientIds[bd.patientIdx % patientIds.length], total, tax, netAmount,
            paidAmount, bd.paid, bd.paid !== 'pending' ? 'card' : null,
            i === 2 ? 'Insurance claim pending' : null, userIds[4]]
         );
@@ -347,12 +567,12 @@ async function seed() {
           );
         }
         if (paidAmount > 0) {
-          const payUuid = uuidv4();
+          const payUuid = randomUUID();
           const payNumber = `PAY-${Date.now().toString(36).toUpperCase()}-${i + 1}`;
           await conn.query(
             `INSERT INTO payments (uuid, payment_number, bill_id, patient_id, amount, payment_method, received_by, notes)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [payUuid, payNumber, result.insertId, patientIds[bd.patientIdx], paidAmount,
+            [payUuid, payNumber, result.insertId, patientIds[bd.patientIdx % patientIds.length], paidAmount,
              i === 1 ? 'card' : 'cash', userIds[4],
              bd.paid === 'partial' ? 'Partial payment' : 'Full payment']
           );
@@ -414,17 +634,17 @@ async function seed() {
       ];
       for (let i = 0; i < wards.length; i++) {
         const w = wards[i];
-        const uuid = uuidv4();
+        const uuid = randomUUID();
         const admNum = `ADM-${Date.now().toString(36).toUpperCase()}-${i + 1}`;
         await conn.query(
           `INSERT INTO admissions (uuid, admission_number, patient_id, doctor_id, ward, bed_number, diagnosis, treatment_plan, status, notes, admission_date)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?, datetime('now', ?))`,
-          [uuid, admNum, patientIdList[w.patientIdx], i % 2 === 0 ? doctorUserId1 : doctorUserId2,
+          [uuid, admNum, patientIdList[w.patientIdx % patientIdList.length], i % 2 === 0 ? doctorUserId1 : doctorUserId2,
            w.ward, w.bed, w.diagnosis, w.plan,
            `${w.bed} days stay, review daily`, `-${i % 5} days`]
         );
       }
-      const dischargedUuid = uuidv4();
+      const dischargedUuid = randomUUID();
       await conn.query(
         `INSERT INTO admissions (uuid, admission_number, patient_id, doctor_id, ward, bed_number, diagnosis, treatment_plan, status, notes, admission_date, discharge_date)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'discharged', ?, datetime('now', '-10 days'), datetime('now', '-3 days'))`,
@@ -456,14 +676,25 @@ async function seed() {
     console.log('  Receptionist: receptionist@hospital.com');
     console.log('  Pharmacist:   pharmacist@hospital.com');
     console.log('  Lab Tech:     labtech@hospital.com');
-    console.log('  Patient Portal (portal_pin: password123):  any patient MRN / phone / email');
+    if (demoPortalCredentials.length > 0) {
+      console.log('\nDemo patient portal credentials:');
+      for (const credential of demoPortalCredentials) {
+        console.log(`  ${credential.mrn}: ${credential.pin}`);
+      }
+    }
   } catch (error) {
-    await conn.rollback();
+    try { await conn.rollback(); } catch (_) { /* preserve original error */ }
     console.error('Seeding failed:', error);
-    process.exitCode = 1;
+    throw error;
   } finally {
     conn.release();
   }
 }
 
-seed();
+if (require.main === module) {
+  seed().catch(() => {
+    process.exitCode = 1;
+  });
+}
+
+module.exports = seed;
