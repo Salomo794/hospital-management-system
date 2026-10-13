@@ -10,6 +10,7 @@
     "db:seed": "node server/config/seed.js"
   },
   "dependencies": {
-    "concurrently": "^8.2.0"
+    "concurrently": "^8.2.0",
+    "validator": "^13.15.35"
   }
 }
