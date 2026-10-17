@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: hospital-management-system
+    runtime: node
+    plan: free
+    buildCommand: npm run install:all && npm run build
+    preDeployCommand: npm run db:setup
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false
+      - key: DB_PATH
+        value: /var/data/hospital.db
+      - key: PUBLIC_URL
+        sync: false
+      - key: APP_TIMEZONE
+        value: Africa/Kigali
+      - key: ALLOW_SIMULATED_PAYMENTS
+        value: false
+      - key: BACKUP_ENCRYPTION_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_SECURE
+        value: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: PASSWORD_RESET_MINUTES
+        value: 30
+      - key: MAIL_LOG_TOKENS
+        value: false
+      - key: TRUST_PROXY
+        value: true
+    disk:
+      name: hms-data
+      mountPath: /var/data
+      sizeGB: 1
