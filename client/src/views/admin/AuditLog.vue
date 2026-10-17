@@ -5,25 +5,41 @@
         <span class="user-count badge badge-info" v-if="!loading">{{ total }} entries</span>
       </div>
       <div class="header-actions">
-        <div class="filter-group">
-          <select v-model="actionFilter" @change="page = 1; loadEntries()">
-            <option value="">All Actions</option>
-            <option v-for="action in actions" :key="action" :value="action">{{ action }}</option>
-          </select>
+        <div class="filter-field">
+          <label for="audit-action">Action</label>
+          <div class="select-wrap">
+            <select id="audit-action" v-model="actionFilter" @change="page = 1; loadEntries()">
+              <option value="">All Actions</option>
+              <option v-for="action in actions" :key="action" :value="action">{{ action }}</option>
+            </select>
+            <svg class="select-chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
         </div>
-        <div class="filter-group">
-          <select v-model="actorFilter" @change="page = 1; loadEntries()">
-            <option value="">All Actors</option>
-            <option value="staff">Staff</option>
-            <option value="patient">Patient</option>
-            <option value="anonymous">Anonymous</option>
-          </select>
+        <div class="filter-field">
+          <label for="audit-actor">Actor</label>
+          <div class="select-wrap">
+            <select id="audit-actor" v-model="actorFilter" @change="page = 1; loadEntries()">
+              <option value="">All Actors</option>
+              <option value="staff">Staff</option>
+              <option value="patient">Patient</option>
+              <option value="anonymous">Anonymous</option>
+            </select>
+            <svg class="select-chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
         </div>
-        <div class="filter-group">
-          <input type="date" v-model="fromDate" @change="page = 1; loadEntries()" title="From date" />
-          <input type="date" v-model="toDate" @change="page = 1; loadEntries()" title="To date" />
+        <div class="filter-field">
+          <label>Date range</label>
+          <div class="date-range">
+            <span class="date-range__glyph" aria-hidden="true">📅</span>
+            <input type="date" v-model="fromDate" @change="page = 1; loadEntries()" aria-label="From date" title="From date" />
+            <span class="date-range__sep" aria-hidden="true">→</span>
+            <input type="date" v-model="toDate" @change="page = 1; loadEntries()" aria-label="To date" title="To date" />
+          </div>
         </div>
-        <button class="btn btn-sm btn-outline" @click="loadEntries" :disabled="loading">Refresh</button>
+        <button class="btn btn-sm btn-outline refresh-btn" @click="loadEntries" :disabled="loading">
+          <span class="refresh-icon" :class="{ spinning: loading }" aria-hidden="true">↻</span>
+          Refresh
+        </button>
       </div>
     </div>
 
@@ -50,7 +66,10 @@
         </thead>
         <tbody>
           <tr v-for="entry in entries" :key="entry.id">
-            <td class="text-muted">{{ formatDateTime(entry.created_at) }}</td>
+            <td class="date-cell" :title="formatDateTime(entry.created_at)">
+              <span class="date-cell__date">{{ formatDate(entry.created_at) }}</span>
+              <span class="date-cell__time">{{ formatTimeOnly(entry.created_at) }}</span>
+            </td>
             <td>
               <div>{{ actorName(entry) }}</div>
               <span class="badge" :class="actorBadge(entry.actor_type)">{{ entry.actor_type }}</span>
@@ -102,7 +121,7 @@
 <script>
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
-import { formatDateTime } from '../../utils/helpers'
+import { formatDate, formatDateTime, formatTimeOnly } from '../../utils/helpers'
 import { useToast } from '../../store/toast'
 
 export default {
@@ -198,13 +217,128 @@ export default {
       entries, actions, total, page, limit, loading, error,
       actionFilter, actorFilter, fromDate, toDate,
       expanded, expandedDetails,
-      loadEntries, toggleDetails, actorName, actorBadge, pretty, formatDateTime
+      loadEntries, toggleDetails, actorName, actorBadge, pretty, formatDate, formatDateTime, formatTimeOnly
     }
   }
 }
 </script>
 
 <style scoped>
+/* ── header filter toolbar ── */
+.header-actions { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
+.filter-field { display: flex; flex-direction: column; gap: 6px; }
+.filter-field > label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.filter-field select,
+.date-range {
+  height: 42px;
+  border: 1.5px solid var(--control-border);
+  border-radius: var(--radius);
+  background: var(--surface-elevated);
+  color: var(--gray-700);
+  box-shadow: var(--shadow-xs);
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+.filter-field select {
+  width: 100%;
+  padding: 0 38px 0 14px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  appearance: none;
+  cursor: pointer;
+}
+.select-wrap { position: relative; display: flex; }
+.select-chevron {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+  pointer-events: none;
+  transition: color .18s ease;
+}
+.select-wrap:hover .select-chevron { color: var(--gray-700); }
+
+.filter-field select:hover,
+.date-range:hover { border-color: var(--control-border-hover); }
+.filter-field select:focus,
+.date-range:focus-within {
+  outline: none;
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 3px rgba(20,184,166,.14);
+}
+
+/* Date range reads as one grouped control: calendar glyph, From → To. */
+.date-range { display: flex; align-items: center; gap: 8px; padding: 0 14px; }
+.date-range__glyph { font-size: 14px; line-height: 1; opacity: .7; }
+.date-range__sep { color: var(--text-subtle); font-size: 13px; }
+.date-range input[type="date"] {
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--gray-700);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.date-range input[type="date"]:focus { outline: none; }
+
+.header-actions .refresh-btn {
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1.5px solid var(--control-border);
+  border-radius: var(--radius);
+  background: var(--surface-elevated);
+  color: var(--gray-700);
+  font-weight: 600;
+  box-shadow: var(--shadow-xs);
+  transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+.header-actions .refresh-btn:hover:not(:disabled) { border-color: var(--control-border-hover); background: var(--gray-50); }
+.header-actions .refresh-btn:focus-visible {
+  outline: none;
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 3px rgba(20,184,166,.14);
+}
+.refresh-btn .refresh-icon { font-size: 15px; line-height: 1; display: inline-block; }
+.refresh-btn .refresh-icon.spinning { animation: audit-spin .8s linear infinite; }
+@keyframes audit-spin { to { transform: rotate(360deg); } }
+
+/* Native date/select widgets should follow the dark surface too. */
+:global([data-theme="dark"]) .header-actions { color-scheme: dark; }
+
+.date-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: nowrap;
+}
+.date-cell__date {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-700);
+  letter-spacing: -0.01em;
+}
+.date-cell__time {
+  font-size: 11.5px;
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
+}
 .action-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;

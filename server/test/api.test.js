@@ -21,6 +21,7 @@ const setupDatabase = require('../config/setup');
 const seedDatabase = require('../config/seed');
 const app = require('../index');
 const pool = require('../config/database');
+const rateLimit = require('../middleware/rateLimit');
 const { evaluateSafety } = require('../utils/safety');
 const { settleMockCharge, getMockCharge, mockWebhookSignature } = require('../services/mobileMoney');
 
@@ -91,6 +92,31 @@ test('health checks the initialized database', async () => {
   assert.equal(response.body.status, 'OK');
 });
 
+test('patient registration issues a unique 4-digit numeric access code', async () => {
+  const token = await login();
+  const codes = new Set();
+  for (let index = 0; index < 5; index += 1) {
+    const response = await request(app)
+      .post('/api/patients')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        first_name: `Code${index}`,
+        last_name: 'Patient',
+        date_of_birth: '1988-08-08',
+        gender: 'female',
+        email: `code-${index}-${Date.now()}@example.com`,
+      })
+      .expect(201);
+    const accessCode = response.body.patient.access_code;
+    assert.match(accessCode, /^\d{4}$/, `access code "${accessCode}" should be exactly 4 digits`);
+    codes.add(accessCode);
+  }
+  assert.equal(codes.size, 5, 'access codes must be unique across registrations');
+  // This case spends several writes; hand the shared budgets back untouched so
+  // the rest of the suite does not inherit its consumption.
+  rateLimit.clearAll();
+});
+
 test('malformed JSON returns the API error contract', async () => {
   const response = await request(app)
     .post('/api/auth/login')
@@ -107,6 +133,58 @@ test('pagination cannot be bypassed with a negative limit', async () => {
     .set('Authorization', `Bearer ${token}`)
     .expect(400);
   assert.match(response.body.message, /limit/i);
+});
+
+test('the user list filters by account status, and rejects an unknown one', async () => {
+  const adminToken = await login();
+  const email = `status-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
+  const created = await request(app)
+    .post('/api/auth/register')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({
+      first_name: 'Status',
+      last_name: 'Filter',
+      email,
+      password: 'Birch-Canyon-Ledger-42!',
+      role: 'nurse',
+    })
+    .expect(201);
+  const id = created.body.user.id;
+
+  // Deactivating through the API is what the admin page's delete button does.
+  await request(app)
+    .delete(`/api/users/${id}`)
+    .set('Authorization', `Bearer ${adminToken}`)
+    .expect(200);
+
+  const inactive = await request(app)
+    .get('/api/users?status=inactive&limit=100')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .expect(200);
+  assert.ok(inactive.body.users.every(u => !u.is_active), 'the inactive filter must exclude active accounts');
+  assert.ok(inactive.body.users.some(u => u.id === id), 'the deactivated account must be listed as inactive');
+
+  await request(app)
+    .put(`/api/users/${id}`)
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ is_active: true })
+    .expect(200);
+
+  const active = await request(app)
+    .get('/api/users?status=active&limit=100')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .expect(200);
+  assert.ok(active.body.users.every(u => u.is_active), 'the active filter must exclude deactivated accounts');
+  assert.ok(active.body.users.some(u => u.id === id), 'the restored account must be listed as active');
+
+  await request(app)
+    .get('/api/users?status=not-a-status')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .expect(400);
+
+  // Registering, deactivating and restoring all spend from the same write
+  // budget the rest of the suite uses; hand it back so later cases start clean.
+  rateLimit.clearAll();
 });
 
 test('a pharmacist cannot cancel appointments', async () => {

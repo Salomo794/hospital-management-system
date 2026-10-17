@@ -22,6 +22,13 @@ function withoutPortalPin(patient) {
   };
 }
 
+// A 4-digit access code has only 10,000 possible values, so a clash is an
+// expected outcome as the table fills rather than a broken random source. Detect
+// it so the insert can be retried with a fresh code.
+function isAccessCodeConflict(error) {
+  return /UNIQUE constraint failed: patients\.access_code/i.test(String(error?.message || ''));
+}
+
 function validatePatientUpdates(body, currentRole) {
   const allowed = [
     'first_name', 'last_name', 'date_of_birth', 'gender', 'blood_type',
@@ -127,22 +134,37 @@ router.post('/', authenticate, authorize(...CLINICAL_ROLES), writePatientData, v
 
   const uuid = randomUUID();
   const mrn = generateMrn();
-  const accessCode = generateAccessCode(mrn);
   const plainPin = generatePortalPin();
   const hashedPin = await bcrypt.hash(plainPin, 12);
-  const [result] = await pool.query(
-    `INSERT INTO patients
-      (uuid, mrn, access_code, portal_pin, first_name, last_name, date_of_birth, gender, blood_type,
-       phone, email, address, emergency_contact_name, emergency_contact_phone,
-       insurance_provider, insurance_number, allergies, chronic_conditions)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [
-      uuid, mrn, accessCode, hashedPin, first_name.trim(), last_name.trim(), date_of_birth, gender,
-      blood_type || null, phone || null, email || null, address || null,
-      emergency_contact_name || null, emergency_contact_phone || null,
-      insurance_provider || null, insurance_number || null, allergies || null, chronic_conditions || null,
-    ]
-  );
+
+  // Draw a 4-digit access code and insert it. Because the space is small, the
+  // UNIQUE constraint - not the draw - is what guarantees uniqueness: on a clash
+  // the code is redrawn and the insert retried.
+  const maxAccessCodeAttempts = 50;
+  let result;
+  for (let attempt = 0; attempt < maxAccessCodeAttempts; attempt += 1) {
+    const accessCode = generateAccessCode();
+    try {
+      [result] = await pool.query(
+        `INSERT INTO patients
+          (uuid, mrn, access_code, portal_pin, first_name, last_name, date_of_birth, gender, blood_type,
+           phone, email, address, emergency_contact_name, emergency_contact_phone,
+           insurance_provider, insurance_number, allergies, chronic_conditions)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [
+          uuid, mrn, accessCode, hashedPin, first_name.trim(), last_name.trim(), date_of_birth, gender,
+          blood_type || null, phone || null, email || null, address || null,
+          emergency_contact_name || null, emergency_contact_phone || null,
+          insurance_provider || null, insurance_number || null, allergies || null, chronic_conditions || null,
+        ]
+      );
+      break;
+    } catch (error) {
+      if (!isAccessCodeConflict(error)) throw error;
+      if (attempt < maxAccessCodeAttempts - 1) continue;
+      throw new ApiError(503, 'All 4-digit patient access codes are in use; a longer code format is required.');
+    }
+  }
   const [newPatient] = await pool.query('SELECT * FROM patients WHERE id = ?', [result.insertId]);
   await recordAudit({
     req,

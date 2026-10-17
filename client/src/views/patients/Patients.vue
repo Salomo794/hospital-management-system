@@ -30,7 +30,7 @@
             <input
               v-model="lookupCode"
               @keyup.enter="lookupPatient"
-              placeholder="e.g. HMS-L9XQ-R4A2B"
+              placeholder="e.g. 4821"
               class="lookup-input"
               :class="{ 'lookup-input--error': lookupError, 'lookup-input--success': lookupResult }"
               spellcheck="false"
@@ -377,7 +377,7 @@ import { useToast } from '../../store/toast'
 import { useConfirm } from '../../store/confirm'
 import { useAuthStore } from '../../store/auth'
 import PatientAccessCard from '../../components/PatientAccessCard.vue'
-import { PHONE_MAX_DIGITS } from '../../utils/phone'
+import { PHONE_MAX_DIGITS, phoneProblem } from '../../utils/phone'
 
 export default {
   name: 'Patients',
@@ -509,6 +509,24 @@ export default {
         return
       }
 
+      // Same field rules as the API, checked here so a rejected value is
+      // explained before the request instead of surfacing as a bare server error.
+      // The phone rule is only enforced by the API on create, so only check it
+      // there; existing records may predate the digits-only rule.
+      const email = form.value.email.trim()
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        toast.warning('Enter a valid email address, e.g. patient@example.com.')
+        return
+      }
+      if (!editingPatient.value) {
+        const phoneIssue = phoneProblem(form.value.phone) || phoneProblem(form.value.emergency_contact_phone)
+        if (phoneIssue) {
+          toast.warning(phoneIssue)
+          return
+        }
+      }
+      form.value.email = email
+
       saving.value = true
       try {
         if (editingPatient.value) {
@@ -543,7 +561,6 @@ export default {
         message:      `Are you sure you want to deactivate ${patient.first_name} ${patient.last_name}?`,
         confirmText:  'Delete',
         confirmClass: 'btn-danger',
-        icon:         '⚠️',
       })
       if (!yes) return
       try {

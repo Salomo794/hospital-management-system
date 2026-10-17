@@ -12,14 +12,19 @@ const AUDITED_FIELDS = ['email', 'role', 'first_name', 'last_name', 'phone', 'is
 
 router.get('/', authenticate, authorize('admin'), readPatientDataInBulk, asyncHandler(async (req, res) => {
   const { page, limit, offset } = getPagination(req.query);
-  const { role, search } = req.query;
+  const { role, search, status } = req.query;
   if (role && !ROLES.includes(role)) throw new ApiError(400, 'Invalid role filter');
+  if (status && !['active', 'inactive'].includes(status)) throw new ApiError(400, 'Invalid status filter');
 
   let where = 'WHERE 1=1';
   const params = [];
   if (role) {
     where += ' AND role = ?';
     params.push(role);
+  }
+  if (status) {
+    where += ' AND is_active = ?';
+    params.push(status === 'active' ? 1 : 0);
   }
   if (search) {
     where += ' AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?)';

@@ -415,6 +415,18 @@ export default {
   box-shadow: 0 0 0 4px rgba(13, 148, 136, 0.12);
 }
 
+.input-wrap { position: relative; display: flex; align-items: center; }
+.input-wrap input { padding-right: 44px; }
+.reveal {
+  position: absolute; right: 8px;
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0;
+  background: none; border: none; border-radius: 7px;
+  color: var(--text-subtle); cursor: pointer;
+}
+.reveal:hover { color: var(--primary); background: var(--primary-bg); }
+.reveal :deep(svg) { width: 17px; height: 17px; }
+
 .btn-block {
   width: 100%;
   padding: 13px;

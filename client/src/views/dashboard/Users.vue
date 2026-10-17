@@ -6,10 +6,10 @@
       </div>
       <div class="header-actions">
         <div class="search-bar">
-          <input type="text" v-model="search" placeholder="Search users..." @input="debouncedLoad" />
+          <input type="text" v-model="search" placeholder="Search users..." aria-label="Search users" @input="debouncedLoad" />
         </div>
         <div class="filter-group">
-          <select v-model="roleFilter" @change="page = 1; loadUsers()">
+          <select v-model="roleFilter" aria-label="Filter by role" @change="page = 1; loadUsers()">
             <option value="">All Roles</option>
             <option value="admin">Admin</option>
             <option value="doctor">Doctor</option>
@@ -19,6 +19,13 @@
             <option value="lab_technician">Lab Technician</option>
           </select>
         </div>
+        <div class="filter-group">
+          <select v-model="statusFilter" aria-label="Filter by account status" @change="page = 1; loadUsers()">
+            <option value="">All Statuses</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
         <button class="btn btn-primary add-user-btn" @click="openCreate">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
           Add User
@@ -26,21 +33,43 @@
       </div>
     </div>
 
-    <div v-if="loading" class="loading-state">
-      <div class="spinner"></div>
-      <p>Loading users...</p>
+    <!-- The table frame is drawn immediately and the rows shimmer, so the page
+         keeps its shape and nothing jumps when the data lands. -->
+    <div v-if="loading" class="card">
+      <table class="data-table">
+        <thead>
+          <tr><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Status</th><th>Last Login</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="n in 6" :key="`skeleton-${n}`" class="skeleton-row">
+            <td><span class="skeleton ske ske-name"></span></td>
+            <td><span class="skeleton ske ske-email"></span></td>
+            <td><span class="skeleton ske ske-chip"></span></td>
+            <td><span class="skeleton ske ske-phone"></span></td>
+            <td><span class="skeleton ske ske-chip"></span></td>
+            <td><span class="skeleton ske ske-date"></span></td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+      <span class="sr-only" role="status">Loading users…</span>
     </div>
 
     <div v-else-if="users.length === 0" class="empty-state">
       <span class="empty-icon">👥</span>
       <p>No users found.</p>
-      <span class="text-muted">Try adjusting your search or filters.</span>
+      <span class="text-muted">
+        {{ hasFilters ? 'Try adjusting your search or filters.' : 'Add a user to get started.' }}
+      </span>
+      <button v-if="hasFilters" class="btn btn-secondary clear-filters" @click="clearFilters">
+        Clear filters
+      </button>
     </div>
 
     <div v-else class="card">
       <table class="data-table">
         <thead>
-          <tr><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Status</th><th>Last Login</th></tr>
+          <tr><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Status</th><th>Last Login</th><th>Actions</th></tr>
         </thead>
         <tbody>
           <tr v-for="u in users" :key="u.id">
@@ -50,6 +79,41 @@
             <td>{{ u.phone || '-' }}</td>
             <td><span class="badge" :class="u.is_active ? 'badge-success' : 'badge-danger'">{{ u.is_active ? 'Active' : 'Inactive' }}</span></td>
             <td>{{ u.last_login ? formatDateTime(u.last_login) : 'Never' }}</td>
+            <td>
+              <div class="table-actions">
+                <!-- Delete deactivates the account (the API never drops the row),
+                     so the restore button is what brings a user back. The server
+                     also refuses a self-delete, so the admin's own row shows a
+                     quiet "You" label instead of a button that would only fail. -->
+                <template v-if="u.id === authStore.user?.id">
+                  <span class="self-tag">You</span>
+                </template>
+                <template v-else-if="u.is_active">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost btn-icon action-danger"
+                    :disabled="busyId === u.id"
+                    :title="`Delete ${u.first_name} ${u.last_name}`"
+                    :aria-label="`Delete ${u.first_name} ${u.last_name}`"
+                    @click="deleteUser(u)"
+                  >
+                    <AppIcon name="trash" :size="15" :class="{ spinning: busyId === u.id }" />
+                  </button>
+                </template>
+                <template v-else>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost btn-icon action-success"
+                    :disabled="busyId === u.id"
+                    :title="`Restore access for ${u.first_name} ${u.last_name}`"
+                    :aria-label="`Restore access for ${u.first_name} ${u.last_name}`"
+                    @click="restoreUser(u)"
+                  >
+                    <AppIcon name="user-check" :size="15" :class="{ spinning: busyId === u.id }" />
+                  </button>
+                </template>
+              </div>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -160,11 +224,14 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
+import { useConfirm } from '../../store/confirm'
+import { useAuthStore } from '../../store/auth'
 import { formatDateTime, getStatusLabel, debounce } from '../../utils/helpers'
 import {
   validatePassword, passwordStrength, MIN_LENGTH as PASSWORD_MIN_LENGTH, MAX_LENGTH as PASSWORD_MAX_LENGTH
 } from '../../utils/passwordPolicy'
 import { phoneProblem as checkPhone, PHONE_MAX_DIGITS } from '../../utils/phone'
+import AppIcon from '../../components/AppIcon.vue'
 
 // The same eye pair the sign-in and reset screens use, so the control looks the
 // same wherever a password is typed.
@@ -177,14 +244,18 @@ const icons = {
 
 export default {
   name: 'Users',
+  components: { AppIcon },
   setup() {
     const toast = useToast()
+    const { confirm } = useConfirm()
+    const authStore = useAuthStore()
     const users = ref([])
     const total = ref(0)
     const page = ref(1)
     const limit = ref(20)
     const search = ref('')
     const roleFilter = ref('')
+    const statusFilter = ref('')
     const loading = ref(true)
 
     /* ── create-user modal ── */
@@ -255,6 +326,50 @@ export default {
       }
     }
 
+    /* ── delete / restore ── */
+    // The API deactivates rather than drops the row, so appointments, audit
+    // entries and anything else pointing at this user keep their history.
+    const busyId = ref(null)
+    const deleteUser = async (u) => {
+      if (busyId.value) return
+      const yes = await confirm({
+        title:        'Delete User',
+        message:      `Are you sure you want to delete ${u.first_name} ${u.last_name}? They will no longer be able to sign in, and you can restore them later from this list.`,
+        confirmText:  'Delete',
+        confirmClass: 'btn-danger',
+      })
+      if (!yes) return
+      busyId.value = u.id
+      try {
+        await axios.delete(`/api/users/${u.id}`)
+        // The undo travels in the toast instead of a second dialog: the list
+        // reloads straight away and a mis-click is one tap away from undone.
+        toast.warning(`User ${u.first_name} ${u.last_name} deleted.`, {
+          label: 'Undo',
+          onClick: () => restoreUser(u, { silentBusy: true }),
+        })
+        loadUsers()
+      } catch (e) {
+        toast.error(e.response?.data?.message || 'Failed to delete user.')
+      } finally {
+        busyId.value = null
+      }
+    }
+
+    const restoreUser = async (u, { silentBusy = false } = {}) => {
+      if (busyId.value) return
+      if (!silentBusy) busyId.value = u.id
+      try {
+        await axios.put(`/api/users/${u.id}`, { is_active: true })
+        toast.success(`Access restored for ${u.first_name} ${u.last_name}.`)
+        loadUsers()
+      } catch (e) {
+        toast.error(e.response?.data?.message || 'Failed to restore user.')
+      } finally {
+        busyId.value = null
+      }
+    }
+
     let requestId = 0
     const loadUsers = async () => {
       const currentRequest = ++requestId
@@ -263,6 +378,7 @@ export default {
         const params = { page: page.value, limit: limit.value }
         if (search.value) params.search = search.value
         if (roleFilter.value) params.role = roleFilter.value
+        if (statusFilter.value) params.status = statusFilter.value
         const { data } = await axios.get('/api/users', { params })
         if (currentRequest !== requestId) return
         users.value = data.users
@@ -279,6 +395,17 @@ export default {
       loadUsers()
     }, 300)
 
+    // Drives the empty state, so a zero-result screen offers a way out instead
+    // of leaving the admin to spot which control they set.
+    const hasFilters = computed(() => !!(search.value || roleFilter.value || statusFilter.value))
+    const clearFilters = () => {
+      search.value = ''
+      roleFilter.value = ''
+      statusFilter.value = ''
+      page.value = 1
+      loadUsers()
+    }
+
     const getRoleColor = (role) => {
       const map = { admin: 'danger', doctor: 'info', nurse: 'success', receptionist: 'warning', pharmacist: 'info', lab_technician: 'info' }
       return map[role] || 'info'
@@ -291,6 +418,8 @@ export default {
       users, total, page, limit, search, roleFilter, loading, loadUsers, debouncedLoad,
       getRoleColor, formatDateTime, formatStatusLabel,
       showCreate, creating, form, openCreate, createUser, showPassword, icons,
+      deleteUser, restoreUser, busyId, authStore,
+      statusFilter, hasFilters, clearFilters,
       passwordProblems, strengthLabel, strengthClass, strengthPercent,
       phoneProblem, PHONE_MAX_DIGITS,
       PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH
@@ -336,12 +465,39 @@ export default {
 .reveal:hover { color: var(--brand-600, #0d9488); background: var(--brand-50, #f0fdfa); }
 .reveal :deep(svg) { width: 17px; height: 17px; }
 
+.table-actions { display: flex; gap: 2px; align-items: center; }
+.table-actions .btn-icon { color: var(--text-subtle); }
+.action-danger:hover:not(:disabled) { color: var(--danger); background: var(--danger-bg); }
+.action-success:hover:not(:disabled) { color: var(--success); background: var(--success-bg); }
+.spinning :deep(.app-icon) { animation: spin .8s linear infinite; }
+.self-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-subtle);
+  background: var(--gray-100);
+  border-radius: var(--radius-full);
+  padding: 3px 10px;
+}
+
 .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+.empty-state .clear-filters { margin-top: 16px; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* Loading rows keep the table layout, then shimmer in place */
+.skeleton-row td { padding: 16px 14px; }
+.skeleton-row .ske { display: block; height: 13px; border-radius: var(--radius-sm); }
+.ske-name  { width: 130px; }
+.ske-email { width: 170px; }
+.ske-chip  { width: 64px; height: 20px; border-radius: var(--radius-full); }
+.ske-phone { width: 100px; }
+.ske-date  { width: 120px; }
 .empty-icon { font-size: 40px; display: block; margin-bottom: 12px; }
 .text-muted { color: var(--text-subtle); font-size: 13px; }
 
-.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; color: var(--text-muted); }
-.spinner { width: 40px; height: 40px; border: 4px solid var(--gray-200); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 768px) {

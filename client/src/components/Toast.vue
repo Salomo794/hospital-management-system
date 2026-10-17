@@ -6,12 +6,21 @@
         :key="t.id"
         class="toast-item"
         :class="`toast-${t.type}`"
-        role="alert"
-        @click="remove(t.id)"
+        role="status"
       >
-        <span class="toast-icon">{{ iconMap[t.type] }}</span>
+        <span class="toast-icon"><AppIcon :name="iconMap[t.type]" :size="16" :stroke-width="2" /></span>
         <span class="toast-text">{{ t.message }}</span>
-        <button class="toast-close" aria-label="Dismiss">×</button>
+        <button
+          v-if="t.action"
+          type="button"
+          class="toast-action"
+          @click.stop="runAction(t)"
+        >
+          {{ t.action.label }}
+        </button>
+        <button class="toast-close" type="button" aria-label="Dismiss" @click.stop="remove(t.id)">
+          <AppIcon name="x" :size="14" :stroke-width="2.2" />
+        </button>
       </div>
     </transition-group>
   </teleport>
@@ -19,12 +28,23 @@
 
 <script>
 import { useToast } from '../store/toast'
+import AppIcon from './AppIcon.vue'
+
 export default {
   name: 'ToastContainer',
+  components: { AppIcon },
   setup() {
     const { toasts, remove } = useToast()
-    const iconMap = { success: '✓', danger: '✕', warning: '⚠', info: 'ℹ' }
-    return { toasts, remove, iconMap }
+    const iconMap = { success: 'check', danger: 'alert-triangle', warning: 'alert-triangle', info: 'info' }
+
+    // The toast closes itself first, so the action runs against a screen the
+    // user can already see the result on.
+    const runAction = (t) => {
+      remove(t.id)
+      t.action?.onClick?.()
+    }
+
+    return { toasts, remove, iconMap, runAction }
   }
 }
 </script>
@@ -40,11 +60,10 @@ export default {
 
 .toast-item {
   display: flex; align-items: center; gap: 10px;
-  padding: 13px 16px;
+  padding: 13px 14px 13px 16px;
   border-radius: 12px;
   font-size: 13.5px; font-weight: 500;
   box-shadow: 0 8px 30px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.10);
-  cursor: pointer;
   border: 1px solid rgba(255,255,255,.15);
   backdrop-filter: blur(10px);
   min-width: 260px;
@@ -55,14 +74,32 @@ export default {
 .toast-warning { background: #78350f; color: #fef3c7; }
 .toast-info    { background: #1e3a5f; color: #bfdbfe; }
 
-.toast-icon { font-size: 15px; flex-shrink: 0; opacity: .9; }
+.toast-icon { display: flex; flex-shrink: 0; opacity: .9; }
 .toast-text { flex: 1; line-height: 1.4; }
-.toast-close {
-  background: none; border: none; font-size: 18px; line-height: 1;
-  cursor: pointer; opacity: .6; padding: 0 2px; color: inherit;
-  margin-left: 4px; flex-shrink: 0;
+
+.toast-action {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  background: rgba(255,255,255,.14);
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
 }
-.toast-close:hover { opacity: 1; }
+.toast-action:hover { background: rgba(255,255,255,.24); border-color: rgba(255,255,255,.35); }
+
+.toast-close {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  background: none; border: none; border-radius: 6px;
+  cursor: pointer; opacity: .55; color: inherit;
+  flex-shrink: 0;
+  transition: opacity .15s ease, background .15s ease;
+}
+.toast-close:hover { opacity: 1; background: rgba(255,255,255,.14); }
 
 .toast-anim-enter-active { animation: tIn .3s cubic-bezier(.34,1.46,.64,1); }
 .toast-anim-leave-active { animation: tOut .2s ease forwards; position: absolute; right: 0; }

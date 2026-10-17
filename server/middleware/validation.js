@@ -61,7 +61,7 @@ const validatePatient = [
   body('blood_type')
     .optional({ values: 'falsy' })
     .isIn(['A+','A-','B+','B-','AB+','AB-','O+','O-']),
-  body('email').optional({ values: 'falsy' }).isEmail(),
+  body('email').optional({ values: 'falsy' }).isEmail().withMessage('Enter a valid email address, e.g. patient@example.com'),
   body('date_of_birth').custom(value => {
     if (new Date(`${value}T00:00:00Z`) > new Date()) throw new Error('date_of_birth cannot be in the future');
     return true;

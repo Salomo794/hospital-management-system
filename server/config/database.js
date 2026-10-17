@@ -367,9 +367,13 @@ function migrate() {
       const updateCode = sqlite.prepare('UPDATE patients SET access_code = ? WHERE id = ?');
       const insertCode = sqlite.transaction(() => {
         for (const patient of patientsWithoutCode) {
-          let code = generateAccessCode(patient.mrn);
-          while (sqlite.prepare('SELECT 1 FROM patients WHERE access_code = ?').get(code)) {
-            code = generateAccessCode(patient.mrn);
+          let code = generateAccessCode();
+          // 4-digit codes are a scarce space, so a taken value is expected as
+          // the table fills rather than impossible. Probe, then let the UNIQUE
+          // constraint be the final authority.
+          for (let attempt = 0; attempt < 100; attempt += 1) {
+            if (!sqlite.prepare('SELECT 1 FROM patients WHERE access_code = ?').get(code)) break;
+            code = generateAccessCode();
           }
           updateCode.run(code, patient.id);
         }

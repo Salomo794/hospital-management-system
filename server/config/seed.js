@@ -184,10 +184,15 @@ async function seed() {
         { first_name: 'Christopher', last_name: 'Lopez', dob: '1995-08-03', gender: 'male', phone: '555-0109', blood: 'AB-', insurance: 'Aetna', allergies: 'None', conditions: '' },
         { first_name: 'Margaret', last_name: 'Clark', dob: '1940-02-14', gender: 'female', phone: '555-0110', blood: 'A+', insurance: 'Medicare', allergies: 'Penicillin, Morphine', conditions: 'Heart Failure, Diabetes Type 2' },
       ];
+      // 4-digit codes can repeat by chance, so dedupe within the seed run. The
+      // access_code column is UNIQUE, which would otherwise abort seeding.
+      const usedAccessCodes = new Set();
       for (const p of patients) {
         const uuid = randomUUID();
         const mrn = `MRN-${uuid.substring(0, 8).toUpperCase()}`;
-        const accessCode = generateAccessCode(mrn);
+        let accessCode = generateAccessCode();
+        while (usedAccessCodes.has(accessCode)) accessCode = generateAccessCode();
+        usedAccessCodes.add(accessCode);
         const [result] = await conn.query(
           `INSERT INTO patients (uuid, mrn, access_code, first_name, last_name, date_of_birth, gender, phone, blood_type, address, insurance_provider, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, status)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,

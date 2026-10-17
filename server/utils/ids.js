@@ -27,9 +27,12 @@ function generateMrn() {
   return `MRN-${randomToken(10)}`;
 }
 
-function generateAccessCode(mrn) {
-  const mrnPart = String(mrn || '').replace(/^MRN-/i, '').slice(0, 4).toUpperCase();
-  return `HMS-${mrnPart}-${randomToken(5)}`;
+// A short, all-digit code (0000-9999) that a patient can read, remember and type
+// at the front desk or portal. The space is small, so this function only draws a
+// candidate: callers must persist it against the UNIQUE access_code column and
+// retry on a collision rather than assume the value is free.
+function generateAccessCode() {
+  return String(randomInt(0, 10_000)).padStart(4, '0');
 }
 
 function generatePortalPin() {
