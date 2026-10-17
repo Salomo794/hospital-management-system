@@ -7,7 +7,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "install:all": "npm install && npm --prefix server install && npm --prefix client install",
+    "install:all": "npm install --include=dev && npm --prefix server install --include=dev && npm --prefix client install --include=dev",
+    "install:ci": "npm ci --include=dev && npm --prefix server ci --include=dev && npm --prefix client ci --include=dev",
+    "start": "node server/index.js",
+    "start:prod": "npm run db:setup && node server/index.js",
     "server": "node server/index.js",
     "client": "npm --prefix client run dev",
     "dev": "concurrently \"npm run server\" \"npm run client\"",

@@ -31,6 +31,13 @@ const portalRoutes = require('./routes/portal');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
+
+// Trust proxy when behind reverse proxies like Render, Railway, etc.
+// This ensures req.ip reflects the original client IP.
+if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
+
 const DEFAULT_PORT = 5000;
 const JWT_PLACEHOLDER = 'change_this_to_a_secure_random_string';
 
