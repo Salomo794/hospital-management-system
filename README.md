@@ -152,6 +152,21 @@ Refusing in production is the point. Silently not sending would leave a user wai
 
 The application is in good shape. The deployment is not, and that difference matters more than any feature still missing. These are the outstanding items, in the order they should be dealt with.
 
+**Production startup guard.** When `NODE_ENV=production`, the API now refuses to start unless the public URL uses HTTPS, every `CORS_ORIGINS` entry is an exact HTTPS origin (no path or trailing slash), SMTP host/user/password are configured, the backup encryption key is non-placeholder and at least 16 characters, and `DB_PATH` is not `:memory:`. This is a configuration check, not a replacement for a real TLS deployment or a verified restore test.
+
+Before deploying, set these in your hosting provider's secret/environment settings (not in Git):
+```dotenv
+NODE_ENV=production
+PUBLIC_URL=https://hms.example.org
+CORS_ORIGINS=https://hms.example.org,https://portal.example.org
+DB_PATH=/persistent/path/hospital.db
+SMTP_HOST=your-smtp-host
+SMTP_USER=your-smtp-user
+SMTP_PASS=your-smtp-password
+BACKUP_ENCRYPTION_KEY=use-a-long-unique-secret-from-your-secret-manager
+```
+Replace the example URLs, paths and values with real deployment values. Do not commit `server/.env`, and never copy the example secret into production. Run the GitHub Actions checks before merging the readiness pull request; tests/build have not yet been confirmed as passing.
+
 **1. Terminate TLS in front of the application.** There is no HTTPS anywhere in the server; the only `https` in the codebase is the Paystack API URL. Every record, login and session token currently crosses the network in clear text. Put a reverse proxy in front — Caddy is the shortest path, since it obtains and renews certificates itself — and set `PUBLIC_URL` to the `https://` origin so reset links point at it.
 
 **2. Load a real drug-interaction dataset.** This is the one item that can physically hurt someone rather than merely expose data. The bundled list is 16 well-known pairs across 20 demo medicines; a maintained reference covers thousands of medicines and tens of thousands of pairs. Until one is loaded the screening check will report most real interactions as absent, and silence from a check is read as safety.
