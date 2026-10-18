@@ -8,6 +8,17 @@ function isHttpsUrl(value) {
   }
 }
 
+function isHttpsOrigin(value) {
+  try {
+    const url = new URL(value);
+    // Browser Origin headers contain only scheme, host and optional port.
+    // Reject paths, credentials, and trailing slashes that would never match.
+    return url.protocol === 'https:' && url.origin === value;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Validate deployment settings that are required before production can handle
  * patient data. This cannot prove that a reverse proxy really terminates TLS;
@@ -29,9 +40,9 @@ function productionReadinessErrors(env = process.env) {
   if (origins.length === 0) {
     errors.push('CORS_ORIGINS must contain at least one production https:// origin.');
   } else {
-    const invalidOrigins = origins.filter(origin => !isHttpsUrl(origin));
+    const invalidOrigins = origins.filter(origin => !isHttpsOrigin(origin));
     if (invalidOrigins.length > 0) {
-      errors.push('Every CORS_ORIGINS entry must use https://.');
+      errors.push('Every CORS_ORIGINS entry must be an HTTPS origin without a path or trailing slash.');
     }
   }
 
