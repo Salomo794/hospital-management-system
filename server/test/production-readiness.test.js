@@ -18,6 +18,20 @@ test('accepts a production environment with HTTPS, mail, encrypted backups and p
   assert.doesNotThrow(() => assertProductionReadiness(validEnvironment));
 });
 
+test('rejects insecure or malformed public URLs', () => {
+  for (const PUBLIC_URL of [
+    'http://hms.example.org',
+    'https://hms.example.org/',
+    'https://user:pass@hms.example.org',
+    'https://hms.example.org?next=/login',
+    'https://hms.example.org#section',
+    'not-a-url',
+  ]) {
+    const errors = productionReadinessErrors({ ...validEnvironment, PUBLIC_URL });
+    assert.ok(errors.some(error => error.includes('PUBLIC_URL')), `Expected URL to be rejected: ${PUBLIC_URL}`);
+  }
+});
+
 test('rejects missing HTTPS configuration', () => {
   const errors = productionReadinessErrors({
     ...validEnvironment,
@@ -46,6 +60,14 @@ test('rejects CORS entries that are URLs rather than exact browser origins', () 
   }
 });
 
+test('rejects empty CORS entries rather than silently ignoring configuration mistakes', () => {
+  const errors = productionReadinessErrors({
+    ...validEnvironment,
+    CORS_ORIGINS: 'https://hms.example.org,,https://portal.example.org',
+  });
+  assert.ok(errors.some(error => error.includes('CORS_ORIGINS')));
+});
+
 test('accepts an HTTPS origin with an explicit port', () => {
   assert.deepEqual(productionReadinessErrors({
     ...validEnvironment,
@@ -53,14 +75,16 @@ test('accepts an HTTPS origin with an explicit port', () => {
   }), []);
 });
 
-test('rejects missing email and backup encryption configuration', () => {
-  const errors = productionReadinessErrors({
-    ...validEnvironment,
-    SMTP_PASS: '',
-    BACKUP_ENCRYPTION_KEY: 'REPLACE_ME',
-  });
-  assert.ok(errors.some(error => error.includes('SMTP_PASS')));
-  assert.ok(errors.some(error => error.includes('BACKUP_ENCRYPTION_KEY')));
+test('rejects missing email and weak or placeholder backup encryption configuration', () => {
+  for (const BACKUP_ENCRYPTION_KEY of ['REPLACE_ME', 'short']) {
+    const errors = productionReadinessErrors({
+      ...validEnvironment,
+      SMTP_PASS: '',
+      BACKUP_ENCRYPTION_KEY,
+    });
+    assert.ok(errors.some(error => error.includes('SMTP_PASS')));
+    assert.ok(errors.some(error => error.includes('BACKUP_ENCRYPTION_KEY')));
+  }
 });
 
 test('rejects in-memory database storage for production', () => {
