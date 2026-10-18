@@ -28,6 +28,31 @@ test('rejects missing HTTPS configuration', () => {
   assert.ok(errors.some(error => error.includes('CORS_ORIGINS')));
 });
 
+test('rejects CORS entries that are URLs rather than exact browser origins', () => {
+  for (const invalidOrigin of [
+    'https://hms.example.org/',
+    'https://hms.example.org/app',
+    'https://user:pass@hms.example.org',
+    'https://portal.example.org/path/',
+  ]) {
+    const errors = productionReadinessErrors({
+      ...validEnvironment,
+      CORS_ORIGINS: invalidOrigin,
+    });
+    assert.ok(
+      errors.some(error => error.includes('CORS_ORIGINS')),
+      `Expected CORS origin to be rejected: ${invalidOrigin}`
+    );
+  }
+});
+
+test('accepts an HTTPS origin with an explicit port', () => {
+  assert.deepEqual(productionReadinessErrors({
+    ...validEnvironment,
+    CORS_ORIGINS: 'https://hms.example.org:8443',
+  }), []);
+});
+
 test('rejects missing email and backup encryption configuration', () => {
   const errors = productionReadinessErrors({
     ...validEnvironment,
