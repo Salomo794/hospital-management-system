@@ -40,9 +40,16 @@ if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === 'true')
 
 const DEFAULT_PORT = 5000;
 const JWT_PLACEHOLDER = 'change_this_to_a_secure_random_string';
+const { assertProductionReadiness } = require('./config/productionReadiness');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === JWT_PLACEHOLDER || process.env.JWT_SECRET.length < 32) {
   throw new Error('[security] JWT_SECRET must be set to a unique random value of at least 32 characters.');
+}
+
+// Fail closed before accepting traffic if production-only deployment safeguards
+// are not configured. Development and test environments remain unaffected.
+if (process.env.NODE_ENV === 'production') {
+  assertProductionReadiness(process.env);
 }
 
 const developmentOrigins = new Set(['http://localhost:3000', 'http://127.0.0.1:3000']);
