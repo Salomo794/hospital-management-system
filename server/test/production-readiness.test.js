@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { productionReadinessErrors, assertProductionReadiness } = require('../config/productionReadiness');
+const { productionReadinessErrors, productionReadinessWarnings, assertProductionReadiness } = require('../config/productionReadiness');
 
 const validEnvironment = {
   NODE_ENV: 'production',
@@ -16,6 +16,26 @@ const validEnvironment = {
 test('accepts a production environment with HTTPS, mail, encrypted backups and persistent storage', () => {
   assert.deepEqual(productionReadinessErrors(validEnvironment), []);
   assert.doesNotThrow(() => assertProductionReadiness(validEnvironment));
+});
+
+test('accepts a single-service deployment that serves the client itself', () => {
+  // The API and the client share one address, so the application's own origin
+  // is the only browser origin that can reach it. Requiring a second entry
+  // would have made a valid deployment impossible to start.
+  const environment = { ...validEnvironment, CORS_ORIGINS: '' };
+  assert.deepEqual(productionReadinessErrors(environment), []);
+  assert.doesNotThrow(() => assertProductionReadiness(environment));
+});
+
+test('warns when no additional browser origin is configured', () => {
+  const warnings = productionReadinessWarnings({ ...validEnvironment, CORS_ORIGINS: '' });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /CORS_ORIGINS is empty/);
+  assert.match(warnings[0], /hosted separately/);
+});
+
+test('does not warn once a browser origin is configured', () => {
+  assert.deepEqual(productionReadinessWarnings(validEnvironment), []);
 });
 
 test('rejects insecure or malformed public URLs', () => {

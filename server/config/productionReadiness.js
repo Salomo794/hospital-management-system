@@ -1,3 +1,5 @@
+const { isHttpsOrigin, parseOrigins } = require('./corsOrigins');
+
 const PLACEHOLDER_BACKUP_KEYS = new Set([
   '',
   'REPLACE_ME',
@@ -14,17 +16,6 @@ function isHttpsPublicUrl(value) {
       !url.search &&
       !url.hash &&
       !value.endsWith('/');
-  } catch {
-    return false;
-  }
-}
-
-function isHttpsOrigin(value) {
-  try {
-    const url = new URL(value);
-    // Browser Origin headers contain only scheme, host and optional port.
-    // Reject paths, credentials, and trailing slashes that would never match.
-    return url.protocol === 'https:' && url.origin === value;
   } catch {
     return false;
   }
@@ -48,13 +39,13 @@ function productionReadinessErrors(env = process.env) {
   const originEntries = rawOrigins.split(',').map(value => value.trim());
   const origins = originEntries.filter(Boolean);
 
-  if (origins.length === 0) {
-    errors.push('CORS_ORIGINS must contain at least one production HTTPS origin.');
-  } else {
-    const invalidOrigins = origins.filter(origin => !isHttpsOrigin(origin));
-    if (invalidOrigins.length > 0 || originEntries.some(origin => !origin)) {
-      errors.push('Every CORS_ORIGINS entry must be an HTTPS origin without a path or trailing slash; empty entries are not allowed.');
-    }
+  // An unset list is a single-service deployment and is allowed. A blank entry
+  // inside a list is a mistake, because it is an origin the operator meant to
+  // name and did not.
+  const hasBlankEntry = rawOrigins.trim() !== '' && originEntries.some(origin => !origin);
+  const invalidOrigins = origins.filter(origin => !isHttpsOrigin(origin));
+  if (invalidOrigins.length > 0 || hasBlankEntry) {
+    errors.push('Every CORS_ORIGINS entry must be an HTTPS origin without a path or trailing slash; empty entries are not allowed.');
   }
 
   for (const key of ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS']) {
@@ -75,6 +66,27 @@ function productionReadinessErrors(env = process.env) {
   return errors;
 }
 
+/**
+ * Settings that are legal but worth saying out loud.
+ *
+ * An empty CORS_ORIGINS list is a valid single-service deployment, because
+ * the application's own origin is always allowed. It does mean that no
+ * separately hosted client can reach the API, which is a surprise worth
+ * reporting rather than leaving to be discovered in the browser console.
+ */
+function productionReadinessWarnings(env = process.env) {
+  const warnings = [];
+
+  if (parseOrigins(env.CORS_ORIGINS).length === 0) {
+    warnings.push(
+      'CORS_ORIGINS is empty, so only the application\'s own origin (PUBLIC_URL) may call the API. ' +
+      'Add the client origin if the client is hosted separately.'
+    );
+  }
+
+  return warnings;
+}
+
 function assertProductionReadiness(env = process.env) {
   const errors = productionReadinessErrors(env);
   if (errors.length > 0) {
@@ -86,4 +98,8 @@ function assertProductionReadiness(env = process.env) {
   }
 }
 
-module.exports = { assertProductionReadiness, productionReadinessErrors };
+module.exports = {
+  assertProductionReadiness,
+  productionReadinessErrors,
+  productionReadinessWarnings,
+};
