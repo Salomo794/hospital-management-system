@@ -11,6 +11,7 @@ const validEnvironment = {
   SMTP_PASS: 'test-only-secret',
   BACKUP_ENCRYPTION_KEY: 'a-long-non-placeholder-backup-secret',
   DB_PATH: '/var/lib/hms/hospital.db',
+  CLINICAL_INTERACTIONS_APPROVED: 'true',
 };
 
 test('accepts a production environment with HTTPS, mail, encrypted backups and persistent storage', () => {
@@ -85,6 +86,13 @@ test('rejects missing email and weak or placeholder backup encryption configurat
     assert.ok(errors.some(error => error.includes('SMTP_PASS')));
     assert.ok(errors.some(error => error.includes('BACKUP_ENCRYPTION_KEY')));
   }
+});
+
+test('requires explicit clinical approval for the imported interaction reference', () => {
+  assert.ok(productionReadinessErrors({ ...validEnvironment, CLINICAL_INTERACTIONS_APPROVED: 'false' })
+    .some(error => error.includes('CLINICAL_INTERACTIONS_APPROVED')));
+  assert.ok(productionReadinessErrors({ ...validEnvironment, CLINICAL_INTERACTIONS_APPROVED: '' })
+    .some(error => error.includes('CLINICAL_INTERACTIONS_APPROVED')));
 });
 
 test('rejects in-memory database storage for production', () => {
