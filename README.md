@@ -37,6 +37,8 @@ npm run install:all
 
 For a reproducible CI-style installation, use `npm ci` in the root, `client`, and `server` directories.
 
+No C++ toolchain is needed. `better-sqlite3` ships a prebuilt binary for every supported platform, and `server/.npmrc` turns install scripts off so npm uses that binary instead of compiling the same source over again. Without it, a Windows install asks for Visual Studio Build Tools, which have nothing to do with running the hospital.
+
 ### 2. Configure the API
 
 ```bash
