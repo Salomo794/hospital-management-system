@@ -2,7 +2,9 @@ services:
   - type: web
     name: hospital-management-system
     runtime: node
-    plan: free
+    # A Persistent Disk is a paid add-on, so the free plan cannot provision the
+    # `hms-data` disk below and the database would be lost on every deploy.
+    plan: starter
     buildCommand: npm run install:all && npm run build
     preDeployCommand: npm run db:setup
     startCommand: npm run start
@@ -13,6 +15,9 @@ services:
         value: 10000
       - key: JWT_SECRET
         generateValue: true
+      # Leave empty for a single-service deployment: the API always allows the
+      # application's own origin (PUBLIC_URL). Set it to the client's origin
+      # only when the client is hosted separately.
       - key: CORS_ORIGINS
         sync: false
       - key: DB_PATH

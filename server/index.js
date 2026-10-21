@@ -29,6 +29,7 @@ const aiRoutes = require('./routes/ai');
 const smartRoutes = require('./routes/smart');
 const portalRoutes = require('./routes/portal');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
+const { ApiError } = require('./utils/http');
 
 const app = express();
 
@@ -40,7 +41,8 @@ if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === 'true')
 
 const DEFAULT_PORT = 5000;
 const JWT_PLACEHOLDER = 'change_this_to_a_secure_random_string';
-const { assertProductionReadiness } = require('./config/productionReadiness');
+const { assertProductionReadiness, productionReadinessWarnings } = require('./config/productionReadiness');
+const { resolveAllowedOrigins } = require('./config/corsOrigins');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === JWT_PLACEHOLDER || process.env.JWT_SECRET.length < 32) {
   throw new Error('[security] JWT_SECRET must be set to a unique random value of at least 32 characters.');
@@ -50,25 +52,21 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === JWT_PLACEHOLDER || pro
 // are not configured. Development and test environments remain unaffected.
 if (process.env.NODE_ENV === 'production') {
   assertProductionReadiness(process.env);
+  for (const warning of productionReadinessWarnings(process.env)) {
+    console.warn(`[production-readiness] ${warning}`);
+  }
 }
 
-const developmentOrigins = new Set(['http://localhost:3000', 'http://127.0.0.1:3000']);
-const configuredOrigins = new Set(
-  String(process.env.CORS_ORIGINS || '')
-    .split(',')
-    .map(origin => origin.trim())
-    .filter(Boolean)
-);
-const allowedOrigins = process.env.NODE_ENV === 'production'
-  ? configuredOrigins
-  : new Set([...developmentOrigins, ...configuredOrigins]);
+const allowedOrigins = resolveAllowedOrigins(process.env);
 
 app.disable('x-powered-by');
 app.use(helmet());
 app.use(cors({
   origin(origin, callback) {
     if (!origin || allowedOrigins.has(origin)) return callback(null, true);
-    return callback(new Error('Origin is not allowed by CORS'));
+    // A refused origin is the caller's mistake, not an outage, so it is
+    // reported as a forbidden request rather than a server error.
+    return callback(new ApiError(403, 'Origin is not allowed by CORS'));
   },
   credentials: false,
 }));
