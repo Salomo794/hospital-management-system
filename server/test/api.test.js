@@ -92,6 +92,19 @@ test('health checks the initialized database', async () => {
   assert.equal(response.body.status, 'OK');
 });
 
+test('health check does not expose internal database errors', async () => {
+  const originalIsReady = pool.isReady;
+  pool.isReady = async () => { throw new Error('SQLITE_ERROR: /private/path/patient.db'); };
+  try {
+    const response = await request(app).get('/api/health').expect(503);
+    assert.equal(response.body.status, 'UNAVAILABLE');
+    assert.equal(response.body.message, 'Database is not ready');
+    assert.doesNotMatch(JSON.stringify(response.body), /SQLITE_ERROR|patient\.db|private\/path/);
+  } finally {
+    pool.isReady = originalIsReady;
+  }
+});
+
 test('patient registration issues a unique 4-digit numeric access code', async () => {
   const token = await login();
   const codes = new Set();
