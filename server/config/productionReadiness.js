@@ -72,6 +72,10 @@ function productionReadinessErrors(env = process.env) {
     errors.push('DB_PATH must point to a persistent database file in production.');
   }
 
+  if (String(env.CLINICAL_INTERACTIONS_APPROVED || '').trim().toLowerCase() !== 'true') {
+    errors.push('CLINICAL_INTERACTIONS_APPROVED=true is required only after a qualified clinical lead has reviewed and approved the imported interaction reference.');
+  }
+
   return errors;
 }
 

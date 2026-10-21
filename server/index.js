@@ -164,7 +164,19 @@ function startServer({ port = process.env.PORT || DEFAULT_PORT } = {}) {
 
 if (require.main === module) {
   pool.isReady()
-    .then(() => startServer())
+    .then(async () => {
+      if (process.env.NODE_ENV === 'production') {
+        const provenance = await readProvenance(pool);
+        if (!provenance.authoritative) {
+          throw new Error(
+            '[production-readiness] Refusing to start: drug-interaction data is still the bundled demo dataset. '
+            + 'Import a maintained clinical reference, obtain qualified clinical review, and set '
+            + 'CLINICAL_INTERACTIONS_APPROVED=true only after that review.'
+          );
+        }
+      }
+      startServer();
+    })
     .catch(error => {
       console.error(`[startup] ${error.message}`);
       process.exitCode = 1;
