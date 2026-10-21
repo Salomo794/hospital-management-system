@@ -53,7 +53,7 @@ Important optional settings:
 | `JWT_SECRET` | none | Required random secret of at least 32 characters |
 | `JWT_EXPIRE` | `7d` | Staff-session lifetime |
 | `PORTAL_JWT_EXPIRE` | `24h` | Patient-portal session lifetime |
-| `CORS_ORIGINS` | local dev origins | Comma-separated production client origins |
+| `CORS_ORIGINS` | local dev origins | Extra browser origins allowed to call the API. The application's own origin is always allowed |
 | `DB_PATH` | `server/hospital.db` | SQLite database path; relative paths resolve from `server/` |
 | `APP_TIMEZONE` | `Africa/Kigali` | IANA zone the hospital operates in; see [Timezones](#timezones) |
 | `ALLOW_SIMULATED_PAYMENTS` | `false` | Enables demo portal payments only when `NODE_ENV` is `development` or `test` |
@@ -154,18 +154,20 @@ The application is in good shape. The deployment is not, and that difference mat
 
 **Production startup guard.** When `NODE_ENV=production`, the API now refuses to start unless the public URL uses HTTPS, every `CORS_ORIGINS` entry is an exact HTTPS origin (no path or trailing slash), SMTP host/user/password are configured, the backup encryption key is non-placeholder and at least 16 characters, and `DB_PATH` is not `:memory:`. This is a configuration check, not a replacement for a real TLS deployment or a verified restore test.
 
+`CORS_ORIGINS` may be left empty, because the API always allows the application's own origin — the one in `PUBLIC_URL`. A deployment that serves the client and the API from the same address needs no extra origins; one that hosts the client separately has to list that origin exactly. The API says so on start-up rather than letting a browser console explain it later.
+
 Before deploying, set these in your hosting provider's secret/environment settings (not in Git):
 ```dotenv
 NODE_ENV=production
 PUBLIC_URL=https://hms.example.org
-CORS_ORIGINS=https://hms.example.org,https://portal.example.org
+CORS_ORIGINS=https://portal.example.org
 DB_PATH=/persistent/path/hospital.db
 SMTP_HOST=your-smtp-host
 SMTP_USER=your-smtp-user
 SMTP_PASS=your-smtp-password
 BACKUP_ENCRYPTION_KEY=use-a-long-unique-secret-from-your-secret-manager
 ```
-Replace the example URLs, paths and values with real deployment values. Do not commit `server/.env`, and never copy the example secret into production. Run the GitHub Actions checks before merging the readiness pull request; tests/build have not yet been confirmed as passing.
+Replace the example URLs, paths and values with real deployment values. Do not commit `server/.env`, and never copy the example secret into production. `docs/deployment.md` covers the Render and Vercel setups, including the settings the API refuses to start without.
 
 **1. Terminate TLS in front of the application.** There is no HTTPS anywhere in the server; the only `https` in the codebase is the Paystack API URL. Every record, login and session token currently crosses the network in clear text. Put a reverse proxy in front — Caddy is the shortest path, since it obtains and renews certificates itself — and set `PUBLIC_URL` to the `https://` origin so reset links point at it.
 
@@ -397,4 +399,4 @@ npm run build
 NODE_ENV=production npm run server
 ```
 
-Use HTTPS, a strong `JWT_SECRET`, an explicit `CORS_ORIGINS` allowlist, encrypted database backups, and a process supervisor. SQLite database files and `.env` files are intentionally excluded from Git.
+Use HTTPS, a strong `JWT_SECRET`, encrypted database backups, and a process supervisor. `CORS_ORIGINS` only has to name origins the client is *not* served from: the application's own origin is always allowed. SQLite database files and `.env` files are intentionally excluded from Git.
