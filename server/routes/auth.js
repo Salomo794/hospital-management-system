@@ -44,6 +44,28 @@ function assertMfaConfigured() {
   }
 }
 
+function createStaffToken(user) {
+  return jwt.sign(
+    { id: user.id, role: user.role, pwd: user.password_changed_at || '0', jti: randomUUID() },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRE || '7d' }
+  );
+}
+
+function publicStaffUser(user) {
+  return {
+    id: user.id,
+    uuid: user.uuid,
+    email: user.email,
+    role: user.role,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    phone: user.phone,
+    mfa_enabled: Boolean(user.mfa_enabled),
+    timezone: appTimezone(),
+  };
+}
+
 async function issueStaffSession(req, res, user) {
   await pool.query("UPDATE users SET last_login = datetime('now') WHERE id = ?", [user.id]);
   await recordAudit({
@@ -54,25 +76,7 @@ async function issueStaffSession(req, res, user) {
     summary: `${user.email} signed in`,
     actor: { userId: user.id, type: 'staff', label: user.email },
   });
-  const token = jwt.sign(
-    { id: user.id, role: user.role, pwd: user.password_changed_at || '0', jti: randomUUID() },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRE || '7d' }
-  );
-  res.json({
-    token,
-    user: {
-      id: user.id,
-      uuid: user.uuid,
-      email: user.email,
-      role: user.role,
-      first_name: user.first_name,
-      last_name: user.last_name,
-      phone: user.phone,
-      mfa_enabled: Boolean(user.mfa_enabled),
-      timezone: appTimezone(),
-    },
-  });
+  res.json({ token: createStaffToken(user), user: publicStaffUser(user) });
 }
 // Deliberately tighter than login. A forgotten-password link is sent to a real
 // inbox, so an unbounded endpoint is a mail-bombing target as well as a way to
@@ -455,10 +459,15 @@ router.post('/mfa/enable', authenticate, asyncHandler(async (req, res) => {
   const secret = user.mfa_pending_secret;
   const recoveryCodes = generateRecoveryCodes();
   const recoveryHashes = recoveryCodes.map(hashRecoveryCode);
+  const stamp = new Date().toISOString();
   await pool.query(
     `UPDATE users SET mfa_enabled = 1, mfa_secret = ?, mfa_pending_secret = NULL,
       mfa_recovery_codes = ?, password_changed_at = ?, updated_at = datetime('now') WHERE id = ?`,
-    [secret, JSON.stringify(recoveryHashes), new Date().toISOString(), req.user.id]
+    [secret, JSON.stringify(recoveryHashes), stamp, req.user.id]
+  );
+  const [updatedRows] = await pool.query(
+    'SELECT id, uuid, email, role, first_name, last_name, phone, password_changed_at, mfa_enabled FROM users WHERE id = ?',
+    [req.user.id]
   );
   await recordAudit({
     req,
@@ -471,6 +480,10 @@ router.post('/mfa/enable', authenticate, asyncHandler(async (req, res) => {
   res.json({
     message: 'MFA is enabled. Save these recovery codes somewhere safe; each can be used only once.',
     recovery_codes: recoveryCodes,
+    // Replace the current session with a token issued after the invalidation
+    // stamp, while every other device is forced to authenticate with MFA.
+    token: createStaffToken(updatedRows[0]),
+    user: publicStaffUser(updatedRows[0]),
   });
 }));
 
@@ -549,7 +562,7 @@ router.post('/mfa/recovery-codes/regenerate', authenticate, asyncHandler(async (
 
 router.get('/me', authenticate, asyncHandler(async (req, res) => {
   const [rows] = await pool.query(
-    'SELECT id, uuid, email, role, first_name, last_name, phone, avatar, created_at FROM users WHERE id = ?',
+    'SELECT id, uuid, email, role, first_name, last_name, phone, avatar, created_at, mfa_enabled FROM users WHERE id = ?',
     [req.user.id]
   );
   // The client renders every timestamp in the hospital's timezone so two staff
