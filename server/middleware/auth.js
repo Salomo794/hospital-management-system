@@ -19,10 +19,15 @@ const authenticate = async (req, res, next) => {
   } catch (_) {
     return res.status(401).json({ message: 'Invalid or expired token.' });
   }
+  // Password-authenticated MFA challenges are intentionally not application
+  // sessions. They may only be exchanged at POST /api/auth/login/mfa.
+  if (decoded.purpose === 'mfa-challenge') {
+    return res.status(401).json({ message: 'Complete multi-factor verification before using this session.' });
+  }
 
   try {
     const [rows] = await pool.query(
-      'SELECT id, uuid, email, role, first_name, last_name, is_active, password_changed_at FROM users WHERE id = ?',
+      'SELECT id, uuid, email, role, first_name, last_name, is_active, password_changed_at, mfa_enabled FROM users WHERE id = ?',
       [decoded.id]
     );
     if (rows.length === 0 || !rows[0].is_active) {
