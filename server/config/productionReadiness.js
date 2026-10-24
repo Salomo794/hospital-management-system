@@ -63,6 +63,11 @@ function productionReadinessErrors(env = process.env) {
     }
   }
 
+  const mfaKey = String(env.MFA_ENCRYPTION_KEY || '').trim();
+  if (mfaKey === 'REPLACE_ME' || mfaKey.length < 32) {
+    errors.push('MFA_ENCRYPTION_KEY must be a unique, non-placeholder secret of at least 32 characters, stored outside the repository.');
+  }
+
   const backupKey = String(env.BACKUP_ENCRYPTION_KEY || '').trim();
   if (PLACEHOLDER_BACKUP_KEYS.has(backupKey) || backupKey.length < 16) {
     errors.push('BACKUP_ENCRYPTION_KEY must be a non-placeholder secret of at least 16 characters, stored outside the repository.');
