@@ -420,4 +420,4 @@ npm run build
 NODE_ENV=production npm run server
 ```
 
-Use HTTPS, a strong `JWT_SECRET`, an explicit `CORS_ORIGINS` allowlist, encrypted database backups, and a process supervisor. SQLite database files and `.env` files are intentionally excluded from Git.
+Use HTTPS, a strong `JWT_SECRET`, a unique `MFA_ENCRYPTION_KEY` (at least 32 characters), an explicit `CORS_ORIGINS` allowlist, encrypted database backups, and a process supervisor. Production startup refuses to proceed if the MFA encryption key is missing or still a placeholder. SQLite database files and `.env` files are intentionally excluded from Git.
