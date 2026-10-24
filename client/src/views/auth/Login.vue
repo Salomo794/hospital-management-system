@@ -205,6 +205,7 @@ export default {
             challengeToken.value = result.challengeToken
             mfaStage.value = true
             mfaCode.value = ''
+            password.value = ''
           } else {
             finishSignIn()
           }
