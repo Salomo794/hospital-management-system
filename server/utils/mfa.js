@@ -98,12 +98,12 @@ function verifyTotp(secret, candidate, timeMs = Date.now()) {
 }
 
 function generateRecoveryCodes() {
-  return Array.from({ length: RECOVERY_CODE_COUNT }, () => crypto.randomBytes(8).toString('hex').toUpperCase());
+  return Array.from({ length: RECOVERY_CODE_COUNT }, () => crypto.randomBytes(12).toString('hex').toUpperCase());
 }
 
 function hashRecoveryCode(code) {
   const normalized = String(code || '').replace(/[^a-f0-9]/gi, '').toLowerCase();
-  if (!/^[a-f0-9]{16}$/.test(normalized)) return null;
+  if (!/^[a-f0-9]{24}$/.test(normalized)) return null;
   return crypto.createHash('sha256').update(normalized).digest('hex');
 }
 
