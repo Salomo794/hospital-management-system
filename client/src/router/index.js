@@ -51,7 +51,8 @@ const routes = [
       { path: 'reports', name: 'Reports', component: () => import('../views/reports/Reports.vue'), meta: { title: 'Reports', roles: ['admin', 'receptionist', 'doctor', 'nurse'] } },
       { path: 'ai-assistant', name: 'AI Assistant', component: () => import('../views/ai/AIAssistant.vue'), meta: { title: 'AI Assistant' } },
       { path: 'users', name: 'Users', component: () => import('../views/dashboard/Users.vue'), meta: { title: 'Users', roles: ['admin'] } },
-      { path: 'audit-log', name: 'AuditLog', component: () => import('../views/admin/AuditLog.vue'), meta: { title: 'Audit Log', roles: ['admin'] } }
+      { path: 'audit-log', name: 'AuditLog', component: () => import('../views/admin/AuditLog.vue'), meta: { title: 'Audit Log', roles: ['admin'] } },
+      { path: 'security', name: 'SecuritySettings', component: () => import('../views/settings/SecuritySettings.vue'), meta: { title: 'Security & MFA' } }
     ]
   },
   {
