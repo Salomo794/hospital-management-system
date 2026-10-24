@@ -10,6 +10,7 @@ const validEnvironment = {
   SMTP_USER: 'hms@example.org',
   SMTP_PASS: 'test-only-secret',
   BACKUP_ENCRYPTION_KEY: 'a-long-non-placeholder-backup-secret',
+  MFA_ENCRYPTION_KEY: 'a-long-non-placeholder-mfa-secret',
   DB_PATH: '/var/lib/hms/hospital.db',
 };
 
@@ -84,6 +85,13 @@ test('rejects missing email and weak or placeholder backup encryption configurat
     });
     assert.ok(errors.some(error => error.includes('SMTP_PASS')));
     assert.ok(errors.some(error => error.includes('BACKUP_ENCRYPTION_KEY')));
+  }
+});
+
+test('rejects missing or placeholder MFA encryption configuration', () => {
+  for (const MFA_ENCRYPTION_KEY of ['', 'REPLACE_ME', 'too-short']) {
+    const errors = productionReadinessErrors({ ...validEnvironment, MFA_ENCRYPTION_KEY });
+    assert.ok(errors.some(error => error.includes('MFA_ENCRYPTION_KEY')));
   }
 });
 
