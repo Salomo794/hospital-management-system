@@ -88,6 +88,16 @@ router.put('/:id', authenticate, authorize('admin'), writePatientData, asyncHand
   if (updates.length === 0) throw new ApiError(400, 'No fields to update');
   const [existing] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
   if (existing.length === 0) throw new ApiError(404, 'User not found');
+  // Never let an ordinary admin edit remove the last active administrator.
+  // Otherwise a typo can permanently lock the hospital out of staff management.
+  const wouldLoseActiveAdmin = existing[0].role === 'admin' && Boolean(existing[0].is_active)
+    && ((role !== undefined && role !== 'admin') || is_active === false);
+  if (wouldLoseActiveAdmin) {
+    const [admins] = await pool.query("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND is_active = 1");
+    if (Number(admins[0]?.count || 0) <= 1) {
+      throw new ApiError(409, 'The last active administrator cannot be demoted or deactivated.');
+    }
+  }
   values.push(id);
   const [result] = await pool.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, values);
   if (result.affectedRows === 0) throw new ApiError(404, 'User not found');
@@ -111,6 +121,12 @@ router.delete('/:id', authenticate, authorize('admin'), writePatientData, asyncH
   if (id === req.user.id) throw new ApiError(400, 'You cannot deactivate your own account');
   const [existing] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
   if (existing.length === 0) throw new ApiError(404, 'User not found');
+  if (existing[0].role === 'admin' && existing[0].is_active) {
+    const [admins] = await pool.query("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND is_active = 1");
+    if (Number(admins[0]?.count || 0) <= 1) {
+      throw new ApiError(409, 'The last active administrator cannot be deactivated.');
+    }
+  }
   const [result] = await pool.query('UPDATE users SET is_active = FALSE WHERE id = ?', [id]);
   if (result.affectedRows === 0) throw new ApiError(404, 'User not found');
   await recordAudit({
