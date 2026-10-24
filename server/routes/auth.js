@@ -368,36 +368,45 @@ router.post('/login/mfa', asyncHandler(async (req, res) => {
   }
 
   assertMfaConfigured();
-  const [rows] = await pool.query(
-    'SELECT id, uuid, email, role, first_name, last_name, phone, password_changed_at, is_active, mfa_enabled, mfa_secret, mfa_recovery_codes FROM users WHERE id = ?',
-    [challenge.id]
-  );
-  const user = rows[0];
-  if (!user || !user.is_active || !user.mfa_enabled || (user.password_changed_at || '0') !== (challenge.pwd || '0')) {
-    throw new ApiError(401, 'The sign-in challenge is no longer valid. Please sign in again.');
-  }
-
-  let valid = false;
-  let updatedRecoveryCodes = null;
-  try {
-    valid = verifyTotp(decryptSecret(user.mfa_secret), code);
-  } catch (_) {
-    throw new ApiError(503, 'Multi-factor authentication could not be verified. Contact your administrator.');
-  }
-
-  if (!valid) {
-    let recoveryCodes = [];
-    try {
-      recoveryCodes = JSON.parse(user.mfa_recovery_codes || '[]');
-    } catch (_) {
-      recoveryCodes = [];
+  // Read and consume a recovery code in one SQLite transaction. Without
+  // this boundary, two simultaneous requests could both accept the same code.
+  const verification = await withTransaction(pool, async connection => {
+    const [rows] = await connection.query(
+      'SELECT id, uuid, email, role, first_name, last_name, phone, password_changed_at, is_active, mfa_enabled, mfa_secret, mfa_recovery_codes FROM users WHERE id = ?',
+      [challenge.id]
+    );
+    const user = rows[0];
+    if (!user || !user.is_active || !user.mfa_enabled || (user.password_changed_at || '0') !== (challenge.pwd || '0')) {
+      throw new ApiError(401, 'The sign-in challenge is no longer valid. Please sign in again.');
     }
-    const consumed = consumeRecoveryCode(code, recoveryCodes);
-    valid = consumed.valid;
-    if (valid) updatedRecoveryCodes = JSON.stringify(consumed.hashes);
-  }
 
-  if (!valid) {
+    let valid = false;
+    try {
+      valid = verifyTotp(decryptSecret(user.mfa_secret), code);
+    } catch (_) {
+      throw new ApiError(503, 'Multi-factor authentication could not be verified. Contact your administrator.');
+    }
+
+    if (!valid) {
+      let recoveryCodes = [];
+      try {
+        recoveryCodes = JSON.parse(user.mfa_recovery_codes || '[]');
+      } catch (_) {
+        recoveryCodes = [];
+      }
+      const consumed = consumeRecoveryCode(code, recoveryCodes);
+      valid = consumed.valid;
+      if (valid) {
+        await connection.query('UPDATE users SET mfa_recovery_codes = ? WHERE id = ?', [
+          JSON.stringify(consumed.hashes),
+          user.id,
+        ]);
+      }
+    }
+    return { user, valid };
+  });
+  const user = verification.user;
+  if (!verification.valid) {
     await recordAudit({
       req,
       action: 'auth.mfa.verification_failed',
@@ -407,10 +416,6 @@ router.post('/login/mfa', asyncHandler(async (req, res) => {
       actor: { userId: user.id, type: 'staff', label: user.email },
     });
     throw new ApiError(401, 'Invalid authenticator or recovery code.');
-  }
-
-  if (updatedRecoveryCodes !== null) {
-    await pool.query('UPDATE users SET mfa_recovery_codes = ? WHERE id = ?', [updatedRecoveryCodes, user.id]);
   }
   mfaByIp.reset(`ip:${req.ip}`);
   mfaByChallenge.reset(`challenge:${challenge.jti}`);
