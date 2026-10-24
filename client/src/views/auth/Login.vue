@@ -61,10 +61,11 @@
         <form @submit.prevent="handleLogin" class="login-form" novalidate>
           <div class="form-heading">
             <span class="form-eyebrow">Secure Access</span>
-            <h2>Welcome Back</h2>
-            <p class="subtitle">Sign in to your account to continue</p>
+            <h2>{{ mfaStage ? 'Verify your identity' : 'Welcome Back' }}</h2>
+            <p class="subtitle">{{ mfaStage ? 'Enter a six-digit authenticator code or one-time recovery code.' : 'Sign in to your account to continue' }}</p>
           </div>
 
+          <template v-if="!mfaStage">
           <div class="form-group" :class="{ 'has-error': emailTouched && !email.trim() }">
             <label>Email Address</label>
             <input
@@ -94,16 +95,35 @@
             <span class="field-error" v-if="passwordTouched && !password">Password is required</span>
           </div>
 
-          <button type="submit" class="btn btn-primary btn-block" :disabled="loading">
-            <span v-if="loading" class="btn-spinner"></span>
-            {{ loading ? 'Signing in...' : 'Sign In' }}
-          </button>
+          </template>
 
-          <div class="form-links">
-            <router-link to="/forgot-password">Forgot password?</router-link>
+          <div v-else class="form-group">
+            <label for="mfa-code">Authenticator or recovery code</label>
+            <input
+              id="mfa-code"
+              v-model="mfaCode"
+              type="text"
+              inputmode="text"
+              autocomplete="one-time-code"
+              maxlength="32"
+              placeholder="Enter your code"
+              autofocus
+            />
           </div>
 
-          <div class="demo-accounts">
+          <button type="submit" class="btn btn-primary btn-block" :disabled="loading">
+            <span v-if="loading" class="btn-spinner"></span>
+            {{ loading ? 'Verifying...' : (mfaStage ? 'Verify and Sign In' : 'Sign In') }}
+          </button>
+
+          <div class="form-links" v-if="!mfaStage">
+            <router-link to="/forgot-password">Forgot password?</router-link>
+          </div>
+          <div class="form-links" v-else>
+            <button type="button" class="link-button" @click="backToPassword" :disabled="loading">Back to password sign-in</button>
+          </div>
+
+          <div class="demo-accounts" v-if="!mfaStage">
             <p class="demo-title">Quick demo access</p>
             <div class="demo-list">
               <button type="button" class="demo-btn" @click="fillDemo('admin@hospital.com')">Admin</button>
@@ -147,29 +167,61 @@ export default {
     const emailTouched = ref(false)
     const passwordTouched = ref(false)
     const showPassword = ref(false)
+    const mfaStage = ref(false)
+    const mfaCode = ref('')
+    const challengeToken = ref('')
+
+    const finishSignIn = () => {
+      toast.success('Login successful!')
+      const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
+        ? route.query.redirect
+        : '/dashboard'
+      router.push(redirect)
+    }
 
     const handleLogin = async () => {
-      emailTouched.value = true
-      passwordTouched.value = true
-
-      if (!email.value.trim() || !password.value) {
-        toast.warning('Please fill in all fields.')
-        return
+      if (mfaStage.value) {
+        if (!mfaCode.value.trim()) {
+          toast.warning('Enter your authenticator or recovery code.')
+          return
+        }
+      } else {
+        emailTouched.value = true
+        passwordTouched.value = true
+        if (!email.value.trim() || !password.value) {
+          toast.warning('Please fill in all fields.')
+          return
+        }
       }
 
       loading.value = true
       try {
-        await authStore.login(email.value, password.value)
-        toast.success('Login successful!')
-        const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
-          ? route.query.redirect
-          : '/dashboard'
-        router.push(redirect)
+        if (mfaStage.value) {
+          await authStore.completeMfaLogin(challengeToken.value, mfaCode.value.trim())
+          finishSignIn()
+        } else {
+          const result = await authStore.login(email.value, password.value)
+          if (result.mfaRequired) {
+            challengeToken.value = result.challengeToken
+            mfaStage.value = true
+            mfaCode.value = ''
+          } else {
+            finishSignIn()
+          }
+        }
       } catch (e) {
-        toast.error(e.response?.data?.message || 'Login failed. Please check your credentials.')
+        toast.error(e.response?.data?.message || (mfaStage.value
+          ? 'Verification failed. Check the code and try again.'
+          : 'Login failed. Please check your credentials.'))
       } finally {
         loading.value = false
       }
+    }
+
+    const backToPassword = () => {
+      mfaStage.value = false
+      challengeToken.value = ''
+      mfaCode.value = ''
     }
 
     const fillDemo = (emailAddr) => {
@@ -181,7 +233,7 @@ export default {
 
     return {
       email, password, loading, emailTouched, passwordTouched, showPassword,
-      handleLogin, fillDemo, brandIcon, eyeIcon, eyeOffIcon
+      mfaStage, mfaCode, handleLogin, backToPassword, fillDemo, brandIcon, eyeIcon, eyeOffIcon
     }
   }
 }
