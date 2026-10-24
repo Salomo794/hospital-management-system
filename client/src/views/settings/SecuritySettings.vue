@@ -32,7 +32,7 @@
 
       <div v-if="setupInfo && !mfaEnabled" class="setup-panel">
         <h3>1. Add your account to the authenticator app</h3>
-        <p>Scan the otpauth URI with a QR scanner that supports authenticator setup, or enter this secret manually.</p>
+        <p>In your authenticator app, choose the option to enter a setup key manually and use the secret below. The URI is provided for compatible apps; it is not a QR image.</p>
         <label for="mfa-secret">Setup secret</label>
         <code id="mfa-secret" class="secret">{{ setupInfo.secret }}</code>
         <label for="mfa-uri">Authenticator URI</label>
