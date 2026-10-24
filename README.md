@@ -298,6 +298,29 @@ The create-user form and the change-password dialog in the header menu both appl
 
 Demo seeding still writes `password123` for the fixture accounts, because those are development credentials and the README says as much. The policy would refuse that password for a real account.
 
+### Multi-factor authentication (MFA)
+
+Staff accounts can use time-based one-time passwords (TOTP) from an authenticator app. MFA is opt-in per staff account, and existing accounts remain usable until each person enrolls. TOTP secrets are encrypted with AES-256-GCM before they are stored; recovery codes are stored only as SHA-256 hashes and each code can be used once.
+
+Before enabling MFA, set a separate secret in the private `server/.env` file. Do not commit it:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+Copy the generated value to `MFA_ENCRYPTION_KEY`. Keep a secure backup of this key separate from the database. If it is lost or changed, existing encrypted MFA secrets cannot be decrypted and affected staff will need an administrator-led recovery/re-enrollment process. The example value `REPLACE_ME` is deliberately rejected.
+
+MFA API flow (all routes are under `/api/auth`):
+
+1. Sign in with email and password as usual.
+2. For an account without MFA, `POST /login` returns a normal session token. For an account with MFA, it returns `mfa_required: true` and a five-minute `challenge_token`, not an application session.
+3. With a valid staff Bearer token, call `POST /mfa/setup`. Add the returned `otpauth_url` to an authenticator app (or enter the returned secret manually).
+4. Submit the current six-digit authenticator code to `POST /mfa/enable`. Save the recovery codes from the response; they are shown only once.
+5. Finish MFA sign-in with `POST /login/mfa`, sending `challenge_token` and the six-digit code (or one unused recovery code). A challenge token cannot access other API routes.
+6. To disable MFA, `POST /mfa/disable` requires the current password and authenticator code. To replace recovery codes, `POST /mfa/recovery-codes/regenerate` also requires both. Both operations require an authenticated session.
+
+Enabling or disabling MFA invalidates existing sessions so they must sign in again. Verification attempts are rate-limited and MFA events are audited. The API endpoints are implemented here; a staff-facing setup screen still needs to be added to the client before this flow is convenient for non-technical users.
+
 ### Phone numbers
 
 Every field that holds a phone number — a staff account, the self-service profile, a patient, and a patient's emergency contact — accepts digits only, between 4 and 20 of them. One rule lives in `server/utils/phone.js` and is applied through `middleware/validation.js`; `client/src/utils/phone.js` mirrors it so a form can explain the problem while it is being typed, with a numeric keypad offered on a phone.
