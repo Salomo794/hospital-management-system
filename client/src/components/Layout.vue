@@ -132,6 +132,10 @@
                   <span v-html="icons.key" />
                   Change password
                 </button>
+                <router-link class="dropdown-item" to="/security" @click="dropdownOpen = false">
+                  <span v-html="icons.key" />
+                  Security &amp; MFA
+                </router-link>
                 <button class="dropdown-item dropdown-item--danger" @click="logout">
                   <span v-html="icons.logout" />
                   Sign out

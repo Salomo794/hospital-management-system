@@ -11,6 +11,16 @@ const { FixedWindowRateLimiter } = require('../utils/rateLimiter');
 const { recordAudit, pick } = require('../utils/audit');
 const { appTimezone } = require('../config/time');
 const { validatePassword } = require('../utils/passwordPolicy');
+const {
+  generateSecret,
+  encryptSecret,
+  decryptSecret,
+  verifyTotp,
+  generateRecoveryCodes,
+  hashRecoveryCode,
+  consumeRecoveryCode,
+  otpauthUrl,
+} = require('../utils/mfa');
 const { phoneDigitsOnly, phoneProblem, normalisePhone, PHONE_MIN_DIGITS, PHONE_MAX_DIGITS } = require('../utils/phone');
 const { withTransaction } = require('../utils/http');
 const mailer = require('../services/mailer');
@@ -23,6 +33,51 @@ const {
 
 const loginByIdentifier = new FixedWindowRateLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
 const loginByIp = new FixedWindowRateLimiter({ windowMs: 15 * 60 * 1000, max: 30 });
+const mfaByIp = new FixedWindowRateLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
+const mfaByChallenge = new FixedWindowRateLimiter({ windowMs: 5 * 60 * 1000, max: 6 });
+
+function assertMfaConfigured() {
+  if (typeof process.env.MFA_ENCRYPTION_KEY !== 'string'
+      || process.env.MFA_ENCRYPTION_KEY.length < 32
+      || process.env.MFA_ENCRYPTION_KEY === 'REPLACE_ME') {
+    throw new ApiError(503, 'Multi-factor authentication is not configured on this server.');
+  }
+}
+
+function createStaffToken(user) {
+  return jwt.sign(
+    { id: user.id, role: user.role, pwd: user.password_changed_at || '0', jti: randomUUID() },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRE || '7d' }
+  );
+}
+
+function publicStaffUser(user) {
+  return {
+    id: user.id,
+    uuid: user.uuid,
+    email: user.email,
+    role: user.role,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    phone: user.phone,
+    mfa_enabled: Boolean(user.mfa_enabled),
+    timezone: appTimezone(),
+  };
+}
+
+async function issueStaffSession(req, res, user) {
+  await pool.query("UPDATE users SET last_login = datetime('now') WHERE id = ?", [user.id]);
+  await recordAudit({
+    req,
+    action: 'auth.login.succeeded',
+    table: 'users',
+    recordId: user.id,
+    summary: `${user.email} signed in`,
+    actor: { userId: user.id, type: 'staff', label: user.email },
+  });
+  res.json({ token: createStaffToken(user), user: publicStaffUser(user) });
+}
 // Deliberately tighter than login. A forgotten-password link is sent to a real
 // inbox, so an unbounded endpoint is a mail-bombing target as well as a way to
 // enumerate which staff addresses exist.
@@ -269,50 +324,250 @@ router.post('/login', asyncHandler(async (req, res) => {
 
   loginByIdentifier.reset(identifierKey);
   loginByIp.reset(ipKey);
-  await pool.query("UPDATE users SET last_login = datetime('now') WHERE id = ?", [user.id]);
+
+  if (user.mfa_enabled) {
+    assertMfaConfigured();
+    const challengeToken = jwt.sign(
+      { id: user.id, pwd: user.password_changed_at || '0', purpose: 'mfa-challenge', jti: randomUUID() },
+      process.env.JWT_SECRET,
+      { expiresIn: '5m' }
+    );
+    await recordAudit({
+      req,
+      action: 'auth.mfa.challenge_issued',
+      table: 'users',
+      recordId: user.id,
+      summary: `MFA challenge issued for ${user.email}`,
+      actor: { userId: user.id, type: 'staff', label: user.email },
+    });
+    return res.json({ mfa_required: true, challenge_token: challengeToken, expires_in_seconds: 300 });
+  }
+
+  return issueStaffSession(req, res, user);
+}));
+
+router.post('/login/mfa', asyncHandler(async (req, res) => {
+  const challengeToken = typeof req.body?.challenge_token === 'string' ? req.body.challenge_token : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  if (!challengeToken || !code) throw new ApiError(400, 'A challenge token and authenticator code are required.');
+
+  const ipLimit = mfaByIp.consume(`ip:${req.ip}`);
+  let challenge;
+  try {
+    challenge = jwt.verify(challengeToken, process.env.JWT_SECRET);
+  } catch (_) {
+    throw new ApiError(401, 'The sign-in challenge is invalid or expired. Please sign in again.');
+  }
+  if (challenge.purpose !== 'mfa-challenge' || !challenge.id || !challenge.jti) {
+    throw new ApiError(401, 'The sign-in challenge is invalid or expired. Please sign in again.');
+  }
+  const challengeLimit = mfaByChallenge.consume(`challenge:${challenge.jti}`);
+  if (!ipLimit.allowed || !challengeLimit.allowed) {
+    res.setHeader('Retry-After', Math.max(ipLimit.retryAfterSeconds, challengeLimit.retryAfterSeconds));
+    throw new ApiError(429, 'Too many verification attempts. Please sign in again later.');
+  }
+
+  assertMfaConfigured();
+  // Read and consume a recovery code in one SQLite transaction. Without
+  // this boundary, two simultaneous requests could both accept the same code.
+  const verification = await withTransaction(pool, async connection => {
+    const [rows] = await connection.query(
+      'SELECT id, uuid, email, role, first_name, last_name, phone, password_changed_at, is_active, mfa_enabled, mfa_secret, mfa_recovery_codes FROM users WHERE id = ?',
+      [challenge.id]
+    );
+    const user = rows[0];
+    if (!user || !user.is_active || !user.mfa_enabled || (user.password_changed_at || '0') !== (challenge.pwd || '0')) {
+      throw new ApiError(401, 'The sign-in challenge is no longer valid. Please sign in again.');
+    }
+
+    let valid = false;
+    try {
+      valid = verifyTotp(decryptSecret(user.mfa_secret), code);
+    } catch (_) {
+      throw new ApiError(503, 'Multi-factor authentication could not be verified. Contact your administrator.');
+    }
+
+    if (!valid) {
+      let recoveryCodes = [];
+      try {
+        recoveryCodes = JSON.parse(user.mfa_recovery_codes || '[]');
+      } catch (_) {
+        recoveryCodes = [];
+      }
+      const consumed = consumeRecoveryCode(code, recoveryCodes);
+      valid = consumed.valid;
+      if (valid) {
+        await connection.query('UPDATE users SET mfa_recovery_codes = ? WHERE id = ?', [
+          JSON.stringify(consumed.hashes),
+          user.id,
+        ]);
+      }
+    }
+    return { user, valid };
+  });
+  const user = verification.user;
+  if (!verification.valid) {
+    await recordAudit({
+      req,
+      action: 'auth.mfa.verification_failed',
+      table: 'users',
+      recordId: user.id,
+      summary: `MFA verification failed for ${user.email}`,
+      actor: { userId: user.id, type: 'staff', label: user.email },
+    });
+    throw new ApiError(401, 'Invalid authenticator or recovery code.');
+  }
+  mfaByIp.reset(`ip:${req.ip}`);
+  mfaByChallenge.reset(`challenge:${challenge.jti}`);
+  return issueStaffSession(req, res, user);
+}));
+
+router.post('/mfa/setup', authenticate, asyncHandler(async (req, res) => {
+  assertMfaConfigured();
+  const [rows] = await pool.query('SELECT email, mfa_enabled FROM users WHERE id = ?', [req.user.id]);
+  if (!rows[0]) throw new ApiError(404, 'User not found.');
+  if (rows[0].mfa_enabled) throw new ApiError(409, 'Multi-factor authentication is already enabled.');
+  const secret = generateSecret();
+  await pool.query('UPDATE users SET mfa_pending_secret = ? WHERE id = ?', [encryptSecret(secret), req.user.id]);
   await recordAudit({
     req,
-    action: 'auth.login.succeeded',
+    action: 'auth.mfa.setup_started',
     table: 'users',
-    recordId: user.id,
-    summary: `${user.email} signed in`,
-    // The authenticate middleware has not run on this route, so name the actor
-    // explicitly rather than leaving the entry unattributed.
-    actor: { userId: user.id, type: 'staff', label: user.email },
+    recordId: req.user.id,
+    summary: 'Authenticator enrollment started',
   });
-  const token = jwt.sign(
-    // Carried so the middleware can tell a session issued before the current
-    // password from one issued after it. `0` for an account that has never
-    // changed its password, which is every account predating this field.
-    //
-    // jti is what makes two sign-ins two sessions. Without it every claim here is
-    // derived from the account and the clock, so signing in twice inside the same
-    // second produced byte-identical tokens: the same bearer credential on two
-    // devices, indistinguishable and individually unrevocable. It costs 36
-    // characters and makes a session addressable.
-    { id: user.id, role: user.role, pwd: user.password_changed_at || '0', jti: randomUUID() },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRE || '7d' }
-  );
   res.json({
-    token,
-    user: {
-      id: user.id,
-      uuid: user.uuid,
-      email: user.email,
-      role: user.role,
-      first_name: user.first_name,
-      last_name: user.last_name,
-      phone: user.phone,
-      // Sent on sign-in so the client can render times correctly straight away.
-      timezone: appTimezone(),
-    },
+    secret,
+    otpauth_url: otpauthUrl(secret, rows[0].email),
+    message: 'Add this account to an authenticator app, then submit its current six-digit code to /api/auth/mfa/enable.',
+  });
+}));
+
+router.post('/mfa/enable', authenticate, asyncHandler(async (req, res) => {
+  assertMfaConfigured();
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  if (!code) throw new ApiError(400, 'An authenticator code is required.');
+  const [rows] = await pool.query('SELECT email, mfa_pending_secret, mfa_enabled FROM users WHERE id = ?', [req.user.id]);
+  const user = rows[0];
+  if (!user) throw new ApiError(404, 'User not found.');
+  if (user.mfa_enabled) throw new ApiError(409, 'Multi-factor authentication is already enabled.');
+  if (!user.mfa_pending_secret) throw new ApiError(400, 'Start MFA setup before enabling it.');
+
+  let valid = false;
+  try {
+    valid = verifyTotp(decryptSecret(user.mfa_pending_secret), code);
+  } catch (_) {
+    throw new ApiError(503, 'Multi-factor authentication could not be verified. Contact your administrator.');
+  }
+  if (!valid) throw new ApiError(400, 'The authenticator code is invalid. Check your device time and try again.');
+
+  const secret = user.mfa_pending_secret;
+  const recoveryCodes = generateRecoveryCodes();
+  const recoveryHashes = recoveryCodes.map(hashRecoveryCode);
+  const stamp = new Date().toISOString();
+  await pool.query(
+    `UPDATE users SET mfa_enabled = 1, mfa_secret = ?, mfa_pending_secret = NULL,
+      mfa_recovery_codes = ?, password_changed_at = ?, updated_at = datetime('now') WHERE id = ?`,
+    [secret, JSON.stringify(recoveryHashes), stamp, req.user.id]
+  );
+  const [updatedRows] = await pool.query(
+    'SELECT id, uuid, email, role, first_name, last_name, phone, password_changed_at, mfa_enabled FROM users WHERE id = ?',
+    [req.user.id]
+  );
+  await recordAudit({
+    req,
+    action: 'auth.mfa.enabled',
+    table: 'users',
+    recordId: req.user.id,
+    summary: 'Authenticator MFA enabled; existing sessions invalidated',
+    after: { mfa_enabled: true, sessions_invalidated: true, recovery_codes_issued: recoveryCodes.length },
+  });
+  res.json({
+    message: 'MFA is enabled. Save these recovery codes somewhere safe; each can be used only once.',
+    recovery_codes: recoveryCodes,
+    // Replace the current session with a token issued after the invalidation
+    // stamp, while every other device is forced to authenticate with MFA.
+    token: createStaffToken(updatedRows[0]),
+    user: publicStaffUser(updatedRows[0]),
+  });
+}));
+
+router.post('/mfa/disable', authenticate, asyncHandler(async (req, res) => {
+  assertMfaConfigured();
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  if (!password || !code) throw new ApiError(400, 'Your password and current authenticator code are required.');
+  const [rows] = await pool.query('SELECT password, mfa_enabled, mfa_secret FROM users WHERE id = ?', [req.user.id]);
+  const user = rows[0];
+  if (!user) throw new ApiError(404, 'User not found.');
+  if (!user.mfa_enabled) throw new ApiError(409, 'Multi-factor authentication is not enabled.');
+  if (!(await bcrypt.compare(password, user.password))) throw new ApiError(401, 'Password is incorrect.');
+
+  let valid = false;
+  try {
+    valid = verifyTotp(decryptSecret(user.mfa_secret), code);
+  } catch (_) {
+    throw new ApiError(503, 'Multi-factor authentication could not be verified. Contact your administrator.');
+  }
+  if (!valid) throw new ApiError(401, 'The authenticator code is invalid.');
+
+  await pool.query(
+    `UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_pending_secret = NULL,
+      mfa_recovery_codes = NULL, password_changed_at = ?, updated_at = datetime('now') WHERE id = ?`,
+    [new Date().toISOString(), req.user.id]
+  );
+  await recordAudit({
+    req,
+    action: 'auth.mfa.disabled',
+    table: 'users',
+    recordId: req.user.id,
+    summary: 'Authenticator MFA disabled; existing sessions invalidated',
+    after: { mfa_enabled: false, sessions_invalidated: true },
+  });
+  res.json({ message: 'MFA has been disabled. Please sign in again.' });
+}));
+
+router.post('/mfa/recovery-codes/regenerate', authenticate, asyncHandler(async (req, res) => {
+  assertMfaConfigured();
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  if (!password || !code) throw new ApiError(400, 'Your password and current authenticator code are required.');
+  const [rows] = await pool.query('SELECT password, mfa_enabled, mfa_secret FROM users WHERE id = ?', [req.user.id]);
+  const user = rows[0];
+  if (!user) throw new ApiError(404, 'User not found.');
+  if (!user.mfa_enabled) throw new ApiError(409, 'Enable MFA before generating recovery codes.');
+  if (!(await bcrypt.compare(password, user.password))) throw new ApiError(401, 'Password is incorrect.');
+
+  let valid = false;
+  try {
+    valid = verifyTotp(decryptSecret(user.mfa_secret), code);
+  } catch (_) {
+    throw new ApiError(503, 'Multi-factor authentication could not be verified. Contact your administrator.');
+  }
+  if (!valid) throw new ApiError(401, 'The authenticator code is invalid.');
+
+  const recoveryCodes = generateRecoveryCodes();
+  await pool.query('UPDATE users SET mfa_recovery_codes = ? WHERE id = ?', [
+    JSON.stringify(recoveryCodes.map(hashRecoveryCode)),
+    req.user.id,
+  ]);
+  await recordAudit({
+    req,
+    action: 'auth.mfa.recovery_codes_regenerated',
+    table: 'users',
+    recordId: req.user.id,
+    summary: 'MFA recovery codes regenerated; previous codes invalidated',
+    after: { recovery_codes_issued: recoveryCodes.length },
+  });
+  res.json({
+    message: 'Store these new recovery codes safely. All previous recovery codes are now invalid.',
+    recovery_codes: recoveryCodes,
   });
 }));
 
 router.get('/me', authenticate, asyncHandler(async (req, res) => {
   const [rows] = await pool.query(
-    'SELECT id, uuid, email, role, first_name, last_name, phone, avatar, created_at FROM users WHERE id = ?',
+    'SELECT id, uuid, email, role, first_name, last_name, phone, avatar, created_at, mfa_enabled FROM users WHERE id = ?',
     [req.user.id]
   );
   // The client renders every timestamp in the hospital's timezone so two staff

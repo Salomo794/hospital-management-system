@@ -26,6 +26,11 @@ async function setup() {
       -- session that predates it - including one held by whoever prompted the
       -- reset. Without this a password reset would not actually lock anyone out.
       password_changed_at TEXT,
+      -- TOTP secrets are AES-256-GCM encrypted; recovery codes are stored as hashes.
+      mfa_enabled INTEGER NOT NULL DEFAULT 0,
+      mfa_secret TEXT,
+      mfa_pending_secret TEXT,
+      mfa_recovery_codes TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     )`);

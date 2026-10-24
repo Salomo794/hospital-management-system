@@ -25,14 +25,29 @@ export const useAuthStore = defineStore('auth', {
     can(...roles) {
       return roles.length === 0 || roles.includes(this.userRole)
     },
-    async login(email, password) {
-      const { data } = await axios.post('/api/auth/login', { email, password })
+    applySession(data) {
       this.token = data.token
       this.user = data.user
       if (data.user?.timezone) setDisplayZone(data.user.timezone)
       setStoredItem('token', data.token)
       setStoredJson('user', data.user)
       axios.defaults.headers.common.Authorization = `Bearer ${data.token}`
+    },
+    async login(email, password) {
+      const { data } = await axios.post('/api/auth/login', { email, password })
+      if (data.mfa_required) {
+        return { mfaRequired: true, challengeToken: data.challenge_token }
+      }
+      this.applySession(data)
+      return { mfaRequired: false }
+    },
+    async completeMfaLogin(challengeToken, code) {
+      const { data } = await axios.post('/api/auth/login/mfa', {
+        challenge_token: challengeToken,
+        code
+      })
+      this.applySession(data)
+      return data
     },
     // Updates the signed-in user's own display name and phone. The server
     // re-reads the user on every request, so the new name applies immediately
@@ -82,7 +97,7 @@ export const useAuthStore = defineStore('auth', {
           response => response,
           error => {
             const url = String(error.config?.url || '')
-            const isPublicAuthRequest = /\/api\/auth\/(login|register)(?:\?|$)/.test(url)
+            const isPublicAuthRequest = /\/api\/auth\/(login(?:\/mfa)?|register)(?:\?|$)/.test(url)
             if (error.response?.status === 401 && !isPublicAuthRequest) {
               this.logout()
               if (window.location.pathname !== '/login') {

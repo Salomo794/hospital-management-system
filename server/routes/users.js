@@ -86,14 +86,27 @@ router.put('/:id', authenticate, authorize('admin'), writePatientData, asyncHand
     }
   }
   if (updates.length === 0) throw new ApiError(400, 'No fields to update');
-  const [existing] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
-  if (existing.length === 0) throw new ApiError(404, 'User not found');
   values.push(id);
-  const [result] = await pool.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, values);
-  if (result.affectedRows === 0) throw new ApiError(404, 'User not found');
-  const [updated] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
-  const before = pick(existing[0], AUDITED_FIELDS);
-  const after = pick(updated[0], AUDITED_FIELDS);
+  const changed = await pool.runTransaction(async connection => {
+    const [existing] = await connection.query('SELECT * FROM users WHERE id = ?', [id]);
+    if (existing.length === 0) throw new ApiError(404, 'User not found');
+    // Count and update within the same transaction so concurrent admin actions
+    // cannot remove the final active administrator.
+    const wouldLoseActiveAdmin = existing[0].role === 'admin' && Boolean(existing[0].is_active)
+      && ((role !== undefined && role !== 'admin') || is_active === false);
+    if (wouldLoseActiveAdmin) {
+      const [admins] = await connection.query("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND is_active = 1");
+      if (Number(admins[0]?.count || 0) <= 1) {
+        throw new ApiError(409, 'The last active administrator cannot be demoted or deactivated.');
+      }
+    }
+    const [result] = await connection.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, values);
+    if (result.affectedRows === 0) throw new ApiError(404, 'User not found');
+    const [updated] = await connection.query('SELECT * FROM users WHERE id = ?', [id]);
+    return { before: existing[0], after: updated[0] };
+  });
+  const before = pick(changed.before, AUDITED_FIELDS);
+  const after = pick(changed.after, AUDITED_FIELDS);
   await recordAudit({
     req,
     action: 'user.updated',
@@ -109,18 +122,27 @@ router.put('/:id', authenticate, authorize('admin'), writePatientData, asyncHand
 router.delete('/:id', authenticate, authorize('admin'), writePatientData, asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   if (id === req.user.id) throw new ApiError(400, 'You cannot deactivate your own account');
-  const [existing] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
-  if (existing.length === 0) throw new ApiError(404, 'User not found');
-  const [result] = await pool.query('UPDATE users SET is_active = FALSE WHERE id = ?', [id]);
-  if (result.affectedRows === 0) throw new ApiError(404, 'User not found');
+  const existing = await pool.runTransaction(async connection => {
+    const [rows] = await connection.query('SELECT * FROM users WHERE id = ?', [id]);
+    if (rows.length === 0) throw new ApiError(404, 'User not found');
+    if (rows[0].role === 'admin' && rows[0].is_active) {
+      const [admins] = await connection.query("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND is_active = 1");
+      if (Number(admins[0]?.count || 0) <= 1) {
+        throw new ApiError(409, 'The last active administrator cannot be deactivated.');
+      }
+    }
+    const [result] = await connection.query('UPDATE users SET is_active = FALSE WHERE id = ?', [id]);
+    if (result.affectedRows === 0) throw new ApiError(404, 'User not found');
+    return rows[0];
+  });
   await recordAudit({
     req,
     action: 'user.deactivated',
     table: 'users',
     recordId: id,
-    summary: `Deactivated ${existing[0].email}`,
-    before: pick(existing[0], AUDITED_FIELDS),
-    after: pick({ ...existing[0], is_active: 0 }, AUDITED_FIELDS),
+    summary: `Deactivated ${existing.email}`,
+    before: pick(existing, AUDITED_FIELDS),
+    after: pick({ ...existing, is_active: 0 }, AUDITED_FIELDS),
   });
   res.json({ message: 'User deactivated' });
 }));

@@ -10,6 +10,7 @@ const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'hms-test-'));
 const dbPath = path.join(tempDirectory, 'hospital.test.db');
 process.env.DB_PATH = dbPath;
 process.env.JWT_SECRET = 'test-secret-that-is-at-least-32-characters-long';
+process.env.MFA_ENCRYPTION_KEY = 'test-mfa-encryption-key-that-is-long-enough-123456789';
 process.env.NODE_ENV = 'test';
 process.env.ALLOW_SIMULATED_PAYMENTS = 'true';
 // The mock rail exercises the real pending -> settled lifecycle without a
@@ -24,6 +25,7 @@ const pool = require('../config/database');
 const rateLimit = require('../middleware/rateLimit');
 const { evaluateSafety } = require('../utils/safety');
 const { settleMockCharge, getMockCharge, mockWebhookSignature } = require('../services/mobileMoney');
+const { totpCode } = require('../utils/mfa');
 
 // Signs and posts exactly these bytes. Supertest re-serialises an object, so the
 // signature has to be computed over the literal string that goes on the wire.
@@ -1436,4 +1438,100 @@ test('dashboard returns role-filtered data and seven weekly buckets', async () =
   assert.equal(typeof pharmacistDashboard.body.stats.lowStockMedications, 'number');
   assert.equal(pharmacistDashboard.body.stats.pendingLabOrders, null);
   assert.deepEqual(pharmacistDashboard.body.weeklyStats, []);
+});
+
+
+test('staff MFA requires a second factor, consumes recovery codes once, and protects the last admin', async () => {
+  const adminToken = await login();
+  const setup = await request(app)
+    .post('/api/auth/mfa/setup')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({})
+    .expect(200);
+  assert.ok(setup.body.secret);
+  assert.match(setup.body.otpauth_url, /^otpauth:\/\/totp\//);
+
+  const enabled = await request(app)
+    .post('/api/auth/mfa/enable')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ code: totpCode(setup.body.secret) })
+    .expect(200);
+  assert.equal(enabled.body.recovery_codes.length, 10);
+
+  const challengeResponse = await request(app)
+    .post('/api/auth/login')
+    .send({ email: 'admin@hospital.com', password: 'password123' })
+    .expect(200);
+  assert.equal(challengeResponse.body.mfa_required, true);
+  assert.equal(typeof challengeResponse.body.challenge_token, 'string');
+  assert.equal(challengeResponse.body.token, undefined);
+
+  await request(app)
+    .get('/api/auth/me')
+    .set('Authorization', `Bearer ${challengeResponse.body.challenge_token}`)
+    .expect(401);
+
+  const validCode = totpCode(setup.body.secret);
+  const wrongCode = String((Number(validCode) + 1) % 1000000).padStart(6, '0');
+  await request(app)
+    .post('/api/auth/login/mfa')
+    .send({ challenge_token: challengeResponse.body.challenge_token, code: wrongCode })
+    .expect(401);
+
+  const completed = await request(app)
+    .post('/api/auth/login/mfa')
+    .send({ challenge_token: challengeResponse.body.challenge_token, code: totpCode(setup.body.secret) })
+    .expect(200);
+  assert.ok(completed.body.token);
+  assert.equal(completed.body.user.mfa_enabled, true);
+
+  const recoveryChallenge = await request(app)
+    .post('/api/auth/login')
+    .send({ email: 'admin@hospital.com', password: 'password123' })
+    .expect(200);
+  await request(app)
+    .post('/api/auth/login/mfa')
+    .send({
+      challenge_token: recoveryChallenge.body.challenge_token,
+      code: enabled.body.recovery_codes[0],
+    })
+    .expect(200);
+
+  const replayChallenge = await request(app)
+    .post('/api/auth/login')
+    .send({ email: 'admin@hospital.com', password: 'password123' })
+    .expect(200);
+  await request(app)
+    .post('/api/auth/login/mfa')
+    .send({
+      challenge_token: replayChallenge.body.challenge_token,
+      code: enabled.body.recovery_codes[0],
+    })
+    .expect(401);
+
+  const createdAdmin = await request(app)
+    .post('/api/auth/register')
+    .set('Authorization', `Bearer ${completed.body.token}`)
+    .send({
+      first_name: 'Second',
+      last_name: 'Administrator',
+      email: 'second-admin-mfa-test@example.com',
+      password: 'Moss-Lantern-Drift-67!',
+      role: 'admin',
+    })
+    .expect(201);
+  const secondAdminLogin = await request(app)
+    .post('/api/auth/login')
+    .send({ email: 'second-admin-mfa-test@example.com', password: 'Moss-Lantern-Drift-67!' })
+    .expect(200);
+
+  const [originalAdmin] = await pool.query("SELECT id FROM users WHERE email = 'admin@hospital.com'");
+  await request(app)
+    .delete(`/api/users/${originalAdmin[0].id}`)
+    .set('Authorization', `Bearer ${secondAdminLogin.body.token}`)
+    .expect(200);
+  await request(app)
+    .delete(`/api/users/${createdAdmin.body.user.id}`)
+    .set('Authorization', `Bearer ${secondAdminLogin.body.token}`)
+    .expect(409);
 });
