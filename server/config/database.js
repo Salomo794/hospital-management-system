@@ -462,6 +462,20 @@ function migrate() {
     if (!columnExists('users', 'password_changed_at')) {
       sqlite.exec('ALTER TABLE users ADD COLUMN password_changed_at TEXT');
     }
+    // MFA fields are nullable/default-off so existing staff accounts keep
+    // working until each person explicitly enrolls an authenticator.
+    if (!columnExists('users', 'mfa_enabled')) {
+      sqlite.exec('ALTER TABLE users ADD COLUMN mfa_enabled INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!columnExists('users', 'mfa_secret')) {
+      sqlite.exec('ALTER TABLE users ADD COLUMN mfa_secret TEXT');
+    }
+    if (!columnExists('users', 'mfa_pending_secret')) {
+      sqlite.exec('ALTER TABLE users ADD COLUMN mfa_pending_secret TEXT');
+    }
+    if (!columnExists('users', 'mfa_recovery_codes')) {
+      sqlite.exec('ALTER TABLE users ADD COLUMN mfa_recovery_codes TEXT');
+    }
   }
   if (tableExists('users')) {
     sqlite.exec(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
