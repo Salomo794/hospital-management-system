@@ -20,6 +20,10 @@ test('TOTP secrets encrypt at rest and decrypt only with the configured key', ()
   assert.notEqual(encrypted, secret);
   assert.match(encrypted, /^v1:/);
   assert.equal(decryptSecret(encrypted), secret);
+  const originalKey = process.env.MFA_ENCRYPTION_KEY;
+  process.env.MFA_ENCRYPTION_KEY = 'different-unit-test-key-that-is-long-enough-123456789';
+  assert.throws(() => decryptSecret(encrypted));
+  process.env.MFA_ENCRYPTION_KEY = originalKey;
   assert.throws(() => decryptSecret('not-an-encrypted-secret'));
 });
 
