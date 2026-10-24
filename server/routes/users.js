@@ -140,7 +140,7 @@ router.delete('/:id', authenticate, authorize('admin'), writePatientData, asyncH
     action: 'user.deactivated',
     table: 'users',
     recordId: id,
-    summary: `Deactivated ${existing[0].email}`,
+    summary: `Deactivated ${existing.email}`,
     before: pick(existing, AUDITED_FIELDS),
     after: pick({ ...existing, is_active: 0 }, AUDITED_FIELDS),
   });
