@@ -36,6 +36,11 @@ jobs:
         npm ci --prefix client
         npm ci --prefix server
     - name: Initialize and seed database
+      # `runner` is only in scope inside a step, never in a job-level env block.
+      # Referencing it there made the whole workflow invalid, so GitHub rejected
+      # the file before running anything and every run failed with no jobs.
+      env:
+        DB_PATH: ${{ runner.temp }}/hms-ci/hospital.db
       run: |
         npm run db:setup
         npm run db:seed
