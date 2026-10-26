@@ -674,18 +674,30 @@ async function seed() {
 
     await conn.commit();
     console.log('\nDatabase seeded successfully!');
-    console.log('\nDemo login credentials (password: password123):');
-    console.log('  Admin:        admin@hospital.com');
-    console.log('  Doctor:       doctor@hospital.com');
-    console.log('  Nurse:        nurse@hospital.com');
-    console.log('  Receptionist: receptionist@hospital.com');
-    console.log('  Pharmacist:   pharmacist@hospital.com');
-    console.log('  Lab Tech:     labtech@hospital.com');
-    if (demoPortalCredentials.length > 0) {
-      console.log('\nDemo patient portal credentials:');
-      for (const credential of demoPortalCredentials) {
-        console.log(`  ${credential.mrn}: ${credential.pin}`);
+
+    // Seeded portal PINs are live credentials for this database. Printing them
+    // unconditionally leaks a working MRN/PIN pair into terminal scrollback and
+    // into CI logs, which are readable by anyone who can read the repository.
+    // They are only shown when explicitly requested.
+    if (shouldPrintDemoCredentials()) {
+      console.log('\nDemo login credentials (password: password123):');
+      console.log('  Admin:        admin@hospital.com');
+      console.log('  Doctor:       doctor@hospital.com');
+      console.log('  Nurse:        nurse@hospital.com');
+      console.log('  Receptionist: receptionist@hospital.com');
+      console.log('  Pharmacist:   pharmacist@hospital.com');
+      console.log('  Lab Tech:     labtech@hospital.com');
+      if (demoPortalCredentials.length > 0) {
+        console.log('\nDemo patient portal credentials:');
+        for (const credential of demoPortalCredentials) {
+          console.log(`  ${credential.mrn}: ${credential.pin}`);
+        }
       }
+    } else {
+      console.log(
+        'Demo credentials are not printed. Set SHOW_DEMO_CREDENTIALS=true to reveal them, ' +
+          'or use the "Forgot portal PIN" flow to issue a new one.'
+      );
     }
   } catch (error) {
     try { await conn.rollback(); } catch (_) { /* preserve original error */ }
