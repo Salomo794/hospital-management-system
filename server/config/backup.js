@@ -5,6 +5,7 @@ const { loadEnvironment, serverDirectory } = require('./environment');
 const crypto = require('crypto');
 const os = require('os');
 const backupCrypto = require('../utils/backupCrypto');
+const { restrictFile, restrictDirectory, restrictDatabaseFiles } = require('../utils/filePermissions');
 
 // A hospital database is the only copy of every patient record, so a backup
 // that has never been restored is not a backup. This script makes a consistent
@@ -236,6 +237,9 @@ function create(options) {
 
   const directory = backupDirectory(options);
   fs.mkdirSync(directory, { recursive: true });
+  // A backup is a full copy of the patient database. Keep the directory and the
+  // archives inside it owner-only instead of inheriting the process umask.
+  restrictDirectory(directory, { label: 'backup directory' });
 
   const name = `hospital-${timestamp()}.db`;
   const target = path.join(directory, name);
@@ -290,6 +294,8 @@ function create(options) {
   }
 
   fs.writeFileSync(`${target}.json`, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  restrictFile(target, { label: 'backup archive' });
+  restrictFile(`${target}.json`, { label: 'backup manifest' });
 
   const finalMb = (fs.statSync(target).size / (1024 * 1024)).toFixed(2);
   console.log(`Backup written: ${target}  (${finalMb} MB${manifest.encrypted ? ', encrypted' : ''})`);
@@ -318,6 +324,7 @@ function restore(file) {
   if (fs.existsSync(databasePath)) {
     const safety = path.join(directory, `pre-restore-${timestamp()}.db`);
     fs.copyFileSync(databasePath, safety);
+    restrictFile(safety, { label: 'pre-restore snapshot' });
     console.log(`The current database has been copied to ${safety} first.`);
   }
   for (const suffix of ['-wal', '-shm']) {
@@ -337,6 +344,9 @@ function restore(file) {
   } else {
     fs.copyFileSync(file, databasePath);
   }
+  // The restored copy inherits the mode of the backup (or of the umask when it
+  // came from a copy), so re-tighten it rather than trusting the source.
+  restrictDatabaseFiles(databasePath);
   console.log('Restored. Restart the API to pick up the restored data.');
 }
 
