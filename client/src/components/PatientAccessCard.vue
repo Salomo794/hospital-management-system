@@ -102,13 +102,23 @@
 
               </div>
 
-              <!-- ── QR CODE ── -->
+              <!-- ── QR CODE (single-use check-in token) ── -->
               <div class="pac-qr-area">
-                <canvas ref="qrCanvas" class="pac-qr-canvas" width="90" height="90" aria-label="Patient check-in QR code" />
+                <canvas
+                  v-if="checkinPayload"
+                  ref="qrCanvas"
+                  class="pac-qr-canvas"
+                  width="90"
+                  height="90"
+                  aria-label="Single-use check-in QR code"
+                />
+                <div v-else class="pac-qr-placeholder" aria-hidden="true">🏥</div>
                 <div class="pac-qr-info">
-                  <div class="pac-qr-label">Scan or type code above</div>
+                  <div class="pac-qr-label">{{ checkinPayload ? 'Scan to check in' : 'Identification only' }}</div>
                   <div class="pac-qr-issued">Issued: {{ today }}</div>
-                  <div class="pac-qr-valid">Valid indefinitely</div>
+                  <div class="pac-qr-valid">
+                    {{ checkinPayload ? `Single use · expires ${formatExpiry}` : 'Ask reception for a check-in code' }}
+                  </div>
                 </div>
               </div>
 
@@ -160,6 +170,10 @@ export default {
     visible:  { type: Boolean, default: false },
     patient:  { type: Object,  required: true },
     plainPin: { type: String,  default: '' },
+    // Single-use check-in token minted by reception (POST /api/portal/checkin-tokens).
+    // The access card never encodes a permanent patient identifier in its QR code.
+    checkinToken:     { type: String, default: '' },
+    checkinExpiresAt: { type: String, default: '' },
   },
   setup(props) {
     const showPin  = ref(false)
@@ -190,10 +204,20 @@ export default {
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     }
 
-    /** Render the real QR payload used by the kiosk. */
+    /** Payload for the kiosk QR code: a single-use token, or nothing at all. */
+    const checkinPayload = computed(() => buildCheckinPayload(props.checkinToken))
+
+    const formatExpiry = computed(() => {
+      if (!props.checkinExpiresAt) return 'soon'
+      const when = new Date(props.checkinExpiresAt)
+      if (Number.isNaN(when.getTime())) return 'soon'
+      return when.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    })
+
+    /** Render the check-in QR code from the token, if one was issued. */
     const drawQr = async () => {
       const canvas = qrCanvas.value
-      const payload = buildCheckinPayload(props.patient)
+      const payload = checkinPayload.value
       if (!canvas || !payload) return
 
       try {
@@ -206,7 +230,7 @@ export default {
       }
     }
 
-    watch(() => [props.visible, props.patient?.id, props.patient?.access_code], async ([visible]) => {
+    watch(() => [props.visible, props.patient?.id, props.checkinToken], async ([visible]) => {
       showPin.value = false
       copied.value = false
       if (copyTimer) clearTimeout(copyTimer)
