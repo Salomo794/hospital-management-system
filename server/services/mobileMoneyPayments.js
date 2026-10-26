@@ -148,13 +148,28 @@ async function applyGatewayResult({ connection, req, paymentId, result }) {
     return { payment, bill: await recalculateBillPayment(connection, payment.bill_id), changed: false };
   }
 
-  const status = result.status === COMPLETED_PAYMENT_STATUS ? COMPLETED_PAYMENT_STATUS : result.status;
+  let status = result.status === COMPLETED_PAYMENT_STATUS ? COMPLETED_PAYMENT_STATUS : result.status;
+  let failureReason = result.failureReason || null;
+
+  if (status === COMPLETED_PAYMENT_STATUS) {
+    const mismatch = describeSettlementMismatch(payment, result);
+    if (mismatch) {
+      // A valid signature proves who sent the callback, not that the numbers on
+      // it are the ones this hospital asked for. Settling on a report of a
+      // different amount or currency would mark a bill paid with money that is
+      // not provably its own, so the charge is closed as failed instead and
+      // left for a human to reconcile.
+      status = 'failed';
+      failureReason = `Settlement rejected: ${mismatch}`;
+    }
+  }
+
   await connection.query(
     `UPDATE payments
      SET status = ?, provider_reference = COALESCE(?, provider_reference),
          failure_reason = ?, completed_at = CASE WHEN ? = 'completed' THEN datetime('now') ELSE NULL END
      WHERE id = ?`,
-    [status, result.providerReference || null, result.failureReason || null, status, paymentId]
+    [status, result.providerReference || null, failureReason, status, paymentId]
   );
 
   const bill = await recalculateBillPayment(connection, payment.bill_id);
@@ -167,7 +182,7 @@ async function applyGatewayResult({ connection, req, paymentId, result }) {
     table: 'payments',
     recordId: paymentId,
     summary: `${payment.payment_number} ${status} for bill ${payment.bill_id}`
-      + (result.failureReason ? `: ${result.failureReason}` : ''),
+      + (failureReason ? `: ${failureReason}` : ''),
     before: { status: payment.status, bill_paid_amount: null },
     after: {
       payment_number: payment.payment_number,
@@ -175,12 +190,12 @@ async function applyGatewayResult({ connection, req, paymentId, result }) {
       amount: payment.amount,
       status,
       provider_reference: result.providerReference || null,
-      failure_reason: result.failureReason || null,
+      failure_reason: failureReason,
       bill_paid_amount: bill.paid_amount,
       bill_payment_status: bill.payment_status,
     },
   });
-  return { payment: { ...payment, status }, bill, changed: true };
+  return { payment: { ...payment, status, failure_reason: failureReason }, bill, changed: true };
 }
 
 // Staff abandoning a request before the patient responds.
