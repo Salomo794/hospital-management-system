@@ -239,3 +239,49 @@ test('an unknown option is refused instead of being ignored', () => {
   const result = run(['--nonsense'], { expect: 1 });
   assert.match(result.stderr, /Unknown option/);
 });
+
+// Backups contain a full copy of patient data, so on a shared host they must not
+// be world-readable. The process umask (usually 022) would otherwise make them
+// 644, readable by every local account.
+test('backup archives and their directory are owner-only', { skip: process.platform === 'win32' }, () => {
+  const dbPath = path.join(tempDirectory, 'source11.db');
+  const dir = path.join(tempDirectory, 'out-11');
+  createDatabase(dbPath);
+  run(['--dir', dir], { dbPath, expect: 0 });
+
+  const directoryMode = fs.statSync(dir).mode & 0o777;
+  assert.equal(directoryMode, 0o700, 'the backup directory must be owner-only');
+
+  const files = backupsIn(dir);
+  assert.ok(files.length > 0, 'a backup should have been written');
+  for (const name of files) {
+    const mode = fs.statSync(path.join(dir, name)).mode & 0o777;
+    assert.equal(mode, 0o600, `${name} must be owner-only, got ${mode.toString(8)}`);
+    const manifest = path.join(dir, `${name}.json`);
+    if (fs.existsSync(manifest)) {
+      assert.equal(
+        fs.statSync(manifest).mode & 0o777,
+        0o600,
+        `${name}.json must be owner-only`
+      );
+    }
+  }
+});
+
+test('a restored database is owner-only even if the source copy was not', { skip: process.platform === 'win32' }, () => {
+  const dbPath = path.join(tempDirectory, 'source12.db');
+  const dir = path.join(tempDirectory, 'out-12');
+  createDatabase(dbPath);
+  run(['--dir', dir], { dbPath, expect: 0 });
+  const [backup] = backupsIn(dir);
+
+  // Simulate a backup that was world-readable before the permissions fix.
+  fs.chmodSync(path.join(dir, backup), 0o644);
+  run(['--restore', path.join(dir, backup)], { dbPath, expect: 0 });
+
+  assert.equal(
+    fs.statSync(dbPath).mode & 0o777,
+    0o600,
+    'the restored live database must be owner-only'
+  );
+});
