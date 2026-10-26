@@ -1322,6 +1322,34 @@ test('pharmacy dispensing validates and scopes idempotency keys', async () => {
   assert.equal(afterReplay[0].dispensed_quantity, 1);
 });
 
+test('public patient check-in response omits personal and appointment details', async () => {
+  const adminToken = await login();
+  const patientResponse = await request(app)
+    .post('/api/patients')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({
+      first_name: 'Privacy',
+      last_name: 'Checkin',
+      date_of_birth: '1990-04-05',
+      gender: 'female',
+      email: `checkin-privacy-${randomUUID()}@example.com`,
+    })
+    .expect(201);
+  const patient = patientResponse.body.patient;
+
+  const response = await request(app)
+    .post('/api/portal/checkin')
+    .send({ identifier: patient.mrn, purpose: 'routine visit' })
+    .expect(200);
+
+  assert.equal(response.body.checked_in, true);
+  assert.equal(response.body.success, true);
+  assert.deepEqual(Object.keys(response.body).sort(), [
+    'checked_in', 'message', 'queue_position', 'status', 'success',
+  ]);
+  assert.doesNotMatch(JSON.stringify(response.body), /Privacy|Checkin|date_of_birth|mrn|appointment|routine visit/i);
+});
+
 test('AI appointment schedule uses the configured hospital timezone date', async () => {
   const [patients] = await pool.query("SELECT id FROM patients WHERE status = 'active' ORDER BY id LIMIT 1");
   const [doctors] = await pool.query("SELECT id FROM users WHERE role = 'doctor' AND is_active = 1 ORDER BY id LIMIT 1");
