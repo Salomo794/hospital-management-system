@@ -1,8 +1,9 @@
 # HMS — Final Audit & Verification Report
 
 **Date:** 2026-10-26
-**Branch:** `appjet` @ `e93fe09f247b81135dbf2694ef48d6f611793f4a`
-**Base:** `main` @ `644cc61` (appjet is **51 ahead / 0 behind** — clean fast-forward, no merge conflicts)
+**Branch:** `appjet` — verification in §3 was executed at commit `148f997` (later commits in this
+branch are documentation corrections only and do not change code or test outcomes)
+**Base:** `main` @ `644cc61` — clean fast-forward, no merge conflicts
 **Status:** All local checks pass. **Nothing has been merged or deployed.**
 
 ---
