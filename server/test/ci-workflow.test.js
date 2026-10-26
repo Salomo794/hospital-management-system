@@ -82,9 +82,13 @@ test('every npm script the workflow runs exists in package.json', () => {
   // CI that calls a renamed script fails in a way that looks like a code
   // problem. Check the contract from the manifests instead.
   const scripts = new Set(Object.keys(require(path.join(repositoryRoot, 'package.json')).scripts));
+  // `npm ci` and `npm install` are commands, not scripts, so they are excluded.
   const invoked = new Set();
   for (const line of lines) {
-    for (const match of line.matchAll(/npm\s+(?:run\s+)?([a-z][a-z0-9:-]*)/gi)) invoked.add(match[1]);
+    for (const match of line.matchAll(/npm\s+(?:run\s+)?([a-z][a-z0-9:-]*)/gi)) {
+      if (match[1] === 'ci' || match[1] === 'install') continue;
+      invoked.add(match[1]);
+    }
   }
 
   const missing = [...invoked].filter(name => !scripts.has(name));
