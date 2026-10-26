@@ -315,28 +315,16 @@ router.post('/checkin', asyncHandler(async (req, res) => {
   });
 
   const { checkin, todayAppointments, queuePosition } = result;
+  // This endpoint is intentionally usable at a public check-in kiosk. Do not
+  // return patient identifiers, demographics, or appointment/clinical details:
+  // the identifier used for check-in (such as an MRN) is not an authentication
+  // secret and may be visible to other people at reception.
   res.json({
     success: true,
     checked_in: true,
     queue_position: queuePosition,
     status: checkin.status,
-    patient: {
-      id: patient.id,
-      name: `${patient.first_name} ${patient.last_name}`,
-      mrn: patient.mrn,
-      dob: patient.date_of_birth,
-      gender: patient.gender,
-    },
-    appointment: todayAppointments[0]
-      ? {
-          time: todayAppointments[0].appointment_time.slice(0, 5),
-          type: todayAppointments[0].type,
-          reason: todayAppointments[0].reason,
-        }
-      : null,
-    message: todayAppointments[0]
-      ? `Checked in for your ${todayAppointments[0].appointment_time.slice(0, 5)} ${todayAppointments[0].type} appointment. Please take a seat and we will call you.`
-      : 'Checked in successfully. Please take a seat. A staff member will assist you shortly.',
+    message: 'Check-in successful. Please wait for a staff member to assist you.',
   });
 }));
 
