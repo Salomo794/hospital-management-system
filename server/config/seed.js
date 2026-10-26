@@ -34,6 +34,14 @@ function assertDemoSeedAllowed() {
   }
 }
 
+// Seeded portal PINs are working credentials for the database that was just
+// written. Never emit them by default: CI logs and shared terminals are not a
+// safe place for credentials. Opt in explicitly, and never in production.
+function shouldPrintDemoCredentials() {
+  if (process.env.NODE_ENV === 'production') return false;
+  return process.env.SHOW_DEMO_CREDENTIALS === 'true';
+}
+
 // Keep this check ahead of the database import so a production CLI invocation
 // cannot open or create the configured database before it is rejected.
 if (require.main === module) {
