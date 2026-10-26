@@ -140,6 +140,34 @@ async function attachProviderReference({ connection, paymentId, provider, provid
 
 // Promotes or fails a pending charge from an authoritative provider answer.
 // Re-entrant on purpose: the same call arriving twice is a no-op.
+// A charge is only allowed to settle the amount that was requested, in the
+// currency that was requested. Returns a human-readable reason when it does not
+// match, and null when the report is acceptable.
+//
+// A provider that omits the amount entirely is accepted here, because the
+// reference is single-use and bound to this payment row; a provider that
+// reports a *different* amount is not, because that is the case where settling
+// would put the wrong money against the bill.
+function describeSettlementMismatch(payment, result) {
+  if (result.amount !== null && result.amount !== undefined) {
+    const reported = Number(result.amount);
+    const expected = Number(payment.amount);
+    if (!Number.isFinite(reported)) return 'provider reported a non-numeric amount';
+    // Currency amounts arrive as decimal strings; compare to the cent rather
+    // than with === so 50 and 50.00 are not treated as a fraud signal.
+    if (Math.abs(reported - expected) >= 0.005) {
+      return `provider reported ${reported} but ${expected} was requested`;
+    }
+  }
+  if (result.currency) {
+    const expectedCurrency = activeCurrency();
+    if (String(result.currency).toUpperCase() !== expectedCurrency) {
+      return `provider reported ${String(result.currency).toUpperCase()} but ${expectedCurrency} was requested`;
+    }
+  }
+  return null;
+}
+
 async function applyGatewayResult({ connection, req, paymentId, result }) {
   const [rows] = await connection.query('SELECT * FROM payments WHERE id = ?', [paymentId]);
   if (rows.length === 0) throw new ApiError(404, 'Payment not found');
