@@ -9,10 +9,10 @@
       </div>
       <div class="header-actions">
         <button class="btn btn-ghost btn-sm" @click="lookupOpen = !lookupOpen">
-          <span>🔍</span> Lookup by Code
+          <AppIcon name="key" :size="15" /> Lookup by Code
         </button>
         <button class="btn btn-primary" @click="openCreateModal">
-          <span>＋</span> New Patient
+          <AppIcon name="plus" :size="15" /> New Patient
         </button>
       </div>
     </div>
@@ -21,7 +21,7 @@
     <Transition name="lookup-slide">
       <div class="lookup-panel" v-if="lookupOpen">
         <div class="lookup-inner">
-          <div class="lookup-icon">🔑</div>
+          <div class="lookup-icon"><AppIcon name="key" :size="20" /></div>
           <div class="lookup-content">
             <div class="lookup-heading">Patient Access Code Lookup</div>
             <div class="lookup-sub">Enter the code from the patient's access card to instantly pull their record.</div>
@@ -112,7 +112,7 @@
       <div class="card-header">
         <div class="filter-bar" style="margin:0;flex:1">
           <div class="search-bar" style="flex:1">
-            <span class="search-icon">🔎</span>
+            <span class="search-icon"><AppIcon name="search" :size="16" /></span>
             <input
               type="text"
               v-model="search"
@@ -162,7 +162,7 @@
                     <router-link :to="`/patients/${p.id}`" class="patient-name-link">
                       {{ p.first_name }} {{ p.last_name }}
                     </router-link>
-                    <div class="patient-email-row">{{ p.email || '—' }}</div>
+                    <div class="patient-email-row" v-if="p.email">{{ p.email }}</div>
                   </div>
                 </div>
               </td>
@@ -187,7 +187,7 @@
                 <div class="table-actions">
                   <router-link :to="`/patients/${p.id}`" class="btn btn-sm btn-secondary">View</router-link>
                   <button class="btn btn-sm btn-secondary" @click="openEditModal(p)">Edit</button>
-                  <button v-if="authStore.can('admin', 'receptionist')" class="btn btn-sm btn-danger" @click="deletePatient(p)">Delete</button>
+                  <button v-if="authStore.can('admin', 'receptionist')" class="icon-btn icon-btn-danger" type="button" :aria-label="`Delete ${p.first_name} ${p.last_name}`" title="Delete patient" @click="deletePatient(p)"><AppIcon name="trash" :size="15" /></button>
                 </div>
               </td>
             </tr>
@@ -197,7 +197,7 @@
 
       <!-- Empty -->
       <div class="empty-state" v-else>
-        <span class="empty-state-icon">👥</span>
+        <span class="empty-state-icon"><AppIcon name="users" :size="30" /></span>
         <h3>No patients found</h3>
         <p>{{ search ? 'Try a different search term.' : 'Register your first patient to get started.' }}</p>
       </div>
@@ -335,7 +335,7 @@
 
                 <!-- Info note for new patients -->
                 <div class="info-box" v-if="!editingPatient">
-                  <span class="info-icon">🔑</span>
+                  <span class="info-icon"><AppIcon name="key" :size="16" /></span>
                   <div>
                     <strong>Access Code & Portal PIN will be auto-generated.</strong>
                     A unique access code and a 6-digit PIN will be created for this patient after registration. You will be able to print the patient card immediately.
@@ -370,6 +370,7 @@
 </template>
 
 <script>
+import AppIcon from '../../components/AppIcon.vue'
 import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { formatDate, debounce, hasAllergy } from '../../utils/helpers'
@@ -381,7 +382,7 @@ import { PHONE_MAX_DIGITS, phoneProblem } from '../../utils/phone'
 
 export default {
   name: 'Patients',
-  components: { PatientAccessCard },
+  components: { PatientAccessCard, AppIcon },
 
   setup() {
     const toast     = useToast()
@@ -786,4 +787,15 @@ export default {
   .lookup-input { width: 100%; }
   .lr-grid { grid-template-columns: repeat(2,1fr); }
 }
+
+/* Row actions: View and Edit stay quiet; Delete is an icon that only turns red on intent. */
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 6px; border: 1px solid transparent;
+  background: transparent; color: var(--gray-500, #64748b); cursor: pointer;
+  transition: background-color .15s, color .15s, border-color .15s;
+}
+.icon-btn:hover { background: var(--gray-100); color: var(--gray-700); }
+.icon-btn-danger:hover, .icon-btn-danger:focus-visible { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-fg); }
+.icon-btn:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 1px; }
 </style>

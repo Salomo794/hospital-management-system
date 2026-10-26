@@ -43,7 +43,7 @@
     </header>
 
     <!-- ── KPI cards ──────────────────────────────────────── -->
-    <section class="kpi-grid" aria-label="Key hospital metrics">
+    <section class="kpi-grid" :style="{ '--kpi-cols': kpiColumns }" aria-label="Key hospital metrics">
       <template v-if="loading">
         <div v-for="i in 4" :key="i" class="kpi-card kpi-skeleton">
           <div class="skeleton skeleton-line" style="width:48%" />
@@ -53,11 +53,10 @@
       </template>
       <article
         v-else
-        v-for="(s, i) in statCards"
+        v-for="s in statCards"
         :key="s.key"
         class="kpi-card"
         :class="`tone-${s.tone}`"
-        :style="{ animationDelay: `${i * 45}ms` }"
       >
         <div class="kpi-head">
           <span class="kpi-label">{{ s.label }}</span>
@@ -88,7 +87,7 @@
                 class="insight-card"
                 :class="`insight-${ins.severity}`"
               >
-                <span class="insight-emoji">{{ ins.icon }}</span>
+                <span class="insight-icon"><AppIcon :name="insightIcon(ins)" :size="17" /></span>
                 <div class="insight-body">
                   <div class="insight-title">{{ ins.title }}</div>
                   <div class="insight-msg">{{ ins.message }}</div>
@@ -96,7 +95,7 @@
                 <AppIcon name="chevron-right" :size="16" class="insight-arrow" />
               </router-link>
               <div v-else class="insight-card" :class="`insight-${ins.severity}`">
-                <span class="insight-emoji">{{ ins.icon }}</span>
+                <span class="insight-icon"><AppIcon :name="insightIcon(ins)" :size="17" /></span>
                 <div class="insight-body">
                   <div class="insight-title">{{ ins.title }}</div>
                   <div class="insight-msg">{{ ins.message }}</div>
@@ -147,7 +146,7 @@
               </tbody>
             </table>
             <div class="empty-state" v-else>
-              <span class="empty-state-icon">📭</span>
+              <span class="empty-state-icon"><AppIcon name="inbox" :size="30" /></span>
               <h3>No appointments today</h3>
               <p>Nothing scheduled for today yet.</p>
             </div>
@@ -168,7 +167,7 @@
               <BarChart :key="uiStore.dark ? 'dark' : 'light'" :data="weeklyChartData" :options="chartOptions" />
             </div>
             <div class="empty-state" v-else>
-              <span class="empty-state-icon">📊</span>
+              <span class="empty-state-icon"><AppIcon name="bar-chart" :size="30" /></span>
               <h3>No data yet</h3>
               <p>Weekly appointment data will appear here.</p>
             </div>
@@ -202,7 +201,7 @@
             </router-link>
           </div>
           <div class="empty-state" v-else>
-            <span class="empty-state-icon">👥</span>
+            <span class="empty-state-icon"><AppIcon name="users" :size="30" /></span>
             <h3>No recent patients</h3>
             <p>Newly registered patients appear here.</p>
           </div>
@@ -330,6 +329,23 @@ export default {
       { key: 'stock', label: 'Low Stock Alerts', caption: 'Needs restocking', value: stats.value.lowStockMedications || 0, icon: 'alert-triangle', tone: 'orange', format: 'number', roles: ['admin', 'pharmacist'] }
     ].filter(card => !card.roles || authStore.can(...card.roles)))
 
+    // Pick a column count that divides the cards evenly so the last row is never
+    // a single orphan card (9 cards -> 3x3, 8 -> 4x2, 5 -> one row of 5).
+    const kpiColumns = computed(() => {
+      const n = statCards.value.length
+      return [4, 3, 5, 2].find(c => n >= c && n % c === 0) || 4
+    })
+
+    // The API sends emoji for each insight; render a matching vector icon instead.
+    const INSIGHT_ICONS = {
+      '\u{1F3E5}': 'bed', '\u{1F6A8}': 'alert-triangle', '\u23F3': 'clock',
+      '\u26A0\uFE0F': 'alert-triangle', '\u{1F4C5}': 'calendar', '\u{1F4B0}': 'dollar',
+      '\u{1F9EA}': 'flask', '\u{1F4C8}': 'trending-up'
+    }
+    const insightIcon = ins => INSIGHT_ICONS[ins.icon]
+      || (ins.severity === 'danger' || ins.severity === 'warning' ? 'alert-triangle'
+        : ins.severity === 'success' ? 'check-circle' : 'info')
+
     watch(statCards, cards => {
       cards.forEach(card => animateValue(card.key, card.value))
     }, { immediate: true })
@@ -450,7 +466,7 @@ export default {
     })
 
     return {
-      loading, refreshing, stats, statCards, insights,
+      loading, refreshing, stats, statCards, kpiColumns, insightIcon, insights,
       recentAppointments, recentPatients,
       weeklyStats, weeklyChartData, chartOptions,
       quickActions, greeting, firstName, roleLabel, todayLong, clockTime, updatedLabel,
@@ -543,33 +559,27 @@ export default {
 /* ── KPI cards ──────────────────────────────────────── */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--kpi-cols, 4), minmax(0, 1fr));
   gap: 14px;
   margin-bottom: 20px;
 }
 .kpi-card {
   position: relative;
   background: var(--surface);
-  border: 1px solid rgba(0,0,0,.05);
-  border-radius: 16px;
+  border: 1px solid var(--gray-200);
+  border-radius: 10px;
   padding: 15px 17px 14px;
   box-shadow: var(--shadow-card);
   overflow: hidden;
   transition: transform .2s ease, box-shadow .25s ease;
-  animation: kpiIn .45s cubic-bezier(.22,1,.36,1) both;
 }
-@keyframes kpiIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-.kpi-card::before {
-  content: '';
-  position: absolute; top: 0; left: 0; right: 0; height: 3px;
-  background: linear-gradient(90deg, var(--tone), transparent 92%);
-}
-.kpi-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-card-hover); }
+/* Colour is reserved for figures that need attention; everything else is neutral. */
+.kpi-card:not(.tone-red):not(.tone-orange) { --tone: var(--brand-700); --tone-bg: var(--brand-50); }
 
 .kpi-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .kpi-label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
 .kpi-icon {
-  width: 34px; height: 34px; border-radius: 10px;
+  width: 32px; height: 32px; border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
   background: var(--tone-bg); color: var(--tone); flex-shrink: 0;
 }
@@ -650,16 +660,20 @@ export default {
 .insights-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 16px 20px; }
 .insight-card {
   display: flex; align-items: flex-start; gap: 11px;
-  padding: 12px 14px; border-radius: 12px;
-  border: 1px solid transparent; border-left-width: 3px;
-  text-decoration: none; transition: transform .18s, box-shadow .18s;
+  padding: 12px 14px; border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--gray-200); border-left-width: 3px;
+  text-decoration: none; transition: border-color .15s, background-color .15s;
 }
-.insight-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,.07); }
-.insight-success { background: var(--success-bg); border-color: #86efac; border-left-color: var(--success-fg); }
-.insight-warning { background: var(--warning-bg); border-color: #fde68a; border-left-color: var(--warning-fg); }
-.insight-danger  { background: var(--danger-bg);  border-color: #fecaca; border-left-color: var(--danger-fg); }
-.insight-info    { background: var(--info-bg);    border-color: #bfdbfe; border-left-color: var(--info-fg); }
-.insight-emoji { font-size: 20px; flex-shrink: 0; margin-top: 1px; line-height: 1; }
+a.insight-card:hover { border-color: var(--gray-300); background: var(--gray-50, var(--gray-100)); }
+.insight-success { border-left-color: var(--success-fg); }
+.insight-warning { border-left-color: var(--warning-fg); }
+.insight-danger  { border-left-color: var(--danger-fg); }
+.insight-info    { border-left-color: var(--info-fg); }
+.insight-icon { flex-shrink: 0; margin-top: 1px; display: flex; color: var(--gray-500, #64748b); }
+.insight-success .insight-icon { color: var(--success-fg); }
+.insight-warning .insight-icon { color: var(--warning-fg); }
+.insight-danger  .insight-icon { color: var(--danger-fg); }
+.insight-info    .insight-icon { color: var(--info-fg); }
 .insight-body { flex: 1; min-width: 0; }
 .insight-title { font-size: 13px; font-weight: 600; color: var(--gray-800); }
 .insight-msg { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.5; }
@@ -748,7 +762,6 @@ export default {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ── Responsive ─────────────────────────────────────── */
-@media (max-width: 1280px) { .kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (max-width: 1080px) {
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dash-grid { grid-template-columns: 1fr; }

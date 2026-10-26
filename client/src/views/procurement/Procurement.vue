@@ -25,23 +25,23 @@
     <!-- ──── Stat strip ──── -->
     <div class="stats-grid" v-if="!loading && summary">
       <StatsCard
-        :icon="'📦'" icon-bg="linear-gradient(135deg, #dbeafe, #bfdbfe)"
+        icon="package"
         :value="summary.open_orders" label="Open orders"
       />
       <StatsCard
-        :icon="'⏳'" icon-bg="linear-gradient(135deg, #fef3c7, #fde68a)"
+        icon="clock"
         :value="summary.awaiting_approval" label="Awaiting approval"
       />
       <StatsCard
-        :icon="'💰'" icon-bg="linear-gradient(135deg, #dcfce7, #bbf7d0)"
+        icon="dollar"
         :value="formatCurrency(summary.open_order_value)" label="Committed value"
       />
       <StatsCard
-        :icon="'⚠️'" icon-bg="linear-gradient(135deg, #fee2e2, #fecaca)"
+        icon="alert-triangle"
         :value="summary.low_stock_items" label="Medicines below minimum"
       />
       <StatsCard
-        :icon="'🏭'" icon-bg="linear-gradient(135deg, #ccfbf1, #99f6e4)"
+        icon="building"
         :value="summary.active_suppliers" label="Active suppliers"
       />
     </div>
@@ -68,7 +68,7 @@
     <!-- ──── REORDER SUGGESTIONS ──── -->
     <template v-else-if="activeTab === 'suggestions'">
       <div v-if="suggestions.length === 0" class="empty-state">
-        <span class="empty-icon">✅</span>
+        <span class="empty-icon"><AppIcon name="check-circle" :size="30" /></span>
         <p>Nothing needs reordering.</p>
         <span class="text-muted">Every active medicine is above its minimum and nothing expires within 30 days.</span>
       </div>
@@ -147,7 +147,7 @@
       </div>
 
       <div v-if="orders.length === 0" class="empty-state">
-        <span class="empty-icon">📋</span>
+        <span class="empty-icon"><AppIcon name="clipboard" :size="30" /></span>
         <p>No purchase orders found.</p>
         <span class="text-muted">Adjust the filters, or raise a new order.</span>
       </div>
@@ -206,7 +206,7 @@
       </div>
 
       <div v-if="suppliers.length === 0" class="empty-state">
-        <span class="empty-icon">🏭</span>
+        <span class="empty-icon"><AppIcon name="building" :size="30" /></span>
         <p>No suppliers found.</p>
         <span class="text-muted">Add a supplier before raising a purchase order.</span>
       </div>
@@ -469,6 +469,7 @@
 </template>
 
 <script>
+import AppIcon from '../../components/AppIcon.vue'
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
@@ -481,7 +482,7 @@ const ORDER_STATUSES = ['draft', 'submitted', 'approved', 'partially_received', 
 
 export default {
   name: 'Procurement',
-  components: { StatsCard },
+  components: { StatsCard, AppIcon },
   setup() {
     const toast = useToast()
     const authStore = useAuthStore()

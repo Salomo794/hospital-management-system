@@ -30,7 +30,7 @@
         <div class="filter-field">
           <label>Date range</label>
           <div class="date-range">
-            <span class="date-range__glyph" aria-hidden="true">📅</span>
+            <span class="date-range__glyph" aria-hidden="true"><AppIcon name="calendar" :size="16" /></span>
             <input type="date" v-model="fromDate" @change="page = 1; loadEntries()" aria-label="From date" title="From date" />
             <span class="date-range__sep" aria-hidden="true">→</span>
             <input type="date" v-model="toDate" @change="page = 1; loadEntries()" aria-label="To date" title="To date" />
@@ -54,7 +54,7 @@
     </div>
 
     <div v-else-if="entries.length === 0" class="empty-state">
-      <span class="empty-icon">🗂️</span>
+      <span class="empty-icon"><AppIcon name="folder" :size="30" /></span>
       <p>No audit entries found.</p>
       <span class="text-muted">Try adjusting the filters.</span>
     </div>
@@ -119,12 +119,14 @@
 </template>
 
 <script>
+import AppIcon from '../../components/AppIcon.vue'
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
 import { formatDate, formatDateTime, formatTimeOnly } from '../../utils/helpers'
 import { useToast } from '../../store/toast'
 
 export default {
+  components: { AppIcon },
   name: 'AuditLog',
   setup() {
     const toast = useToast()

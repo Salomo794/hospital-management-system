@@ -51,22 +51,17 @@
           </span>
           <span class="foot-note">&copy; 2026 MediCare</span>
         </div>
-        <div class="login-footnote">
-          <span class="foot-dot"></span>
-          Role-based access &middot; Authenticated sessions
-        </div>
       </div>
 
       <div class="login-right">
         <form @submit.prevent="handleLogin" class="login-form" novalidate>
           <div class="form-heading">
-            <span class="form-eyebrow">Secure Access</span>
-            <h2>Welcome Back</h2>
-            <p class="subtitle">Sign in to your account to continue</p>
+            <h2>Sign in</h2>
+            <p class="subtitle">Use your hospital account to continue.</p>
           </div>
 
           <div class="form-group" :class="{ 'has-error': emailTouched && !email.trim() }">
-            <label>Email Address</label>
+            <label>Email address</label>
             <input
               type="email" v-model="email" placeholder="Enter your email"
               @blur="emailTouched = true"
@@ -96,15 +91,15 @@
 
           <button type="submit" class="btn btn-primary btn-block" :disabled="loading">
             <span v-if="loading" class="btn-spinner"></span>
-            {{ loading ? 'Signing in...' : 'Sign In' }}
+            {{ loading ? 'Signing in…' : 'Sign in' }}
           </button>
 
           <div class="form-links">
             <router-link to="/forgot-password">Forgot password?</router-link>
           </div>
 
-          <div class="demo-accounts">
-            <p class="demo-title">Quick demo access</p>
+          <div class="demo-accounts" v-if="showDemo">
+            <p class="demo-title">Demo accounts (development only)</p>
             <div class="demo-list">
               <button type="button" class="demo-btn" @click="fillDemo('admin@hospital.com')">Admin</button>
               <button type="button" class="demo-btn" @click="fillDemo('doctor@hospital.com')">Doctor</button>
@@ -172,6 +167,9 @@ export default {
       }
     }
 
+    // Demo shortcuts (and the shared demo password) exist only in local development.
+    const showDemo = import.meta.env.DEV
+
     const fillDemo = (emailAddr) => {
       email.value = emailAddr
       password.value = 'password123'
@@ -181,7 +179,7 @@ export default {
 
     return {
       email, password, loading, emailTouched, passwordTouched, showPassword,
-      handleLogin, fillDemo, brandIcon, eyeIcon, eyeOffIcon
+      handleLogin, fillDemo, showDemo, brandIcon, eyeIcon, eyeOffIcon
     }
   }
 }
@@ -570,4 +568,7 @@ export default {
     font-size: 13px;
   }
 }
+.form-links { margin-top: 14px; text-align: center; font-size: 13px; }
+.form-links a { color: var(--brand-700); font-weight: 500; text-decoration: none; }
+.form-links a:hover { text-decoration: underline; }
 </style>
