@@ -175,9 +175,19 @@
 
       <section class="portal-card kiosk-card">
         <h2>Walk-in check-in</h2>
-        <p>Enter the MRN or access code printed on your patient card.</p>
+        <p v-if="patient">Confirm your arrival and we will add you to today's queue.</p>
+        <p v-else>Enter the single-use check-in code reception gave you.</p>
         <form @submit.prevent="checkIn">
-          <label>MRN or access code<input v-model.trim="checkinForm.identifier" required /></label>
+          <label v-if="!patient">
+            Check-in code
+            <input
+              v-model.trim="checkinForm.checkin_token"
+              required
+              autocomplete="one-time-code"
+              spellcheck="false"
+              placeholder="Code from reception"
+            />
+          </label>
           <label>Visit purpose<input v-model.trim="checkinForm.purpose" placeholder="Optional" /></label>
           <button class="btn btn-secondary" :disabled="checkingIn">{{ checkingIn ? 'Checking in…' : 'Check in' }}</button>
         </form>
@@ -217,7 +227,7 @@ export default {
     const patient = ref(getStoredJson('portal-patient', value => !!value?.id))
     const loginForm = reactive({ identifier: '', portal_pin: '' })
     const showPin = ref(false)
-    const checkinForm = reactive({ identifier: '', purpose: '' })
+    const checkinForm = reactive({ checkin_token: '', purpose: '' })
     const activeTab = ref('appointments')
     const loading = ref(false)
     const loggingIn = ref(false)
