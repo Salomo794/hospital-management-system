@@ -18,15 +18,25 @@ after(() => {
   fs.rmSync(tempDirectory, { recursive: true, force: true });
 });
 
-function run(args, { dbPath, expect } = {}) {
+function run(args, { dbPath, expect, encryptionKey = null } = {}) {
+  // Encryption is opt-in through BACKUP_ENCRYPTION_KEY. Inheriting whatever the
+  // developer happens to export would make these assertions pass or fail based
+  // on their shell, so the key is controlled explicitly here.
+  const env = {
+    ...process.env,
+    DB_PATH: dbPath || '',
+    JWT_SECRET: 'test-secret-that-is-at-least-32-characters-long',
+    NODE_ENV: 'test',
+  };
+  if (encryptionKey) {
+    env.BACKUP_ENCRYPTION_KEY = encryptionKey;
+  } else {
+    delete env.BACKUP_ENCRYPTION_KEY;
+  }
+
   const result = spawnSync(process.execPath, [script, ...args], {
     cwd: serverDirectory,
-    env: {
-      ...process.env,
-      DB_PATH: dbPath || '',
-      JWT_SECRET: 'test-secret-that-is-at-least-32-characters-long',
-      NODE_ENV: 'test',
-    },
+    env,
     encoding: 'utf8',
   });
   if (expect !== undefined) {
