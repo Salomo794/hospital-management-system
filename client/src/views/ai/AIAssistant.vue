@@ -49,7 +49,7 @@
 
         <!-- Empty state -->
         <div v-if="!messages.length && !loading" class="empty-chat">
-          <span class="empty-icon">🤖</span>
+          <span class="empty-icon"><AppIcon name="sparkles" :size="30" /></span>
           <p>Start a conversation by typing a message below.</p>
         </div>
 
@@ -78,6 +78,7 @@
 </template>
 
 <script>
+import AppIcon from '../../components/AppIcon.vue'
 import { ref, computed, nextTick, onMounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
@@ -85,6 +86,7 @@ import { useAuthStore } from '../../store/auth'
 import { formatDateTime } from '../../utils/helpers'
 
 export default {
+  components: { AppIcon },
   name: 'AIAssistant',
   setup() {
     const toast = useToast()

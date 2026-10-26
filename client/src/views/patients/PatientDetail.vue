@@ -98,7 +98,7 @@
                 </tr>
               </tbody>
             </table>
-            <div v-else class="empty-tab"><span class="empty-icon">📋</span><p>No medical records found.</p></div>
+            <div v-else class="empty-tab"><span class="empty-icon"><AppIcon name="clipboard" :size="30" /></span><p>No medical records found.</p></div>
           </div>
 
           <div v-if="tab === 'appointments'" class="tab-content">
@@ -114,7 +114,7 @@
                 </tr>
               </tbody>
             </table>
-            <div v-else class="empty-tab"><span class="empty-icon">📅</span><p>No appointments found.</p></div>
+            <div v-else class="empty-tab"><span class="empty-icon"><AppIcon name="calendar" :size="30" /></span><p>No appointments found.</p></div>
           </div>
 
           <div v-if="tab === 'prescriptions'" class="tab-content">
@@ -129,7 +129,7 @@
                 </tr>
               </tbody>
             </table>
-            <div v-else class="empty-tab"><span class="empty-icon">💊</span><p>No prescriptions found.</p></div>
+            <div v-else class="empty-tab"><span class="empty-icon"><AppIcon name="pill" :size="30" /></span><p>No prescriptions found.</p></div>
           </div>
 
           <div v-if="tab === 'bills'" class="tab-content">
@@ -144,7 +144,7 @@
                 </tr>
               </tbody>
             </table>
-            <div v-else class="empty-tab"><span class="empty-icon">🧾</span><p>No bills found.</p></div>
+            <div v-else class="empty-tab"><span class="empty-icon"><AppIcon name="receipt" :size="30" /></span><p>No bills found.</p></div>
           </div>
         </div>
       </div>
@@ -184,6 +184,7 @@
 </template>
 
 <script>
+import AppIcon from '../../components/AppIcon.vue'
 import { computed, ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
@@ -199,6 +200,7 @@ const emptyEditForm = () => ({
 })
 
 export default {
+  components: { AppIcon },
   name: 'PatientDetail',
   setup() {
     const route = useRoute()

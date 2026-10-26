@@ -56,7 +56,7 @@
     </div>
 
     <div v-else-if="users.length === 0" class="empty-state">
-      <span class="empty-icon">👥</span>
+      <span class="empty-icon"><AppIcon name="users" :size="30" /></span>
       <p>No users found.</p>
       <span class="text-muted">
         {{ hasFilters ? 'Try adjusting your search or filters.' : 'Add a user to get started.' }}

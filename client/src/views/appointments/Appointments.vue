@@ -71,7 +71,7 @@
 
         <!-- Empty State -->
         <div v-else class="empty-state">
-          <div class="empty-icon">📅</div>
+          <div class="empty-icon"><AppIcon name="calendar" :size="30" /></div>
           <h4>No appointments found</h4>
           <p v-if="statusFilter || dateFilter">Try adjusting your filters or </p>
           <button v-if="statusFilter || dateFilter" class="btn btn-sm btn-secondary" @click="clearFilters">Clear Filters</button>
@@ -173,6 +173,7 @@
 </template>
 
 <script>
+import AppIcon from '../../components/AppIcon.vue'
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
@@ -182,6 +183,7 @@ import { useAuthStore } from '../../store/auth'
 import { formatDate, formatTime, getStatusColor } from '../../utils/helpers'
 
 export default {
+  components: { AppIcon },
   name: 'Appointments',
   setup() {
     const toast = useToast()

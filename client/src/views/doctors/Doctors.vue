@@ -36,13 +36,13 @@
         <p class="specialty">{{ d.specialty_name || 'General Practice' }}</p>
         <div class="doctor-details">
           <span v-if="d.qualification" class="detail-item">
-            <span class="detail-icon">🎓</span> {{ d.qualification }}
+            <span class="detail-icon"><AppIcon name="award" :size="15" /></span> {{ d.qualification }}
           </span>
           <span v-if="d.years_of_experience" class="detail-item">
             <span class="detail-icon">⏱</span> {{ d.years_of_experience }} years experience
           </span>
           <span v-if="d.consultation_fee" class="detail-item fee">
-            <span class="detail-icon">💰</span> {{ formatCurrency(d.consultation_fee) }}
+            <span class="detail-icon"><AppIcon name="dollar" :size="15" /></span> {{ formatCurrency(d.consultation_fee) }}
           </span>
         </div>
         <div class="doctor-status">
@@ -66,7 +66,7 @@
 
     <!-- Empty State -->
     <div v-if="!loading && !doctors.length" class="empty-state">
-      <div class="empty-icon">👨‍⚕️</div>
+      <div class="empty-icon"><AppIcon name="stethoscope" :size="30" /></div>
       <h4>No doctors found</h4>
       <p v-if="search || specialtyFilter">
         No doctors match your current filters.
@@ -82,12 +82,14 @@
 </template>
 
 <script>
+import AppIcon from '../../components/AppIcon.vue'
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
 import { formatCurrency } from '../../utils/helpers'
 
 export default {
+  components: { AppIcon },
   name: 'Doctors',
   setup() {
     const toast = useToast()

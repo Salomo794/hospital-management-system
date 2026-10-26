@@ -1,6 +1,6 @@
 <template>
   <div class="stats-card" :style="borderLeft ? { borderLeft: `4px solid ${borderLeft}` } : {}">
-    <div class="stats-icon" :style="{ background: iconBg }" v-if="iconBg">{{ icon }}</div>
+    <div class="stats-icon" :style="iconBg ? { background: iconBg } : {}" v-if="icon"><AppIcon :name="icon" :size="20" /></div>
     <div class="stats-content">
       <div class="stats-value">{{ value }}</div>
       <div class="stats-label">{{ label }}</div>
@@ -10,11 +10,14 @@
 </template>
 
 <script>
+import AppIcon from './AppIcon.vue'
+
 export default {
   name: 'StatsCard',
+  components: { AppIcon },
   props: {
     icon: { type: String, default: '' },
-    iconBg: { type: String, default: 'var(--brand-50)' },
+    iconBg: { type: String, default: '' },
     value: { type: [String, Number], default: 0 },
     label: { type: String, default: '' },
     change: { type: String, default: '' },

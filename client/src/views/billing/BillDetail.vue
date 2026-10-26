@@ -18,7 +18,7 @@
           <span class="text-muted">{{ formatDateTime(bill.created_at) }}</span>
         </div>
         <span class="badge" :class="'badge-' + getStatusColor(bill.payment_status)">{{ bill.payment_status }}</span>
-        <button class="btn btn-sm btn-outline" @click="printBill">🖨 Print</button>
+        <button class="btn btn-sm btn-outline" @click="printBill"><AppIcon name="printer" :size="15" /> Print</button>
       </div>
 
       <div class="bill-grid">
@@ -86,7 +86,7 @@
             </div>
           </div>
           <div v-else class="empty-state">
-            <span class="empty-icon">💰</span>
+            <span class="empty-icon"><AppIcon name="receipt" :size="30" /></span>
             <p>No payments recorded yet.</p>
           </div>
         </div>
@@ -296,6 +296,7 @@
 </template>
 
 <script>
+import AppIcon from '../../components/AppIcon.vue'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
@@ -304,6 +305,7 @@ import { formatDate, formatDateTime, formatCurrency, getStatusColor } from '../.
 import { fetchPaymentMethods, fetchMobileMoneyConfig, paymentMethodLabel, MOBILE_MONEY_METHOD, disabledMobileMoney } from '../../utils/paymentMethods'
 
 export default {
+  components: { AppIcon },
   name: 'BillDetail',
   setup() {
     const route = useRoute()
