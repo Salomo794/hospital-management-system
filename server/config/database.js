@@ -14,6 +14,7 @@ const {
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
+const { restrictDatabaseFiles } = require('../utils/filePermissions');
 
 const configuredPath = process.env.DB_PATH || path.join(serverDirectory, 'hospital.db');
 const dbPath = configuredPath === ':memory:'
@@ -28,6 +29,10 @@ sqlite.pragma('foreign_keys = ON');
 sqlite.pragma('busy_timeout = 5000');
 if (dbPath !== ':memory:') {
   sqlite.pragma('journal_mode = WAL');
+  // SQLite inherits the process umask (typically 644), which would leave the
+  // patient database readable by every local account. Tighten it to owner-only,
+  // together with the -wal/-shm sidecars that also hold committed data.
+  restrictDatabaseFiles(dbPath);
 }
 
 function tableExists(table) {
