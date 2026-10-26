@@ -652,6 +652,7 @@ test('a signed callback reporting a different amount does not settle the bill', 
   );
   assert.equal(paymentRows[0].status, 'failed');
   assert.match(paymentRows[0].failure_reason, /settlement rejected.*amount|reported .* but .* was requested/i);
+  rateLimit.clearAll();
 });
 
 test('a signed callback in the wrong currency does not settle the bill', async () => {
@@ -677,6 +678,7 @@ test('a signed callback in the wrong currency does not settle the bill', async (
     .expect(200);
   assert.equal(after.body.paid_amount, 0);
   assert.equal(after.body.payment_status, 'pending');
+  rateLimit.clearAll();
 });
 
 test('mobile money webhooks without a valid signature are refused', async () => {
