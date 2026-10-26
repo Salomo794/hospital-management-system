@@ -300,7 +300,7 @@ router.get('/insights', authenticate, authorize('admin', 'receptionist', 'doctor
           severity: 'warning',
           icon: '💰',
           title: 'Unpaid bills outstanding',
-          message: `${pendingBills[0].count} bill(s) totaling ${pendingBills[0].amount.toLocaleString()} currency units are pending or partially paid.`,
+          message: `${pendingBills[0].count} bill(s) worth ${pendingBills[0].amount.toLocaleString()} in total are pending or partially paid.`,
           link: '/billing'
         });
       }
