@@ -3,13 +3,21 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
-const { authenticate, authenticatePortal, authorize } = require('../middleware/auth');
+const { authenticate, authenticatePortal, optionalPortalAuth, authorize } = require('../middleware/auth');
 const {
   ApiError, asyncHandler, parseFiniteNumber, parseInteger, withTransaction,
 } = require('../utils/http');
 const { randomUUID, generateRecordNumber } = require('../utils/ids');
 const { getRequestId } = require('../utils/requestId');
 const { FixedWindowRateLimiter } = require('../utils/rateLimiter');
+const {
+  generateCheckinToken,
+  hashCheckinToken,
+  isTokenExpired,
+  expiryFor,
+  normalizeTtlMinutes,
+  normalizeCheckinTokenInput,
+} = require('../utils/checkinTokens');
 const { isPaymentMethod, PENDING_PAYMENT_STATUS, MOBILE_MONEY_METHOD } = require('../config/paymentMethods');
 const { isMobileMoneyEnabled, publicConfig: mobileMoneyPublicConfig, paystackSettings } = require('../config/mobileMoney');
 const { getAdapter: getMobileMoneyAdapter } = require('../services/mobileMoney');
