@@ -250,6 +250,7 @@ module.exports = {
   SUPPORTED_MARKETS,
   CURRENCY_MARKETS,
   activeProviderName,
+  activeCurrency,
   activeMarket,
   activeNetworks,
   unavailableReason,
