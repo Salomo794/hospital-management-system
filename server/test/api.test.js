@@ -1322,6 +1322,53 @@ test('pharmacy dispensing validates and scopes idempotency keys', async () => {
   assert.equal(afterReplay[0].dispensed_quantity, 1);
 });
 
+test('AI appointment schedule uses the configured hospital timezone date', async () => {
+  const [patients] = await pool.query("SELECT id FROM patients WHERE status = 'active' ORDER BY id LIMIT 1");
+  const [doctors] = await pool.query("SELECT id FROM users WHERE role = 'doctor' AND is_active = 1 ORDER BY id LIMIT 1");
+  assert.ok(patients.length > 0, 'fixture should contain an active patient');
+  assert.ok(doctors.length > 0, 'fixture should contain an active doctor');
+
+  await pool.query(
+    `INSERT INTO appointments
+     (uuid, appointment_number, patient_id, doctor_id, appointment_date, appointment_time, type, status)
+     VALUES (?, ?, ?, ?, '2099-01-01', '12:34', 'consultation', 'scheduled')`,
+    [randomUUID(), `APT-TIMEZONE-${randomUUID()}`, patients[0].id, doctors[0].id]
+  );
+
+  const RealDate = global.Date;
+  const previousTimezone = process.env.APP_TIMEZONE;
+  const fixedInstant = '2098-12-31T23:30:00.000Z';
+  class FixedDate extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : [fixedInstant]));
+    }
+    static now() {
+      return new RealDate(fixedInstant).getTime();
+    }
+  }
+
+  process.env.APP_TIMEZONE = 'Pacific/Kiritimati';
+  global.Date = FixedDate;
+  tokenCache.delete('admin@hospital.com');
+  try {
+    const adminToken = await login();
+    const response = await request(app)
+      .post('/api/ai/chat')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ message: "show today's appointments" })
+      .expect(200);
+
+    assert.match(response.body.response, /appointment\(s\) today/i);
+    assert.ok(Array.isArray(response.body.data));
+    assert.ok(response.body.data.some(item => item.time === '12:34'));
+  } finally {
+    global.Date = RealDate;
+    if (previousTimezone === undefined) delete process.env.APP_TIMEZONE;
+    else process.env.APP_TIMEZONE = previousTimezone;
+    tokenCache.delete('admin@hospital.com');
+  }
+});
+
 test('AI search validation and role boundaries are enforced', async () => {
   const adminToken = await login();
   await request(app)
