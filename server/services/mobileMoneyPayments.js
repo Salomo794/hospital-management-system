@@ -22,7 +22,7 @@ const {
   PENDING_PAYMENT_STATUS,
   COMPLETED_PAYMENT_STATUS,
 } = require('../config/paymentMethods');
-const { getAdapter } = require('./mobileMoney');
+const { getAdapter, activeCurrency } = require('./mobileMoney');
 const { normalizePhone, isValidPhone, isNetwork, networkLabel } = require('./mobileMoney');
 
 // Terminal states. A charge that has already reached one of these must never be
@@ -252,6 +252,7 @@ async function cancelPendingPayment({ connection, req, paymentId }) {
 }
 
 module.exports = {
+  describeSettlementMismatch,
   validateRequest,
   createPendingPayment,
   requestChargeFromProvider,
