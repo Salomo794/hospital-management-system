@@ -293,7 +293,10 @@ export default {
       })
     }
 
-    return { showPin, copied, qrCanvas, today, initials, codeChunks, pinDigits, formatDob, copyCode, printCard }
+    return {
+      showPin, copied, qrCanvas, today, initials, codeChunks, pinDigits, formatDob,
+      copyCode, printCard, checkinPayload, formatExpiry,
+    }
   }
 }
 </script>
@@ -499,6 +502,17 @@ export default {
   background: rgba(0,0,0,.2);
   margin: 0 0 0;
   border-top: 1px solid rgba(255,255,255,.06);
+}
+.pac-qr-placeholder {
+  width: 90px;
+  height: 90px;
+  border-radius: 8px;
+  border: 1px dashed rgba(148, 163, 184, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  opacity: 0.6;
 }
 .pac-qr-canvas {
   border-radius: 10px;
