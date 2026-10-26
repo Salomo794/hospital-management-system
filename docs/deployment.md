@@ -90,7 +90,13 @@ HTTPS cannot be confirmed by reading environment variables — `PUBLIC_URL` star
 
 - The app is reachable over `https://` with a valid, unexpired certificate.
 - Plain HTTP redirects to HTTPS (not merely served alongside it).
-- HSTS is sent (the app enables HSTS when `NODE_ENV=production`).
+- HSTS is sent. Verified: `helmet()` is applied with defaults in `server/index.js`, and
+  helmet's default `Strict-Transport-Security` is `max-age=31536000; includeSubDomains`.
+  This header is emitted **unconditionally** (not gated on `NODE_ENV`), so it is present in
+  every environment. Confirm it on a real response, e.g.
+  `curl -sI https://your-app/api/health | grep -i strict-transport-security`.
+  Note: because the app itself always sends HSTS, verify the *certificate and redirect*
+  at the ingress separately — the header alone does not prove TLS terminates correctly.
 - `TRUST_PROXY=true` is set so rate limiting and audit logs see real client IPs rather
   than the proxy's address.
 
