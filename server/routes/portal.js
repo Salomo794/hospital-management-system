@@ -253,86 +253,245 @@ router.post('/login', asyncHandler(async (req, res) => {
   });
 }));
 
-router.post('/checkin', asyncHandler(async (req, res) => {
-  const identifier = typeof req.body?.identifier === 'string' ? req.body.identifier.trim() : '';
-  const purpose = typeof req.body?.purpose === 'string' ? req.body.purpose.trim().slice(0, 200) : null;
-  if (!identifier) throw new ApiError(400, 'identifier is required');
+// ---------------------------------------------------------------------------
+// Patient check-in
+//
+// A patient number, MRN, phone number or a printed QR code is a *public*
+// identifier: it is printed on letters, shown on reception screens and easy to
+// guess. Accepting one as proof of identity would let anybody check a patient
+// in, enumerate which MRNs exist, and read another patient's queue position.
+//
+// Two authenticated paths replace it:
+//   1. a staff-issued, expiring, single-use kiosk token (POST /checkin-tokens);
+//   2. a signed-in patient portal session (PIN login on the patient's phone).
+// Reception keeps a one-step workflow through the authenticated POST /checkins.
+// ---------------------------------------------------------------------------
+
+function enforceCheckinRateLimit(req, res) {
   const limit = checkinLimiter.consume(`checkin:${req.ip}`);
   if (!limit.allowed) {
     res.setHeader('Retry-After', limit.retryAfterSeconds);
-    throw new ApiError(429, 'Too many check-in attempts. Please wait before trying again.');
+    throw new ApiError(429, 'Too many check-in attempts. Please wait and try again.');
+  }
+}
+
+function readCheckinPurpose(req) {
+  const purpose = typeof req.body?.purpose === 'string' ? req.body.purpose.trim() : '';
+  return purpose ? purpose.slice(0, 200) : null;
+}
+
+function readOptionalAppointmentId(req) {
+  if (req.body?.appointment_id === undefined || req.body?.appointment_id === null || req.body?.appointment_id === '') {
+    return null;
+  }
+  return parseInteger(req.body.appointment_id, 'appointment_id', { min: 1 });
+}
+
+async function assertAppointmentBelongsTo(connection, appointmentId, patientId) {
+  if (!appointmentId) return;
+  const [appointments] = await connection.query(
+    'SELECT id FROM appointments WHERE id = ? AND patient_id = ?',
+    [appointmentId, patientId]
+  );
+  if (appointments.length === 0) {
+    throw new ApiError(400, 'Appointment does not belong to this patient');
+  }
+}
+
+/**
+ * Creates the check-in row and returns the queue position. Shared by the public
+ * kiosk route and the authenticated reception route so the two workflows cannot
+ * drift apart.
+ */
+async function createCheckin(connection, patient, appointmentId, purpose, qrToken) {
+  const [existing] = await connection.query(
+    `SELECT id FROM checkins
+     WHERE patient_id = ? AND checkin_date = date('now') AND status != 'cancelled'
+     LIMIT 1`,
+    [patient.id]
+  );
+  if (existing.length > 0) {
+    throw new ApiError(409, 'This patient is already checked in today.');
   }
 
-  const matches = await findPatientByIdentifier(identifier);
-  if (matches.length > 1) throw new ApiError(409, 'Identifier is ambiguous. Use the patient MRN or QR code.');
-  const patient = matches[0];
-  if (!patient) throw new ApiError(404, 'Patient not found. Please check your MRN or QR code.');
-  if (patient.status !== 'active') throw new ApiError(403, 'This patient record is inactive.');
+  const [inserted] = await connection.query(
+    `INSERT INTO checkins (uuid, patient_id, appointment_id, purpose, status, qr_token)
+     VALUES (?, ?, ?, ?, 'waiting', ?)`,
+    [randomUUID(), patient.id, appointmentId || null, purpose, qrToken]
+  );
+  const [created] = await connection.query('SELECT * FROM checkins WHERE id = ?', [inserted.insertId]);
 
-  const result = await withTransaction(pool, async connection => {
-    // The check-in clock is the hospital's wall clock, not the server's UTC one,
-    // and 'today' is the hospital's calendar day.
-    const checkinTime = zonedDateTime();
-    const today = zonedDate();
-    const [todayAppointments] = await connection.query(
-      `SELECT id, appointment_time, type, reason FROM appointments
-       WHERE patient_id = ? AND appointment_date = ? AND status = 'scheduled'
-       ORDER BY appointment_time ASC LIMIT 1`,
-      [patient.id, today]
-    );
-    const [recentCheckins] = await connection.query(
-      `SELECT * FROM checkins
-       WHERE patient_id = ? AND checkin_date = ?
-       ORDER BY id DESC LIMIT 1`,
-      [patient.id, today]
-    );
+  const [positionRows] = await connection.query(
+    `SELECT COUNT(*) AS count FROM checkins
+     WHERE checkin_date = date('now') AND status IN ('waiting', 'in_consultation')`
+  );
 
-    let checkin = recentCheckins[0];
-    if (checkin) {
-      if (!['waiting', 'in_consultation'].includes(checkin.status)) {
-        throw new ApiError(409, `Today's check-in is already ${checkin.status.replace('_', ' ')}. Please contact reception.`);
-      }
-      if (purpose) {
-        await connection.query('UPDATE checkins SET purpose = ? WHERE id = ?', [purpose, checkin.id]);
-        checkin.purpose = purpose;
-      }
-    } else {
-      const [insertResult] = await connection.query(
-        `INSERT INTO checkins
-         (uuid, patient_id, appointment_id, checkin_time, checkin_date, purpose, status, qr_token)
-         VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?)`,
-        [
-          randomUUID(), patient.id, todayAppointments[0]?.id || null, checkinTime, today,
-          purpose || todayAppointments[0]?.type || 'visit', identifier,
-        ]
-      );
-      const [created] = await connection.query('SELECT * FROM checkins WHERE id = ?', [insertResult.insertId]);
-      checkin = created[0];
-    }
+  return { checkin: created[0], queuePosition: Number(positionRows[0].count) };
+}
 
-    const [positionRows] = await connection.query(
-      `SELECT COUNT(*) AS count FROM checkins
-       WHERE checkin_date = ? AND status IN ('waiting', 'in_consultation') AND id <= ?`,
-      [today, checkin.id]
-    );
-    return {
-      checkin,
-      todayAppointments,
-      queuePosition: Number(positionRows[0].count),
-    };
+/**
+ * Staff issue a short-lived, single-use check-in code for one patient.
+ * The plaintext token is returned exactly once and only its SHA-256 hash is
+ * persisted, so a database leak cannot be replayed at the kiosk.
+ */
+router.post('/checkin-tokens', authenticate, authorize('admin', 'doctor', 'nurse', 'receptionist'), asyncHandler(async (req, res) => {
+  const patientId = parseInteger(req.body?.patient_id, 'patient_id', { min: 1 });
+  const appointmentId = readOptionalAppointmentId(req);
+
+  let ttlMinutes;
+  try {
+    ttlMinutes = normalizeTtlMinutes(req.body?.ttl_minutes);
+  } catch (error) {
+    throw new ApiError(400, error.message);
+  }
+
+  const [patients] = await pool.query('SELECT id, status FROM patients WHERE id = ?', [patientId]);
+  if (patients.length === 0) throw new ApiError(404, 'Patient not found');
+  if (patients[0].status !== 'active') {
+    throw new ApiError(409, 'Cannot issue a check-in token for an inactive patient');
+  }
+
+  await assertAppointmentBelongsTo(pool, appointmentId, patientId);
+
+  const { token, hash } = generateCheckinToken();
+  const expiresAt = expiryFor(ttlMinutes);
+
+  const [insert] = await pool.query(
+    `INSERT INTO checkin_tokens (patient_id, appointment_id, token_hash, expires_at, created_by)
+     VALUES (?, ?, ?, ?, ?)`,
+    [patientId, appointmentId, hash, expiresAt, req.user.id]
+  );
+
+  await recordAudit({
+    req,
+    action: 'issue_checkin_token',
+    table: 'checkin_tokens',
+    recordId: insert.insertId,
+    summary: `Issued a single-use check-in token for patient #${patientId}`,
   });
 
-  const { checkin, todayAppointments, queuePosition } = result;
-  // This endpoint is intentionally usable at a public check-in kiosk. Do not
-  // return patient identifiers, demographics, or appointment/clinical details:
-  // the identifier used for check-in (such as an MRN) is not an authentication
-  // secret and may be visible to other people at reception.
+  res.status(201).json({
+    success: true,
+    id: insert.insertId,
+    token,
+    expires_at: expiresAt,
+    expires_in_seconds: ttlMinutes * 60,
+  });
+}));
+
+/**
+ * Public kiosk check-in. Requires a single-use token, or a signed-in portal
+ * session. Never accepts a bare MRN / access code / phone number.
+ */
+router.post('/checkin', optionalPortalAuth, asyncHandler(async (req, res) => {
+  enforceCheckinRateLimit(req, res);
+
+  const purpose = readCheckinPurpose(req);
+  const submitted = normalizeCheckinTokenInput(req.body?.checkin_token);
+  let patient = req.patient || null;
+  let tokenRow = null;
+  let appointmentId = null;
+
+  if (submitted) {
+    const [rows] = await pool.query(
+      `SELECT id, patient_id, appointment_id, expires_at, used_at, revoked_at
+       FROM checkin_tokens WHERE token_hash = ?`,
+      [hashCheckinToken(submitted)]
+    );
+    tokenRow = rows[0];
+    if (!tokenRow || tokenRow.revoked_at) {
+      throw new ApiError(401, 'This check-in code is not valid. Please ask reception for a new one.');
+    }
+    if (tokenRow.used_at) {
+      throw new ApiError(409, 'This check-in code has already been used.');
+    }
+    if (isTokenExpired(tokenRow.expires_at)) {
+      throw new ApiError(410, 'This check-in code has expired. Please ask reception for a new one.');
+    }
+    appointmentId = tokenRow.appointment_id;
+  }
+
+  if (!patient && !tokenRow) {
+    throw new ApiError(
+      401,
+      'A check-in code from reception, or a signed-in patient portal session, is required to check in.'
+    );
+  }
+
+  const result = await withTransaction(pool, async (connection) => {
+    if (tokenRow) {
+      // Claim the token atomically so two kiosks cannot redeem the same code.
+      const [claim] = await connection.query(
+        `UPDATE checkin_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL`,
+        [new Date().toISOString(), tokenRow.id]
+      );
+      if (!claim.affectedRows) {
+        throw new ApiError(409, 'This check-in code has already been used.');
+      }
+
+      const [patients] = await connection.query('SELECT id, status FROM patients WHERE id = ?', [tokenRow.patient_id]);
+      patient = patients[0];
+      if (!patient || patient.status !== 'active') {
+        throw new ApiError(401, 'Patient record not found or inactive.');
+      }
+    }
+
+    return createCheckin(connection, patient, appointmentId, purpose, tokenRow ? hashCheckinToken(submitted) : null);
+  });
+
+  await recordAudit({
+    req,
+    action: 'patient_checkin',
+    table: 'checkins',
+    recordId: result.checkin.id,
+    summary: tokenRow
+      ? 'Patient self check-in with a single-use kiosk token'
+      : 'Patient self check-in with a portal session',
+  });
+
+  // Public response is deliberately free of names, MRNs, demographics and
+  // appointment detail.
   res.json({
     success: true,
     checked_in: true,
-    queue_position: queuePosition,
-    status: checkin.status,
+    queue_position: result.queuePosition,
+    status: result.checkin.status,
     message: 'Check-in successful. Please wait for a staff member to assist you.',
+  });
+}));
+
+/**
+ * Authenticated reception/clinical check-in, so front-desk staff keep the
+ * one-step workflow they had before the public endpoint was locked down.
+ */
+router.post('/checkins', authenticate, authorize('admin', 'doctor', 'nurse', 'receptionist'), asyncHandler(async (req, res) => {
+  const patientId = parseInteger(req.body?.patient_id, 'patient_id', { min: 1 });
+  const appointmentId = readOptionalAppointmentId(req);
+  const purpose = readCheckinPurpose(req);
+
+  const [patients] = await pool.query('SELECT id, status FROM patients WHERE id = ?', [patientId]);
+  const patient = patients[0];
+  if (!patient) throw new ApiError(404, 'Patient not found');
+  if (patient.status !== 'active') throw new ApiError(409, 'Cannot check in an inactive patient');
+
+  await assertAppointmentBelongsTo(pool, appointmentId, patientId);
+
+  const result = await withTransaction(pool, (connection) => (
+    createCheckin(connection, patient, appointmentId, purpose, null)
+  ));
+
+  await recordAudit({
+    req,
+    action: 'staff_checkin',
+    table: 'checkins',
+    recordId: result.checkin.id,
+    summary: `Staff checked in patient #${patientId}`,
+  });
+
+  res.status(201).json({
+    success: true,
+    checkin: result.checkin,
+    queue_position: result.queuePosition,
   });
 }));
 
