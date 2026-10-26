@@ -137,6 +137,14 @@ function paystackSettings() {
   };
 }
 
+// The currency this deployment's charges are denominated in. A settle-in-full
+// check compares the provider's report against this, so it has to be the same
+// value that was sent when the charge was created - which is why the mock
+// reports NGN rather than inheriting a real provider's setting.
+function activeCurrency() {
+  return activeProviderName() === PROVIDER_MOCK ? 'NGN' : paystackSettings().currency;
+}
+
 // An explicit market wins; otherwise it is inferred from the currency, which is
 // the setting a deployment is most likely to have right already.
 function activeMarket() {
