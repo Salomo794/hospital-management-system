@@ -43,7 +43,8 @@ The server serves the built client from `client/dist`. No CORS needed between cl
 Notes:
 - Seed is blocked in production; only seed with ALLOW_DEMO_SEED=true on an isolated DB.
 - DB backups: `npm run db:backup` can run as a cron job or manually. Consider offsite copy.
-- Better-sqlite3 needs native build (Render Node 22 will handle).
+- Better-sqlite3 is a native addon and needs a matching Node ABI — see the
+  **Runtime requirement: Node.js >= 22** section at the top. On Node 20 the process segfaults.
 
 ## Option 2: Vercel frontend + Render backend (split)
 Client uses relative `/api` paths; so Vercel must rewrite `/api/*` to Render backend.
