@@ -110,10 +110,25 @@ advertise online payment as available.
 
 ## Backup and restore drill (run before go-live)
 
-1. `npm run db:backup` and confirm the file is created with `600` permissions.
-2. Copy the backup to an **isolated** environment — never test a restore over live data.
-3. Restore into a fresh `DB_PATH` and verify row counts and key tables match.
-4. Confirm the application starts and serves `/api/health` against the restored database.
+All commands run from `server/`. `--verify` and `--restore` take a **file path**, so they are
+passed through npm with `--` (this is the syntax the tool itself prints when it finishes).
+
+1. `npm run db:backup` — writes a consistent copy plus a `.json` manifest.
+   Confirm the file is owner-only: `ls -l` should show `-rw-------` (`600`), and the
+   `backups/` directory `drwx------` (`700`). Both are enforced by the application.
+2. `npm run db:backup:list` — confirms the new backup is visible and its size looks sane.
+3. `npm run db:backup -- --verify <path/to/backup.db>` — runs an integrity check
+   (`integrity_check ok`) and table/row-count summary. Errors here mean **do not** trust the file.
+4. Copy the backup to an **isolated** environment — never test a restore over live data.
+5. `npm run db:backup -- --restore <path/to/backup.db>` into a fresh `DB_PATH`, then verify
+   row counts and key tables match. Stop the API before restoring and restart it afterwards
+   so it re-opens the restored file.
+6. Confirm the application starts and serves `/api/health` against the restored database.
+
+Retention keeps a fixed number of backups by default; use `-- --keep N` to change it and
+`-- --dir <path>` to target another directory (useful when the backup volume is mounted
+separately from the database volume). Encrypted backups require `BACKUP_ENCRYPTION_KEY`;
+`--verify` transparently decrypts to a scratch copy and removes it afterwards.
 
 ## Environment variables required
 See README.md and server/.env.example. Critical: JWT_SECRET (>=32), DB_PATH, PUBLIC_URL (https in prod), CORS_ORIGINS (if split), SMTP for password resets in prod.
