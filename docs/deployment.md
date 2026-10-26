@@ -57,6 +57,57 @@ Client uses relative `/api` paths; so Vercel must rewrite `/api/*` to Render bac
 ## Important: SQLite persistence on Render
 Render free tier has ephemeral filesystem. To persist data, you MUST attach a Render Persistent Disk to the web service and set DB_PATH to the mount path (e.g. /var/data/hospital.db). Disk is a paid add-on for persistent storage. Backups are still recommended.
 
+## Protecting the database at rest (required for patient data)
+
+This system stores patient data, so **encryption at rest is required** in production. The
+application enforces owner-only filesystem permissions (`600` for the database and backup
+files, `700` for their directories — see `server/utils/filePermissions.js`), but file
+permissions alone are **not** encryption: anyone with disk or snapshot access can still read
+the raw file.
+
+Choose one of these, at the infrastructure layer:
+
+1. **Encrypted persistent volume (preferred).** Attach a volume with encryption at rest
+   enabled (Render/Vercel managed volumes and most cloud block stores support this), and keep
+   the database + backups on it.
+2. **Managed encrypted database.** If you outgrow SQLite, migrate to a managed database that
+   offers encryption at rest. Do not swap the engine silently — plan and test the migration.
+
+Key and credential handling:
+
+- Keep `BACKUP_ENCRYPTION_KEY`, `JWT_SECRET`, and any cloud backup credentials in your
+  platform's secret manager — **never** in the repository or in a committed `.env` file.
+- Rotate any credential that was ever committed or shared in plaintext.
+- Limit restore access: backups are a full copy of patient data.
+
+Verify with a restore drill (below) before go-live.
+
+## Verifying TLS at the real deployment boundary
+
+HTTPS cannot be confirmed by reading environment variables — `PUBLIC_URL` starting with
+`https://` proves only that a string was set. At the actual ingress/reverse proxy, confirm:
+
+- The app is reachable over `https://` with a valid, unexpired certificate.
+- Plain HTTP redirects to HTTPS (not merely served alongside it).
+- HSTS is sent (the app enables HSTS when `NODE_ENV=production`).
+- `TRUST_PROXY=true` is set so rate limiting and audit logs see real client IPs rather
+  than the proxy's address.
+
+## Payments: Rwanda mobile money is NOT live
+
+Online mobile-money payments are **not** enabled for production. The code deliberately
+refuses to run simulated payments when `NODE_ENV=production`. Enabling MTN Mobile Money /
+Airtel Money requires the hospital's own merchant account, provider approval, and production
+credentials — see `docs/audit/mobile-money-rwanda-2026-10-26.md`. Until then, do not
+advertise online payment as available.
+
+## Backup and restore drill (run before go-live)
+
+1. `npm run db:backup` and confirm the file is created with `600` permissions.
+2. Copy the backup to an **isolated** environment — never test a restore over live data.
+3. Restore into a fresh `DB_PATH` and verify row counts and key tables match.
+4. Confirm the application starts and serves `/api/health` against the restored database.
+
 ## Environment variables required
 See README.md and server/.env.example. Critical: JWT_SECRET (>=32), DB_PATH, PUBLIC_URL (https in prod), CORS_ORIGINS (if split), SMTP for password resets in prod.
 
