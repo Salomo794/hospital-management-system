@@ -2,7 +2,7 @@
 
 **Repository:** `Salomo794/hospital-management-system`
 **Date:** 2026-10-26
-**Branch:** `appjet` (fixes applied here; nothing merged, nothing deployed)
+**Branch:** `fix/ci-workflow-and-credential-logging` (dedicated branch off `main`; nothing merged, nothing deployed)
 **Companion document:** `docs/audit/initial-audit-2026-10-26.md` (initial findings HMS-001…HMS-008)
 
 This document records what changed, and — importantly — the commands that were actually
