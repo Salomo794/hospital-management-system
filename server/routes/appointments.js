@@ -140,7 +140,7 @@ router.post('/', authenticate, authorize(...APPOINTMENT_ROLES), validateAppointm
 
   const [[patient], [doctor]] = await Promise.all([
     pool.query('SELECT id FROM patients WHERE id = ? AND status = ?', [patientId, 'active']),
-    pool.query("SELECT id, dp.schedule, dp.is_available FROM users u LEFT JOIN doctor_profiles dp ON dp.user_id = u.id WHERE u.id = ? AND u.role = 'doctor' AND u.is_active = 1", [doctorId]),
+    pool.query("SELECT u.id, dp.schedule, dp.is_available FROM users u LEFT JOIN doctor_profiles dp ON dp.user_id = u.id WHERE u.id = ? AND u.role = 'doctor' AND u.is_active = 1", [doctorId]),
   ]);
   if (patient.length === 0) throw new ApiError(400, 'Patient not found or inactive');
   if (doctor.length === 0) throw new ApiError(400, 'Doctor not found or inactive');
