@@ -619,6 +619,66 @@ test('mobile money rejects partial amounts, unknown networks, and duplicate in-f
     .expect(202);
 });
 
+test('a signed callback reporting a different amount does not settle the bill', async () => {
+  const token = await login();
+  const bill = await createBillWithBalance(token, 50);
+  const initiated = await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ phone: '0271234567', network: 'atl', email: 'patient@example.com' })
+    .expect(202);
+  const reference = initiated.body.payment.payment_number;
+
+  // 1.00 instead of 50.00, correctly signed. The signature proves the sender is
+  // the provider; it says nothing about whether this is the amount that was asked
+  // for, so the charge must not close on it.
+  settleMockCharge(reference, { success: true });
+  const underpaid = await signedWebhook({
+    event: 'charge.success',
+    data: { reference, status: 'success', amount: 100, currency: 'NGN' },
+  }).expect(200);
+  assert.equal(underpaid.body.status, 'failed', 'a mismatched amount must not be treated as paid');
+
+  const after = await request(app)
+    .get(`/api/billing/${bill.id}`)
+    .set('Authorization', `Bearer ${token}`)
+    .expect(200);
+  assert.equal(after.body.paid_amount, 0, 'the bill must stay unpaid');
+  assert.equal(after.body.payment_status, 'pending');
+
+  const [paymentRows] = await pool.query(
+    'SELECT status, failure_reason FROM payments WHERE transaction_reference = ?',
+    [reference]
+  );
+  assert.equal(paymentRows[0].status, 'failed');
+  assert.match(paymentRows[0].failure_reason, /settlement rejected.*amount|reported .* but .* was requested/i);
+});
+
+test('a signed callback in the wrong currency does not settle the bill', async () => {
+  const token = await login();
+  const bill = await createBillWithBalance(token, 40);
+  const initiated = await request(app)
+    .post(`/api/billing/${bill.id}/mobile-money`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ phone: '0271234567', network: 'atl', email: 'patient@example.com' })
+    .expect(202);
+  const reference = initiated.body.payment.payment_number;
+
+  settleMockCharge(reference, { success: true });
+  const wrongCurrency = await signedWebhook({
+    event: 'charge.success',
+    data: { reference, status: 'success', amount: 4000, currency: 'GHS' },
+  }).expect(200);
+  assert.equal(wrongCurrency.body.status, 'failed');
+
+  const after = await request(app)
+    .get(`/api/billing/${bill.id}`)
+    .set('Authorization', `Bearer ${token}`)
+    .expect(200);
+  assert.equal(after.body.paid_amount, 0);
+  assert.equal(after.body.payment_status, 'pending');
+});
+
 test('mobile money webhooks without a valid signature are refused', async () => {
   const payload = JSON.stringify({
     event: 'charge.success',
