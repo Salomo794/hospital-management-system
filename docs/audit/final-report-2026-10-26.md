@@ -62,7 +62,12 @@ Legitimate reception/kiosk workflows are preserved (staff issue tokens; kiosk re
 
 - SQLite files and backups were created with world-readable permissions.
 - **Fix:** `server/utils/filePermissions.js` enforces owner-only access — `600` for database/backup files, `700` for their directories — applied on creation.
-- Backup **integrity and restoration** were exercised against an isolated development database.
+- Backup **integrity and restoration** were exercised against an isolated development database:
+  5 synthetic rows → backup (`integrity_check ok`) → 3 rows deleted to simulate loss → restore
+  → 5 rows with identical values, permissions still `600` (§3.2).
+- **Not verifiable from inside the repo:** encryption at rest depends on the volume/disk the
+  deployment mounts, and TLS depends on the ingress. Both are documented as deployment
+  requirements rather than silently assumed (§5).
 - Encrypted-at-rest storage is a **deployment** concern and is documented rather than silently changed; see `docs/deployment.md`.
 
 ### 1.4 Rwanda mobile money — simulated, not real (HIGH, documented as blocked)
