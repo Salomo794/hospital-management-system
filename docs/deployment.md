@@ -113,9 +113,15 @@ advertise online payment as available.
 See README.md and server/.env.example. Critical: JWT_SECRET (>=32), DB_PATH, PUBLIC_URL (https in prod), CORS_ORIGINS (if split), SMTP for password resets in prod.
 
 ## First run checklist
-- [ ] Set strong JWT_SECRET
+- [ ] Runtime is **Node.js >= 22** (`node --version`) — Node 20 segfaults the DB driver
+- [ ] Set strong JWT_SECRET (>=32 chars, from a secret manager, never committed)
 - [ ] Set DB_PATH to persistent location
+- [ ] Database volume has **encryption at rest** enabled
+- [ ] Key/backup credentials stored outside the repo
 - [ ] Configure PUBLIC_URL to your app URL
-- [ ] Ensure HTTPS (Render/Vercel provide)
+- [ ] Verify HTTPS + HTTP->HTTPS redirect + HSTS at the ingress (not just the env var)
+- [ ] Set TRUST_PROXY=true so rate limits and audit logs see real client IPs
 - [ ] Run `npm run db:setup` (done by preDeployCommand)
 - [ ] Do NOT run `npm run db:seed` in production unless explicitly for demo
+- [ ] Complete a backup + restore drill on an isolated environment
+- [ ] Confirm mobile-money payments remain disabled until provider credentials exist
