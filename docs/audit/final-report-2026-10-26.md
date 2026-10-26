@@ -3,7 +3,8 @@
 **Date:** 2026-10-26
 **Branch:** `appjet` — verification in §3 was executed at commit `148f997` (later commits in this
 branch are documentation corrections only and do not change code or test outcomes)
-**Base:** `main` @ `644cc61` — clean fast-forward, no merge conflicts
+**Base:** `main` @ `644cc61` — `appjet` is **63 ahead / 0 behind**, so it merges as a clean
+fast-forward with no conflicts
 **Status:** All local checks pass. **Nothing has been merged or deployed.**
 
 ---
