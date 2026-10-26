@@ -460,6 +460,24 @@ async function setup() {
       FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL
     )`);
 
+    // Kiosk check-in credentials. Only the SHA-256 hash of the bearer token is
+    // stored, so a database dump cannot be replayed against /api/portal/checkin.
+    await conn.query(`CREATE TABLE IF NOT EXISTS checkin_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      patient_id INTEGER NOT NULL,
+      appointment_id INTEGER,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      revoked_at TEXT,
+      created_by INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
+      FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL
+    )`);
+    await conn.query('CREATE INDEX IF NOT EXISTS idx_checkin_tokens_expires ON checkin_tokens(expires_at)');
+    await conn.query('CREATE INDEX IF NOT EXISTS idx_checkin_tokens_patient ON checkin_tokens(patient_id)');
+
     const [checkinColumns] = await conn.query('PRAGMA table_info(checkins)');
     if (!checkinColumns.some(column => column.name === 'checkin_date')) {
       await conn.query('ALTER TABLE checkins ADD COLUMN checkin_date TEXT');
