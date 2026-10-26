@@ -9,7 +9,7 @@ const pid = p.lastInsertRowid;
 db.prepare(`INSERT INTO bills (uuid, bill_number, patient_id, total_amount, net_amount, payment_status)
   VALUES (?,?,?,?,?,?)`).run(u(), 'BILL-RESTORE-1', pid, 12345.67, 12345.67, 'pending');
 db.prepare(`INSERT INTO patients (uuid, mrn, first_name, last_name, date_of_birth, gender, status)
-  VALUES (?,?,?,?,?,?)`).run(u(), 'MRN-RESTORE-2', 'Second', 'Probe', '1985-02-02', 'male', 'active');
+  VALUES (?,?,?,?,?,?,?)`).run(u(), 'MRN-RESTORE-2', 'Second', 'Probe', '1985-02-02', 'male', 'active');
 const counts = {};
 for (const t of ['patients', 'bills']) counts[t] = db.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c;
 console.log('seeded', JSON.stringify(counts), 'patient id', pid);
