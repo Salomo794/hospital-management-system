@@ -22,8 +22,17 @@ const seedDatabase = require('../config/seed');
 const app = require('../index');
 const pool = require('../config/database');
 const rateLimit = require('../middleware/rateLimit');
+const { clearPortalRateLimits } = require('../utils/portalRateLimits');
+const {
+  generateCheckinToken,
+  expiryFor,
+} = require('../utils/checkinTokens');
 const { evaluateSafety } = require('../utils/safety');
 const { settleMockCharge, getMockCharge, mockWebhookSignature } = require('../services/mobileMoney');
+
+// Mirrors the per-IP budget in utils/portalRateLimits.js. Kept as a named
+// constant so the throttling test fails loudly if the real limit moves.
+const CHECKIN_ATTEMPT_LIMIT = 20;
 
 // Signs and posts exactly these bytes. Supertest re-serialises an object, so the
 // signature has to be computed over the literal string that goes on the wire.
