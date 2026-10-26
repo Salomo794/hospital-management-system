@@ -1358,7 +1358,7 @@ async function createCheckinPatient(adminToken, label) {
   return { patient: response.body.patient, plainPin: response.body.plain_pin };
 }
 
-async function issueCheckinToken(adminToken, patientId, body = {}) {
+function issueCheckinToken(adminToken, patientId, body = {}) {
   return request(app)
     .post('/api/portal/checkin-tokens')
     .set('Authorization', `Bearer ${adminToken}`)
@@ -1552,11 +1552,13 @@ test('only clinical and reception staff can mint check-in tokens', async () => {
     .post('/api/portal/login')
     .send({ identifier: patient.email, portal_pin: plainPin })
     .expect(200);
+  // A portal token is not a staff token: the staff authenticator refuses it
+  // outright rather than letting it reach the role check.
   await request(app)
     .post('/api/portal/checkin-tokens')
     .set('Authorization', `Bearer ${portalLogin.body.token}`)
     .send({ patient_id: patient.id })
-    .expect(403);
+    .expect(401);
 
   // A patient cannot mint a token for a different patient even if they know
   // that patient's id.
@@ -1565,7 +1567,7 @@ test('only clinical and reception staff can mint check-in tokens', async () => {
     .post('/api/portal/checkin-tokens')
     .set('Authorization', `Bearer ${portalLogin.body.token}`)
     .send({ patient_id: other.patient.id })
-    .expect(403);
+    .expect(401);
 
   await issueCheckinToken(adminToken, patient.id, { ttl_minutes: 0 }).expect(400);
   await issueCheckinToken(adminToken, patient.id, { ttl_minutes: 60 * 48 }).expect(400);
