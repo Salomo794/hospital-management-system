@@ -1352,6 +1352,9 @@ async function createCheckinPatient(adminToken, label) {
       email: `checkin-${label.toLowerCase()}-${randomUUID()}@example.com`,
     })
     .expect(201);
+  // Each case registers several patients; hand the shared write budget back so
+  // the records created here do not throttle the case's real assertions.
+  rateLimit.clearAll();
   return { patient: response.body.patient, plainPin: response.body.plain_pin };
 }
 
