@@ -12,7 +12,11 @@
     "setup": "node config/setup.js",
     "seed": "node config/seed.js",
     "test": "node --test --test-concurrency=1",
-    "check": "node --check index.js"
+    "check": "node --check index.js",
+    "db:backup": "node config/backup.js",
+    "db:backup:list": "node config/backup.js --list",
+    "db:backup:verify": "node config/backup.js --verify",
+    "db:backup:restore": "node config/backup.js --restore"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
