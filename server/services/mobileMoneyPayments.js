@@ -22,7 +22,8 @@ const {
   PENDING_PAYMENT_STATUS,
   COMPLETED_PAYMENT_STATUS,
 } = require('../config/paymentMethods');
-const { getAdapter, activeCurrency } = require('./mobileMoney');
+const { getAdapter } = require('./mobileMoney');
+const { activeCurrency } = require('../config/mobileMoney');
 const { normalizePhone, isValidPhone, isNetwork, networkLabel } = require('./mobileMoney');
 
 // Terminal states. A charge that has already reached one of these must never be
