@@ -358,7 +358,7 @@ export default {
       removeStoredItem('portal-patient')
       loginForm.identifier = ''
       loginForm.portal_pin = ''
-      checkinForm.identifier = ''
+      checkinForm.checkin_token = ''
       checkinForm.purpose = ''
       activeTab.value = 'appointments'
       loading.value = false
@@ -499,7 +499,14 @@ export default {
       checkinController = controller
       checkingIn.value = true
       try {
-        const { data } = await portalApi.post('/portal/checkin', { ...checkinForm }, { signal: controller.signal })
+        const payload = { purpose: checkinForm.purpose }
+        // A signed-in patient is already authenticated; an anonymous kiosk must
+        // present the single-use code issued by reception.
+        if (!requestToken) payload.checkin_token = checkinForm.checkin_token
+        const { data } = await portalApi.post('/portal/checkin', payload, {
+          signal: controller.signal,
+          ...(requestToken ? { headers: requestHeaders(requestToken) } : {}),
+        })
         if (
           componentUnmounted ||
           controller.signal.aborted ||
@@ -508,6 +515,7 @@ export default {
           (requestToken && requestToken !== token.value)
         ) return
         checkinResult.value = data
+        checkinForm.checkin_token = ''
         if (token.value) await loadPortalData()
       } catch (requestError) {
         if (
@@ -650,7 +658,7 @@ export default {
       clearPortalData()
       loginForm.identifier = ''
       loginForm.portal_pin = ''
-      checkinForm.identifier = ''
+      checkinForm.checkin_token = ''
       checkinForm.purpose = ''
     })
 
