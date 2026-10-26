@@ -152,7 +152,7 @@ Refusing in production is the point. Silently not sending would leave a user wai
 
 The application is in good shape. The deployment is not, and that difference matters more than any feature still missing. These are the outstanding items, in the order they should be dealt with.
 
-**Production startup guard.** When `NODE_ENV=production`, the API now refuses to start unless the public URL uses HTTPS, every `CORS_ORIGINS` entry is an exact HTTPS origin (no path or trailing slash), SMTP host/user/password are configured, the backup encryption key is non-placeholder and at least 16 characters, and `DB_PATH` is not `:memory:`. This is a configuration check, not a replacement for a real TLS deployment or a verified restore test.
+**Production startup guard.** When `NODE_ENV=production`, the API refuses to start unless the public URL uses HTTPS, every `CORS_ORIGINS` entry is an exact HTTPS origin, SMTP host/user/password are configured, the backup encryption key is non-placeholder and at least 16 characters, `DB_PATH` is persistent, and `CLINICAL_INTERACTIONS_APPROVED=true` is explicitly set after qualified clinical review. It also refuses to start if the database still reports the bundled demo drug-interaction data. The approval flag is an operator attestation, not automated proof that a dataset is clinically correct. This does not replace real TLS, MFA, or a verified offsite restore.
 
 Before deploying, set these in your hosting provider's secret/environment settings (not in Git):
 ```dotenv
@@ -164,12 +164,14 @@ SMTP_HOST=your-smtp-host
 SMTP_USER=your-smtp-user
 SMTP_PASS=your-smtp-password
 BACKUP_ENCRYPTION_KEY=use-a-long-unique-secret-from-your-secret-manager
+# Keep false until a qualified clinical lead reviews the imported reference.
+CLINICAL_INTERACTIONS_APPROVED=false
 ```
 Replace the example URLs, paths and values with real deployment values. Do not commit `server/.env`, and never copy the example secret into production. Run the GitHub Actions checks before merging the readiness pull request; tests/build have not yet been confirmed as passing.
 
 **1. Terminate TLS in front of the application.** There is no HTTPS anywhere in the server; the only `https` in the codebase is the Paystack API URL. Every record, login and session token currently crosses the network in clear text. Put a reverse proxy in front — Caddy is the shortest path, since it obtains and renews certificates itself — and set `PUBLIC_URL` to the `https://` origin so reset links point at it.
 
-**2. Load a real drug-interaction dataset.** This is the one item that can physically hurt someone rather than merely expose data. The bundled list is 16 well-known pairs across 20 demo medicines; a maintained reference covers thousands of medicines and tens of thousands of pairs. Until one is loaded the screening check will report most real interactions as absent, and silence from a check is read as safety.
+**2. Load and clinically review a real drug-interaction dataset.** This is the one item that can physically hurt someone rather than merely expose data. The bundled list is 16 well-known pairs across 20 demo medicines; a maintained reference covers thousands of medicines and tens of thousands of pairs. Until one is loaded the screening check will report most real interactions as absent, and silence from a check is read as safety. Production now refuses to start while the reference is still marked as demo data. After importing a maintained source, have a qualified clinical lead review the source, licensing, version, medicine-name coverage and clinical suitability; only then set `CLINICAL_INTERACTIONS_APPROVED=true`. That flag is an explicit sign-off, not automatic validation.
 
 Because that failure is quiet, it is made loud in three places: the server prints a `DRUG-INTERACTION DATA IS NOT CLINICAL` block on every start, every safety evaluation carries `provenance` in its response, and `GET /api/pharmacy/interactions/provenance` reports the source, version and catalogue coverage. Load a dataset with:
 
@@ -177,7 +179,7 @@ Because that failure is quiet, it is made loud in three places: the server print
 npm run db:interactions -- --file data/interactions.csv --name "BNF Interaction Data" --version 2026.03
 ```
 
-The CSV needs `medicine_a,medicine_b,severity,description,clinical_management`. Rows naming a medicine that is not in the catalogue are reported rather than dropped, because a dataset that silently matched nothing would look loaded without being so. The import is transactional and marks the reference authoritative only once it completes.
+The CSV needs `medicine_a,medicine_b,severity,description,clinical_management`. Rows naming a medicine that is not in the catalogue are reported rather than dropped, because a dataset that silently matched nothing would look loaded without being so. The import is transactional and records provenance, but a successful import alone does not mean the reference is medically validated.
 
 **3. Configure SMTP.** Without it, password resets are refused in production — the right behaviour, but it does mean the feature is unavailable. The message body carries a single-use reset link, so it is withheld from the logs unless `MAIL_LOG_TOKENS=true`, and never in production.
 
