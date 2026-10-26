@@ -119,7 +119,8 @@ app.get('/api/health', async (req, res, next) => {
     await pool.isReady();
     res.json({ status: 'OK', timestamp: new Date().toISOString() });
   } catch (error) {
-    res.status(503).json({ status: 'UNAVAILABLE', message: error.message });
+    // Keep internal database errors and filesystem paths out of public responses.
+    res.status(503).json({ status: 'UNAVAILABLE', message: 'Database is not ready' });
   }
 });
 
