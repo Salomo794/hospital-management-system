@@ -1322,32 +1322,308 @@ test('pharmacy dispensing validates and scopes idempotency keys', async () => {
   assert.equal(afterReplay[0].dispensed_quantity, 1);
 });
 
-test('public patient check-in response omits personal and appointment details', async () => {
-  const adminToken = await login();
-  const patientResponse = await request(app)
+// ---------------------------------------------------------------------------
+// Public patient check-in
+//
+// An MRN, access code, phone number or printed QR code is a public identifier,
+// so none of them may act as a credential. These cases lock in the replacement
+// flows: a staff-issued single-use token, a signed-in portal session, and the
+// authenticated reception route.
+// ---------------------------------------------------------------------------
+
+async function createCheckinPatient(adminToken, label) {
+  const response = await request(app)
     .post('/api/patients')
     .set('Authorization', `Bearer ${adminToken}`)
     .send({
-      first_name: 'Privacy',
+      first_name: label,
       last_name: 'Checkin',
       date_of_birth: '1990-04-05',
       gender: 'female',
-      email: `checkin-privacy-${randomUUID()}@example.com`,
+      email: `checkin-${label.toLowerCase()}-${randomUUID()}@example.com`,
     })
     .expect(201);
-  const patient = patientResponse.body.patient;
+  return { patient: response.body.patient, plainPin: response.body.plain_pin };
+}
+
+async function issueCheckinToken(adminToken, patientId, body = {}) {
+  return request(app)
+    .post('/api/portal/checkin-tokens')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ patient_id: patientId, ...body });
+}
+
+test('public check-in refuses a bare patient identifier', async () => {
+  clearPortalRateLimits();
+  const adminToken = await login();
+  const { patient } = await createCheckinPatient(adminToken, 'Identifier');
+
+  // Every public identifier the old implementation trusted, in every shape it
+  // accepted: mrn, 4-digit access code, phone, email, and the raw patient uuid.
+  const attempts = [
+    { identifier: patient.mrn, purpose: 'routine visit' },
+    { identifier: patient.access_code, purpose: 'routine visit' },
+    { identifier: patient.email, purpose: 'routine visit' },
+    { identifier: patient.uuid, purpose: 'routine visit' },
+    { mrn: patient.mrn },
+    { access_code: patient.access_code },
+    { patient_id: patient.id },
+  ];
+
+  for (const body of attempts) {
+    const response = await request(app)
+      .post('/api/portal/checkin')
+      .send(body)
+      .expect(401);
+    assert.match(response.body.message, /check-in code|portal session/i);
+    const serialized = JSON.stringify(response.body);
+    assert.doesNotMatch(serialized, new RegExp(patient.mrn));
+    assert.doesNotMatch(serialized, /Checkin|identifier|access code/i);
+  }
+
+  const [rows] = await pool.query('SELECT id FROM checkins WHERE patient_id = ?', [patient.id]);
+  assert.equal(rows.length, 0, 'no check-in may be created without a credential');
+  clearPortalRateLimits();
+});
+
+test('a staff-issued single-use token authorises check-in without leaking patient data', async () => {
+  clearPortalRateLimits();
+  const adminToken = await login();
+  const { patient } = await createCheckinPatient(adminToken, 'Kiosk');
+
+  const issued = await issueCheckinToken(adminToken, patient.id, { ttl_minutes: 15 }).expect(201);
+  assert.equal(issued.body.success, true);
+  assert.ok(issued.body.token.length >= 40, 'the token must carry at least 256 bits of entropy');
+  assert.equal(issued.body.expires_in_seconds, 900);
+
+  const [stored] = await pool.query('SELECT token_hash, used_at FROM checkin_tokens WHERE id = ?', [issued.body.id]);
+  assert.match(stored[0].token_hash, /^[0-9a-f]{64}$/, 'only the sha256 hash may be stored');
+  assert.notEqual(stored[0].token_hash, issued.body.token);
+  assert.equal(stored[0].used_at, null);
 
   const response = await request(app)
     .post('/api/portal/checkin')
-    .send({ identifier: patient.mrn, purpose: 'routine visit' })
+    .send({ checkin_token: issued.body.token, purpose: 'routine visit' })
     .expect(200);
 
   assert.equal(response.body.checked_in, true);
   assert.equal(response.body.success, true);
+  assert.equal(response.body.status, 'waiting');
   assert.deepEqual(Object.keys(response.body).sort(), [
     'checked_in', 'message', 'queue_position', 'status', 'success',
   ]);
-  assert.doesNotMatch(JSON.stringify(response.body), /Privacy|Checkin|date_of_birth|mrn|appointment|routine visit/i);
+  assert.doesNotMatch(
+    JSON.stringify(response.body),
+    /Kiosk|Checkin|date_of_birth|mrn|appointment|routine visit/i
+  );
+
+  const [used] = await pool.query('SELECT used_at FROM checkin_tokens WHERE id = ?', [issued.body.id]);
+  assert.ok(used[0].used_at, 'the token must be consumed');
+
+  const [checkins] = await pool.query(
+    "SELECT id, qr_token FROM checkins WHERE patient_id = ? AND checkin_date = date('now')",
+    [patient.id]
+  );
+  assert.equal(checkins.length, 1);
+  assert.notEqual(checkins[0].qr_token, issued.body.token, 'the plaintext token must never be stored on the check-in');
+
+  const [audits] = await pool.query(
+    "SELECT actor_type, summary FROM audit_log WHERE action = 'patient_checkin' AND record_id = ?",
+    [checkins[0].id]
+  );
+  assert.equal(audits.length, 1, 'the check-in must be audited');
+  assert.equal(audits[0].actor_type, 'anonymous', 'a kiosk is not a signed-in patient');
+
+  // Replay of the same token is refused and creates nothing new.
+  const replay = await request(app)
+    .post('/api/portal/checkin')
+    .send({ checkin_token: issued.body.token })
+    .expect(409);
+  assert.match(replay.body.message, /already been used/i);
+  const [afterReplay] = await pool.query('SELECT COUNT(*) AS count FROM checkins WHERE patient_id = ?', [patient.id]);
+  assert.equal(Number(afterReplay[0].count), 1);
+  clearPortalRateLimits();
+});
+
+test('expired, revoked and unknown check-in tokens are rejected with generic errors', async () => {
+  clearPortalRateLimits();
+  const adminToken = await login();
+  const { patient } = await createCheckinPatient(adminToken, 'Expired');
+
+  const expiredPlain = generateCheckinToken();
+  await pool.query(
+    'INSERT INTO checkin_tokens (patient_id, token_hash, expires_at) VALUES (?, ?, ?)',
+    [patient.id, expiredPlain.hash, new Date(Date.now() - 60_000).toISOString()]
+  );
+  const expired = await request(app)
+    .post('/api/portal/checkin')
+    .send({ checkin_token: expiredPlain.token })
+    .expect(410);
+  assert.match(expired.body.message, /expired/i);
+
+  const revokedPlain = generateCheckinToken();
+  await pool.query(
+    'INSERT INTO checkin_tokens (patient_id, token_hash, expires_at, revoked_at) VALUES (?, ?, ?, ?)',
+    [patient.id, revokedPlain.hash, expiryFor(30), new Date().toISOString()]
+  );
+  const revoked = await request(app)
+    .post('/api/portal/checkin')
+    .send({ checkin_token: revokedPlain.token })
+    .expect(401);
+  assert.doesNotMatch(JSON.stringify(revoked.body), new RegExp(patient.mrn));
+
+  const unknown = await request(app)
+    .post('/api/portal/checkin')
+    .send({ checkin_token: generateCheckinToken().token })
+    .expect(401);
+  assert.match(unknown.body.message, /not valid/i);
+  assert.doesNotMatch(JSON.stringify(unknown.body), /not found|does not exist/i);
+
+  // The HMS: prefix envelope used by the printed QR code is accepted, but a
+  // malformed or oversized value is still just "not valid".
+  await request(app)
+    .post('/api/portal/checkin')
+    .send({ checkin_token: `HMS:CHECKIN:${generateCheckinToken().token}` })
+    .expect(401);
+  await request(app)
+    .post('/api/portal/checkin')
+    .send({ checkin_token: 'x'.repeat(4096) })
+    .expect(401);
+
+  const [rows] = await pool.query('SELECT id FROM checkins WHERE patient_id = ?', [patient.id]);
+  assert.equal(rows.length, 0, 'no rejected attempt may create a check-in');
+  clearPortalRateLimits();
+});
+
+test('repeated failed check-in attempts are rate limited', async () => {
+  clearPortalRateLimits();
+  const adminToken = await login();
+  const { patient } = await createCheckinPatient(adminToken, 'Guess');
+
+  const statuses = [];
+  for (let attempt = 0; attempt < CHECKIN_ATTEMPT_LIMIT + 1; attempt += 1) {
+    const response = await request(app)
+      .post('/api/portal/checkin')
+      .send({ checkin_token: generateCheckinToken().token, identifier: patient.mrn });
+    statuses.push(response.status);
+    if (response.status === 429) {
+      assert.ok(response.headers['retry-after'], 'a 429 must advertise Retry-After');
+    }
+  }
+  assert.ok(statuses.includes(429), `expected a 429 within ${CHECKIN_ATTEMPT_LIMIT + 1} attempts, got ${statuses.join(',')}`);
+  assert.equal(statuses.filter(status => status === 429).length, 1);
+
+  // A caller who is being throttled cannot rely on a valid token to slip past
+  // the limiter either.
+  const issued = await issueCheckinToken(adminToken, patient.id).expect(201);
+  await request(app)
+    .post('/api/portal/checkin')
+    .send({ checkin_token: issued.body.token })
+    .expect(429);
+
+  const [rows] = await pool.query('SELECT id FROM checkins WHERE patient_id = ?', [patient.id]);
+  assert.equal(rows.length, 0);
+  clearPortalRateLimits();
+});
+
+test('only clinical and reception staff can mint check-in tokens', async () => {
+  clearPortalRateLimits();
+  const adminToken = await login();
+  const { patient, plainPin } = await createCheckinPatient(adminToken, 'Minter');
+
+  await request(app)
+    .post('/api/portal/checkin-tokens')
+    .send({ patient_id: patient.id })
+    .expect(401);
+
+  const portalLogin = await request(app)
+    .post('/api/portal/login')
+    .send({ identifier: patient.email, portal_pin: plainPin })
+    .expect(200);
+  await request(app)
+    .post('/api/portal/checkin-tokens')
+    .set('Authorization', `Bearer ${portalLogin.body.token}`)
+    .send({ patient_id: patient.id })
+    .expect(403);
+
+  // A patient cannot mint a token for a different patient even if they know
+  // that patient's id.
+  const other = await createCheckinPatient(adminToken, 'Other');
+  await request(app)
+    .post('/api/portal/checkin-tokens')
+    .set('Authorization', `Bearer ${portalLogin.body.token}`)
+    .send({ patient_id: other.patient.id })
+    .expect(403);
+
+  await issueCheckinToken(adminToken, patient.id, { ttl_minutes: 0 }).expect(400);
+  await issueCheckinToken(adminToken, patient.id, { ttl_minutes: 60 * 48 }).expect(400);
+  await issueCheckinToken(adminToken, patient.id, { ttl_minutes: 'ten' }).expect(400);
+  await issueCheckinToken(adminToken, 999_999).expect(404);
+
+  await pool.query("UPDATE patients SET status = 'inactive' WHERE id = ?", [other.patient.id]);
+  await issueCheckinToken(adminToken, other.patient.id).expect(409);
+  await pool.query("UPDATE patients SET status = 'active' WHERE id = ?", [other.patient.id]);
+
+  clearPortalRateLimits();
+});
+
+test('a signed-in patient can check themselves in and reception keeps a direct workflow', async () => {
+  clearPortalRateLimits();
+  const adminToken = await login();
+  const { patient, plainPin } = await createCheckinPatient(adminToken, 'Session');
+
+  const portalLogin = await request(app)
+    .post('/api/portal/login')
+    .send({ identifier: patient.email, portal_pin: plainPin })
+    .expect(200);
+  const session = await request(app)
+    .post('/api/portal/checkin')
+    .set('Authorization', `Bearer ${portalLogin.body.token}`)
+    .send({ purpose: 'follow-up' })
+    .expect(200);
+  assert.equal(session.body.checked_in, true);
+  assert.doesNotMatch(JSON.stringify(session.body), /Session|Checkin|mrn|follow-up/i);
+
+  // A portal session belongs to one patient only: a second signed-in patient
+  // cannot check the first one in by passing her id.
+  const second = await createCheckinPatient(adminToken, 'Second');
+  const secondLogin = await request(app)
+    .post('/api/portal/login')
+    .send({ identifier: second.patient.email, portal_pin: second.plainPin })
+    .expect(200);
+  await request(app)
+    .post('/api/portal/checkin')
+    .set('Authorization', `Bearer ${secondLogin.body.token}`)
+    .send({ patient_id: patient.id })
+    .expect(200);
+  const [secondCheckins] = await pool.query(
+    "SELECT patient_id FROM checkins WHERE checkin_date = date('now') ORDER BY id DESC LIMIT 1"
+  );
+  assert.equal(secondCheckins[0].patient_id, second.patient.id, 'the session, not the body, decides who is checked in');
+
+  // Reception's authenticated one-step workflow still works and still returns
+  // the record the front desk needs.
+  const third = await createCheckinPatient(adminToken, 'Reception');
+  const reception = await request(app)
+    .post('/api/portal/checkins')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ patient_id: third.patient.id, purpose: 'walk-in' })
+    .expect(201);
+  assert.equal(reception.body.checkin.patient_id, third.patient.id);
+  assert.equal(reception.body.checkin.status, 'waiting');
+  assert.equal(typeof reception.body.queue_position, 'number');
+
+  await request(app)
+    .post('/api/portal/checkins')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ patient_id: third.patient.id })
+    .expect(409);
+
+  await request(app)
+    .post('/api/portal/checkins')
+    .send({ patient_id: third.patient.id })
+    .expect(401);
+  clearPortalRateLimits();
 });
 
 test('AI appointment schedule uses the configured hospital timezone date', async () => {
