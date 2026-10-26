@@ -32,7 +32,8 @@ const REQUEST_TIMEOUT_MS = 20000;
 // Paystack reports these in `data.status`. "abandoned" means the customer
 // dismissed the prompt, which for a bill is a failure, not a pending state.
 const PAYSTACK_SUCCESS_STATUS = 'success';
-const PAYSTACK_PENDING_STATUSES = new Set(['pending', 'processing', 'queued', 'ongoing', 'reversed']);
+// A reversed transaction is terminal: it must not remain pending as if settlement could still complete.
+const PAYSTACK_PENDING_STATUSES = new Set(['pending', 'processing', 'queued', 'ongoing']);
 
 function isNetwork(value) {
   return typeof value === 'string' && networkValues().has(value);
