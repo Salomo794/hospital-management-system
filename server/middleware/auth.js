@@ -20,6 +20,14 @@ const authenticate = async (req, res, next) => {
     return res.status(401).json({ message: 'Invalid or expired token.' });
   }
 
+  // A patient portal token is a different kind of credential and must never be
+  // accepted here. Today it would fail anyway because it carries `pid` instead
+  // of `id`, but relying on that coincidence means a future rename could
+  // silently promote every patient session to a staff session.
+  if (decoded.portal === true || !decoded.id) {
+    return res.status(401).json({ message: 'Access denied. Staff credentials are required for this endpoint.' });
+  }
+
   try {
     const [rows] = await pool.query(
       'SELECT id, uuid, email, role, first_name, last_name, is_active, password_changed_at FROM users WHERE id = ?',
