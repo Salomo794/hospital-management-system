@@ -337,6 +337,12 @@ async function createCheckin(connection, patient, appointmentId, purpose, qrToke
  * persisted, so a database leak cannot be replayed at the kiosk.
  */
 router.post('/checkin-tokens', authenticate, authorize('admin', 'doctor', 'nurse', 'receptionist'), asyncHandler(async (req, res) => {
+  const issueLimit = checkinTokenIssueLimiter.consume(`issue:${req.user.id}`);
+  if (!issueLimit.allowed) {
+    res.setHeader('Retry-After', issueLimit.retryAfterSeconds);
+    throw new ApiError(429, 'Too many check-in codes issued. Please wait before issuing more.');
+  }
+
   const patientId = parseInteger(req.body?.patient_id, 'patient_id', { min: 1 });
   const appointmentId = readOptionalAppointmentId(req);
 
