@@ -120,7 +120,7 @@ test('a patient portal token is refused by every staff-only endpoint', async () 
   const staffOnly = [
     ['get', '/api/patients'],
     ['get', `/api/patients/${patient.id}`],
-    ['get', `/api/users/${admin.body.user.id}`],
+    ['get', `/api/users/${admin.body.id}`],
     ['get', `/api/emr/patient/${patient.id}`],
     ['get', '/api/billing'],
     ['get', '/api/reports/dashboard'],
@@ -149,6 +149,7 @@ test('one patient cannot read or pay another patient\'s bill by guessing its id'
   const bobToken = await portalLogin(bob);
 
   const aliceBill = await createBill(adminToken, alice.id, 400);
+  assert.ok(aliceBill.id, 'the bill under test must have an id');
 
   // Alice can see her own bill; that is the control case that proves the id is
   // real and the request shape is correct.
@@ -157,7 +158,7 @@ test('one patient cannot read or pay another patient\'s bill by guessing its id'
     .set('Authorization', `Bearer ${aliceToken}`)
     .expect(200);
   assert.ok(
-    aliceBills.body.bills.some(bill => Number(bill.id) === Number(aliceBill.bill.id)),
+    aliceBills.body.bills.some(bill => Number(bill.id) === Number(aliceBill.id)),
     'a patient must be able to see their own bill'
   );
 
@@ -167,23 +168,23 @@ test('one patient cannot read or pay another patient\'s bill by guessing its id'
     .set('Authorization', `Bearer ${bobToken}`)
     .expect(200);
   assert.ok(
-    !bobBills.body.bills.some(bill => Number(bill.id) === Number(aliceBill.bill.id)),
+    !bobBills.body.bills.some(bill => Number(bill.id) === Number(aliceBill.id)),
     'another patient\'s bill must never appear in the list'
   );
 
   const payAttempt = await request(app)
-    .post(`/api/portal/bills/${aliceBill.bill.id}/pay`)
+    .post(`/api/portal/bills/${aliceBill.id}/pay`)
     .set('Authorization', `Bearer ${bobToken}`)
     .send({ amount: 10, payment_method: 'card', request_id: `authz-${Date.now()}` })
     .expect(404);
   assert.match(payAttempt.body.message, /not found/i);
 
   // The refused attempt must not have moved any money on Alice's bill.
-  const [billRows] = await pool.query('SELECT paid_amount, payment_status FROM bills WHERE id = ?', [aliceBill.bill.id]);
+  const [billRows] = await pool.query('SELECT paid_amount, payment_status FROM bills WHERE id = ?', [aliceBill.id]);
   assert.equal(Number(billRows[0].paid_amount), 0, 'a rejected cross-patient payment must not touch the bill');
   assert.equal(billRows[0].payment_status, 'pending');
 
-  const [payments] = await pool.query('SELECT COUNT(*) AS count FROM payments WHERE bill_id = ?', [aliceBill.bill.id]);
+  const [payments] = await pool.query('SELECT COUNT(*) AS count FROM payments WHERE bill_id = ?', [aliceBill.id]);
   assert.equal(Number(payments[0].count), 0, 'no payment row may be created for a rejected request');
 
   rateLimit.clearAll();
@@ -268,8 +269,8 @@ test('notifications can only be marked read by their owner', async () => {
   const other = await registerStaff(adminToken, 'nurse');
 
   const [inserted] = await pool.query(
-    'INSERT INTO notifications (uuid, user_id, title, message, type) VALUES (?, ?, ?, ?, ?)',
-    [`authz-${Date.now()}`, owner.id, 'Shift handover', 'Please review the ward list', 'info']
+    'INSERT INTO notifications (user_id, title, message, type) VALUES (?, ?, ?, ?)',
+    [owner.id, 'Shift handover', 'Please review the ward list', 'info']
   );
 
   const stolen = await request(app)
