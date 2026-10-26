@@ -123,7 +123,7 @@ No secrets, keys, passwords, or credentials were added. Diff scanned for credent
 
 ## 3. Tests actually executed and results
 
-All commands below were run against commit `e93fe09` in this environment. **Node 22.23.4** (v22 LTS), matching the CI matrix.
+All commands below were run against commit `148f997` in this environment. **Node 22.23.4** (v22 LTS), matching the CI matrix.
 
 | Check | Command | Result |
 |---|---|---|
@@ -131,7 +131,7 @@ All commands below were run against commit `e93fe09` in this environment. **Node
 | Server tests | `npm test --prefix server` | **183 / 183 pass, 0 fail** |
 | Client tests | `npm test --prefix client` | **247 / 247 pass** (5 files) |
 | Lint | `npm run lint --prefix client` | **clean, 0 errors** |
-| Production build | `npm run build --prefix client` | **success** (`✓ built in 3.33s`) |
+| Production build | `npm run build --prefix client` | **success** (`✓ built in 3.72s`) |
 | Prod dep audit — root | `npm audit --omit=dev` | **0 vulnerabilities** |
 | Prod dep audit — client | `npm audit --omit=dev` | **0 vulnerabilities** |
 | Prod dep audit — server | `npm audit --omit=dev` | **0 vulnerabilities** |
@@ -139,8 +139,43 @@ All commands below were run against commit `e93fe09` in this environment. **Node
 | CI guard mutation test | swap in `main`'s workflow → expect failure | **Correctly FAILS** (`line 21 ... "runner" at job level`) |
 | Nested-tree superset proof | 130 deleted paths vs root | **0 orphans** |
 | Node 20 behavior | server suite on v20.20.2 | **SIGSEGV, 16 fail** → documented requirement (§1.7) |
+| **Full CI job replay** | all 7 workflow steps, in order, same env | **ALL STEPS PASSED** (see below) |
+| **Backup → loss → restore** | isolated temp DB, row-level diff | **5 rows → 2 → 5, exact match** |
 
-**Honest limitation:** these are local sandbox executions on Node 22. The GitHub Actions workflow itself has **not yet been observed to pass**, because no run has ever executed with the fixed file. That is the one open item below. I am not claiming the CI pipeline is green.
+### 3.1 CI job replayed step-for-step (stand-in for a real run)
+
+Because I cannot dispatch the workflow, I replayed the job locally in **workflow order** with
+the same environment (`NODE_ENV=test`, `JWT_SECRET`, and `DB_PATH` set only on the seed step,
+unset for every later step — exactly as the YAML does). Lockfiles were checked first for
+`npm ci` consistency: root 2/2, client 15/15, server 13/13 declared-vs-locked, no drift.
+
+| # | Workflow step | Result |
+|---|---|---|
+| 1–3 | `npm ci` (root, client, server) | lockfiles in sync — no drift to fail on |
+| 4 | `db:setup` + `db:seed` with step-scoped `DB_PATH` | **PASS**, DB created `600` |
+| 5 | Lint client | **PASS** |
+| 6 | Test server | **PASS** (183) |
+| 7 | Test client | **PASS** (247) |
+| 8 | Build client | **PASS** |
+| 9 | Audit production dependencies | **PASS**, 0 vulnerabilities |
+
+The workflow was also validated structurally with a YAML parser: it parses, job-level `env`
+contains only `NODE_ENV`/`JWT_SECRET` (both legal contexts), `runner.temp` appears **only** in
+step 4's `env`, every step has exactly one of `run`/`uses`, and `workflow_dispatch` is present.
+Only one workflow file exists, and all three cached lockfiles are present.
+
+### 3.2 Restore was executed, not just documented
+
+Backup integrity alone is not a recovery plan, so the destructive half was exercised on an
+isolated DB: 5 synthetic rows → backup (`integrity_check ok`) → deleted 3 rows to simulate loss
+→ `--restore` → **5 rows again, values identical** (`SYNTH-1…5`), file still `600`. The CLI also
+wrote a pre-restore copy of the current DB before overwriting, so a mistaken restore is itself
+recoverable.
+
+**Honest limitation:** these are local sandbox executions on Node 22 (Node 24 is not installed
+here, so the matrix's second leg is unverified locally). The GitHub Actions workflow itself has
+**not yet been observed to pass**, because no run has ever executed with the fixed file. That is
+the one open item below. I am not claiming the CI pipeline is green.
 
 ---
 
