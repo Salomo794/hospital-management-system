@@ -43,8 +43,6 @@ const CHECKIN_TRANSITIONS = {
   no_show: new Set(),
   cancelled: new Set(),
 };
-const portalLoginLimiter = new FixedWindowRateLimiter({ windowMs: 15 * 60 * 1000, max: 8 });
-const checkinLimiter = new FixedWindowRateLimiter({ windowMs: 5 * 60 * 1000, max: 20 });
 
 function paymentsEnabled() {
   return (
