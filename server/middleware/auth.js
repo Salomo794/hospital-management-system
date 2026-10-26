@@ -55,6 +55,26 @@ const authorize = (...roles) => (req, res, next) => {
   return next();
 };
 
+const PORTAL_PATIENT_COLUMNS = `id, uuid, mrn, first_name, last_name, date_of_birth, gender, phone, email,
+        blood_type, insurance_provider, allergies, chronic_conditions, status,
+        portal_session_version`;
+
+/**
+ * Resolves a verified portal JWT to a live patient row.
+ * Returns { patient } or { error: 'missing' | 'revoked' } so callers can choose
+ * between responding with a 401 and quietly falling back to anonymous access.
+ */
+async function loadPortalSession(decoded) {
+  const [rows] = await pool.query(
+    `SELECT ${PORTAL_PATIENT_COLUMNS}
+     FROM patients WHERE id = ? AND status = 'active'`,
+    [decoded.pid]
+  );
+  if (rows.length === 0) return { error: 'missing' };
+  if (Number(decoded.psv) !== Number(rows[0].portal_session_version)) return { error: 'revoked' };
+  return { patient: rows[0] };
+}
+
 const authenticatePortal = async (req, res, next) => {
   const token = readBearerToken(req);
   if (!token) {
@@ -72,24 +92,42 @@ const authenticatePortal = async (req, res, next) => {
   }
 
   try {
-    const [rows] = await pool.query(
-      `SELECT id, uuid, mrn, first_name, last_name, date_of_birth, gender, phone, email,
-              blood_type, insurance_provider, allergies, chronic_conditions, status,
-              portal_session_version
-       FROM patients WHERE id = ? AND status = 'active'`,
-      [decoded.pid]
-    );
-    if (rows.length === 0) {
+    const session = await loadPortalSession(decoded);
+    if (session.error === 'missing') {
       return res.status(401).json({ message: 'Patient record not found or inactive.' });
     }
-    if (Number(decoded.psv) !== Number(rows[0].portal_session_version)) {
+    if (session.error === 'revoked') {
       return res.status(401).json({ message: 'This portal session has been revoked. Please sign in again.' });
     }
-    req.patient = rows[0];
+    req.patient = session.patient;
     return next();
   } catch (error) {
     return next(error);
   }
 };
 
-module.exports = { authenticate, authorize, authenticatePortal, readBearerToken };
+/**
+ * Attaches req.patient when a valid portal session is present, and otherwise
+ * continues anonymously. Used by endpoints that are legitimately reachable both
+ * by an authenticated patient (from their own phone) and by an unauthenticated
+ * kiosk holding a single-use check-in token.
+ */
+const optionalPortalAuth = async (req, res, next) => {
+  if (!readBearerToken(req)) return next();
+  let decoded;
+  try {
+    decoded = jwt.verify(readBearerToken(req), process.env.JWT_SECRET);
+  } catch (_) {
+    return next(); // invalid/expired session is simply "not signed in" here
+  }
+  if (!decoded.portal || !decoded.pid) return next();
+  try {
+    const session = await loadPortalSession(decoded);
+    if (session.patient) req.patient = session.patient;
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
+
+module.exports = { authenticate, authorize, authenticatePortal, optionalPortalAuth, readBearerToken };
