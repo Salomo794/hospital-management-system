@@ -44,23 +44,33 @@ export async function renderQR(text, opts = {}) {
 
 /**
  * Build the check-in payload string to encode in a QR code.
- * The payload embeds the patient's UUID, used by the lobby kiosk and
- * the staff patient-checkin flow.
+ *
+ * This encodes a single-use, expiring check-in token issued by reception — it
+ * must never encode an MRN, access code or patient UUID. Those are permanent
+ * public identifiers and the server refuses them as credentials, so a card
+ * printed with one would stop working and would leak the identifier to anyone
+ * who scanned the paper.
+ *
+ * @param {string} token plaintext check-in token from POST /api/portal/checkin-tokens
+ * @returns {string} payload, or '' when no token is available
  */
-export function buildCheckinPayload(patient) {
-  if (!patient || !patient.uuid) return ''
-  // The kiosk resolves the UUID after removing the HMS:CHECKIN: prefix.
-  // Do not append the patient's name: it is display data, not an identifier.
-  return `HMS:CHECKIN:${String(patient.uuid).trim()}`
+export function buildCheckinPayload(token) {
+  const value = String(token || '').trim()
+  if (!value) return ''
+  if (value.startsWith('HMS:CHECKIN:')) return value
+  return `HMS:CHECKIN:${value}`
 }
 
-/** Decode a scanned check-in payload back into the patient identifier. */
+/**
+ * Decode a scanned check-in payload back into the single-use token.
+ * Legacy payloads that carried a patient identifier are returned as-is so the
+ * kiosk can submit them and let the server answer with a generic rejection.
+ */
 export function parseCheckinPayload(payload) {
   const str = String(payload || '').replace(/\x00/g, '').trim()
   const parts = str.split(':')
   if (parts[0] && parts[0].toUpperCase() === 'HMS' && parts[1] && parts[1].toUpperCase() === 'CHECKIN') {
-    return { identifier: parts.slice(2).join(':') || '' }
+    return { checkin_token: parts.slice(2).join(':') || '' }
   }
-  // Fallback: payload could be a raw MRN, UUID, email or phone number.
-  return { identifier: str }
+  return { checkin_token: str }
 }
