@@ -9,7 +9,11 @@ const {
 } = require('../utils/http');
 const { randomUUID, generateRecordNumber } = require('../utils/ids');
 const { getRequestId } = require('../utils/requestId');
-const { FixedWindowRateLimiter } = require('../utils/rateLimiter');
+const {
+  portalLoginLimiter,
+  checkinLimiter,
+  checkinTokenIssueLimiter,
+} = require('../utils/portalRateLimits');
 const {
   generateCheckinToken,
   hashCheckinToken,
