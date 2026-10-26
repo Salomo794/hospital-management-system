@@ -114,12 +114,17 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/smart', smartRoutes);
 app.use('/api/portal', portalRoutes);
 
-app.get('/api/health', async (req, res, next) => {
+app.get('/api/health', async (req, res) => {
   try {
     await pool.isReady();
     res.json({ status: 'OK', timestamp: new Date().toISOString() });
-  } catch (error) {
-    res.status(503).json({ status: 'UNAVAILABLE', message: error.message });
+  } catch (_) {
+    // Health checks are public operational endpoints. Do not return raw database
+    // errors here: they can expose filesystem paths, schema details, or internals.
+    res.status(503).json({
+      status: 'UNAVAILABLE',
+      message: 'Service temporarily unavailable',
+    });
   }
 });
 

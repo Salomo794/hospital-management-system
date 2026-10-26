@@ -170,7 +170,7 @@ router.post('/chat', authenticate, async (req, res) => {
       if (!OPERATIONS_ROLES.includes(req.user.role)) {
         return res.status(403).json({ response: 'You do not have permission to view appointment schedules.', data: null });
       }
-      const today = new Date().toISOString().split('T')[0];
+      const today = zonedDate();
       let query = `SELECT a.appointment_time, a.status, a.type,
         p.first_name || ' ' || p.last_name as patient_name,
         u.first_name || ' ' || u.last_name as doctor_name
@@ -258,7 +258,7 @@ router.post('/chat', authenticate, async (req, res) => {
       if (!OPERATIONS_ROLES.includes(req.user.role)) {
         return res.status(403).json({ response: 'You do not have permission to view operational tasks.', data: null });
       }
-      const today = new Date().toISOString().split('T')[0];
+      const today = zonedDate();
       let appointmentCountQuery = "SELECT COUNT(*) as count FROM appointments WHERE status = 'scheduled' AND appointment_date >= ?";
       const appointmentCountParams = [today];
       if (req.user.role === 'doctor') {
@@ -518,7 +518,7 @@ router.post('/chat', authenticate, async (req, res) => {
       if (!OPERATIONS_ROLES.includes(req.user.role)) {
         return res.status(403).json({ response: 'You do not have permission to view the live hospital overview.', data: null });
       }
-      const today = new Date().toISOString().split('T')[0];
+      const today = zonedDate();
       let appointmentsTodayQuery = 'SELECT COUNT(*) as count FROM appointments WHERE appointment_date = ?';
       const appointmentsTodayParams = [today];
       if (req.user.role === 'doctor') {
