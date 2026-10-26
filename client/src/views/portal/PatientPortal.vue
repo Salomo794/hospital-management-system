@@ -480,7 +480,6 @@ export default {
         setStoredJson('portal-patient', data.patient)
         loginForm.identifier = ''
         loginForm.portal_pin = ''
-        checkinForm.identifier = data.patient.mrn
         await loadPortalData()
       } catch (requestError) {
         if (componentUnmounted || controller.signal.aborted || requestSession !== sessionGeneration || axios.isCancel(requestError)) return
@@ -642,7 +641,6 @@ export default {
     const formatLabel = value => String(value || '').replace(/_/g, ' ').replace(/\b\w/g, character => character.toUpperCase())
 
     onMounted(async () => {
-      if (patient.value?.mrn) checkinForm.identifier = patient.value.mrn
       if (token.value) await loadPortalData()
     })
 
