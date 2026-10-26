@@ -1,5 +1,22 @@
 # Deployment Guide (Render + Vercel or single Render)
 
+## Runtime requirement: Node.js >= 22 (hard requirement)
+
+This application **must** run on Node.js 22 or newer. `server/package.json` declares
+`"engines": { "node": ">=22" }`, and `better-sqlite3` is a **native addon** compiled
+against the Node ABI.
+
+Running on Node 20 or older does **not** produce a clean "unsupported version" error — the
+database driver **segfaults the process** (`SIGSEGV`), which looks like a random crash loop
+and is easy to misdiagnose as an application bug. When the server suite is run on Node 20 it
+reports ~16/60 failures with no useful stack trace.
+
+- On Node 22: native module loads, all tests pass.
+- On Node 20: `SIGSEGV`, process aborts.
+
+Pin the runtime explicitly on your host (e.g. `NODE_VERSION=22` on Render/Vercel, or a
+`node:22` base image for Docker) and verify with `node --version` at startup.
+
 ## Option 1: Single Render service (Recommended - same-origin, simplest)
 The server serves the built client from `client/dist`. No CORS needed between client and API.
 
