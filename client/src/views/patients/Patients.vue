@@ -362,6 +362,8 @@
       :visible="showAccessCard"
       :patient="newPatientData"
       :plain-pin="newPatientPin"
+      :checkin-token="newPatientCheckinToken"
+      :checkin-expires-at="newPatientCheckinExpiresAt"
       @close="showAccessCard = false; loadPatients()"
       @register-another="showAccessCard = false; openCreateModal()"
     />
@@ -406,6 +408,10 @@ export default {
 
     /* ── access card state ── */
     const showAccessCard  = ref(false)
+    // Single-use check-in code minted at registration. The printed card encodes
+    // this token, never the patient's MRN or access code.
+    const newPatientCheckinToken    = ref('')
+    const newPatientCheckinExpiresAt = ref('')
     const newPatientData  = ref({})
     const newPatientPin   = ref('')
 
@@ -542,7 +548,21 @@ export default {
           // Show the access card with all details
           newPatientData.value = data.patient
           newPatientPin.value  = data.plain_pin
+          newPatientCheckinToken.value = ''
+          newPatientCheckinExpiresAt.value = ''
           showAccessCard.value = true
+          // Best effort: mint the day's single-use check-in code for the card.
+          // A failure here must never block a completed registration.
+          try {
+            const { data: issued } = await axios.post('/api/portal/checkin-tokens', {
+              patient_id: data.patient.id,
+              ttl_minutes: 1440,
+            })
+            newPatientCheckinToken.value = issued.token
+            newPatientCheckinExpiresAt.value = issued.expires_at
+          } catch (e) {
+            console.warn('Check-in code could not be issued for the printed card.', e.response?.status)
+          }
         }
       } catch (e) {
         const msg = e.response?.data?.message
@@ -602,6 +622,7 @@ export default {
       patients, total, page, limit, search, statusFilter, loading,
       showModal, saving, submitted, editingPatient, form,
       showAccessCard, newPatientData, newPatientPin,
+      newPatientCheckinToken, newPatientCheckinExpiresAt,
       lookupOpen, lookupCode, lookupLoading, lookupError, lookupResult,
       today, bloodTypes, totalPages, pageRange,
       formatDate, debouncedSearch, hasAllergy, hasClinicalCondition, authStore,
