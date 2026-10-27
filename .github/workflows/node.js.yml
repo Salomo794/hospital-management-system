@@ -18,10 +18,13 @@ jobs:
     env:
       NODE_ENV: test
       JWT_SECRET: ci-secret-that-is-at-least-32-characters-long
-      DB_PATH: ${{ runner.temp }}/hms-ci/hospital.db
 
     steps:
     - uses: actions/checkout@v4
+    # The `runner` context is not available in job-level `env`, so the
+    # disposable CI database path is exported from a step instead.
+    - name: Set disposable CI database path
+      run: echo "DB_PATH=${{ runner.temp }}/hms-ci/hospital.db" >> "$GITHUB_ENV"
     - name: Use Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@v4
       with:
