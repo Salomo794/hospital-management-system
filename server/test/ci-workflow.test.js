@@ -64,18 +64,47 @@ test('no job-level env block uses a context GitHub only exposes to steps', () =>
   assert.deepEqual(offenders, [], `job-level env must use literal values only:\n${offenders.join('\n')}`);
 });
 
-test('the database path used by the workflow is defined at step level', () => {
-  // The seeded database lives under the runner temp directory, which is only
-  // addressable from a step. Guards against reintroducing the invalid form.
-  const declaration = lines.findIndex(line => line.includes('DB_PATH:'));
-  assert.notEqual(declaration, -1, 'the workflow still points the database at the runner temp directory');
-  assert.match(lines[declaration], /\$\{\{\s*runner\.temp\s*\}\}/);
+test('the database path is declared where GitHub can resolve the runner context', () => {
+  // Two encodings are valid for a path that depends on the runner: a step-level
+  // `env:` block, and a step that exports the value through `$GITHUB_ENV`.
+  // Both are used by branches of this repository, so the guard accepts either
+  // one and rejects only the job-level form that made GitHub reject the whole
+  // workflow file before a single job was created.
+  const envDeclaration = lines.findIndex(line => /^\s*DB_PATH\s*:/.test(line));
+  const exportDeclaration = lines.findIndex(
+    line => line.includes('DB_PATH=') && line.includes('$GITHUB_ENV')
+  );
 
-  const governingEnv = envBlocks()
-    .filter(block => block.expressionLines.some(entry => entry.number === declaration + 1))
-    .pop();
-  assert.ok(governingEnv, 'DB_PATH is declared inside an env block');
-  assert.notEqual(governingEnv.headerIndent, 4, 'DB_PATH must not be declared in a job-level env block');
+  assert.ok(
+    envDeclaration !== -1 || exportDeclaration !== -1,
+    'the workflow still points the database at the runner temp directory'
+  );
+
+  for (const index of [envDeclaration, exportDeclaration].filter(value => value !== -1)) {
+    assert.match(
+      lines[index],
+      /\$\{\{\s*runner\.temp\s*\}\}/,
+      `line ${index + 1} should point the database at the runner temp directory`
+    );
+  }
+
+  if (envDeclaration !== -1) {
+    const governingEnv = envBlocks()
+      .filter(block => block.expressionLines.some(entry => entry.number === envDeclaration + 1))
+      .pop();
+    assert.ok(governingEnv, 'DB_PATH is declared inside an env block');
+    assert.notEqual(governingEnv.headerIndent, 4, 'DB_PATH must not be declared in a job-level env block');
+  }
+
+  if (exportDeclaration !== -1) {
+    assert.match(lines[exportDeclaration], /run:/, 'the exported database path must be written by a step');
+    const governing = envBlocks().filter(block =>
+      block.expressionLines.some(entry => entry.number === exportDeclaration + 1)
+    );
+    for (const block of governing) {
+      assert.notEqual(block.headerIndent, 4, 'the exported database path must not come from a job-level env block');
+    }
+  }
 });
 
 test('every npm script the workflow runs exists in package.json', () => {
