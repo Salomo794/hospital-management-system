@@ -1322,9 +1322,11 @@ test('pharmacy dispensing validates and scopes idempotency keys', async () => {
   assert.equal(afterReplay[0].dispensed_quantity, 1);
 });
 
-test('public patient check-in response omits personal and appointment details', async () => {
-  const adminToken = await login();
-  const patientResponse = await request(app)
+async function createCheckinPatient(adminToken, label) {
+  // Patient registration shares the suite's loopback write budget.
+  rateLimit.clearAll();
+  const email = `checkin-${label}-${randomUUID()}@example.com`;
+  const created = await request(app)
     .post('/api/patients')
     .set('Authorization', `Bearer ${adminToken}`)
     .send({
@@ -1332,14 +1334,35 @@ test('public patient check-in response omits personal and appointment details', 
       last_name: 'Checkin',
       date_of_birth: '1990-04-05',
       gender: 'female',
-      email: `checkin-privacy-${randomUUID()}@example.com`,
+      email,
     })
     .expect(201);
-  const patient = patientResponse.body.patient;
+  assert.ok(created.body.plain_pin, 'registration should provision a portal PIN');
+  return { patient: created.body.patient, pin: created.body.plain_pin, email };
+}
+
+test('public check-in requires the patient portal PIN, not just an identifier', async () => {
+  const adminToken = await login();
+  const { patient, pin } = await createCheckinPatient(adminToken, 'pin');
+
+  // The MRN alone no longer checks anyone in.
+  await request(app)
+    .post('/api/portal/checkin')
+    .send({ identifier: patient.mrn, purpose: 'routine visit' })
+    .expect(400);
+  const [none] = await pool.query('SELECT COUNT(*) AS count FROM checkins WHERE patient_id = ?', [patient.id]);
+  assert.equal(Number(none[0].count), 0);
+
+  await request(app)
+    .post('/api/portal/checkin')
+    .send({ identifier: patient.mrn, portal_pin: `${pin}9`, purpose: 'routine visit' })
+    .expect(401);
+  const [stillNone] = await pool.query('SELECT COUNT(*) AS count FROM checkins WHERE patient_id = ?', [patient.id]);
+  assert.equal(Number(stillNone[0].count), 0);
 
   const response = await request(app)
     .post('/api/portal/checkin')
-    .send({ identifier: patient.mrn, purpose: 'routine visit' })
+    .send({ identifier: patient.mrn, portal_pin: pin, purpose: 'routine visit' })
     .expect(200);
 
   assert.equal(response.body.checked_in, true);
@@ -1348,6 +1371,95 @@ test('public patient check-in response omits personal and appointment details', 
     'checked_in', 'message', 'queue_position', 'status', 'success',
   ]);
   assert.doesNotMatch(JSON.stringify(response.body), /Privacy|Checkin|date_of_birth|mrn|appointment|routine visit/i);
+
+  // The identifier typed at a shared kiosk is not kept alongside the check-in.
+  const [stored] = await pool.query('SELECT qr_token FROM checkins WHERE patient_id = ?', [patient.id]);
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].qr_token, null);
+});
+
+test('public check-in does not reveal whether an identifier is registered', async () => {
+  const adminToken = await login();
+  const { patient, pin, email } = await createCheckinPatient(adminToken, 'enum');
+
+  const unknown = await request(app)
+    .post('/api/portal/checkin')
+    .send({ identifier: `MRN-NOPE-${randomUUID()}`, portal_pin: '000000' })
+    .expect(401);
+  const knownWrongPin = await request(app)
+    .post('/api/portal/checkin')
+    .send({ identifier: patient.mrn, portal_pin: '000000' })
+    .expect(401);
+  const byEmailWrongPin = await request(app)
+    .post('/api/portal/checkin')
+    .send({ identifier: email, portal_pin: '000000' })
+    .expect(401);
+
+  assert.deepEqual(unknown.body, knownWrongPin.body);
+  assert.deepEqual(unknown.body, byEmailWrongPin.body);
+
+  // A patient with no PIN provisioned cannot be checked in anonymously either,
+  // and looks identical to an unknown record.
+  await pool.query('UPDATE patients SET portal_pin = NULL WHERE id = ?', [patient.id]);
+  const noPin = await request(app)
+    .post('/api/portal/checkin')
+    .send({ identifier: patient.mrn, portal_pin: pin })
+    .expect(401);
+  assert.deepEqual(noPin.body, unknown.body);
+});
+
+test('public check-in throttles repeated PIN guesses for one patient', async () => {
+  const adminToken = await login();
+  const { patient, pin } = await createCheckinPatient(adminToken, 'throttle');
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await request(app)
+      .post('/api/portal/checkin')
+      .send({ identifier: patient.mrn, portal_pin: `00000${attempt}` })
+      .expect(401);
+  }
+  const blocked = await request(app)
+    .post('/api/portal/checkin')
+    .send({ identifier: patient.mrn, portal_pin: pin })
+    .expect(429);
+  assert.ok(Number(blocked.headers['retry-after']) >= 1);
+  const [rows] = await pool.query('SELECT COUNT(*) AS count FROM checkins WHERE patient_id = ?', [patient.id]);
+  assert.equal(Number(rows[0].count), 0);
+});
+
+test('check-in accepts a portal session and rejects an invalid or other token', async () => {
+  const adminToken = await login();
+  const { patient, pin } = await createCheckinPatient(adminToken, 'session');
+
+  const portalLogin = await request(app)
+    .post('/api/portal/login')
+    .send({ identifier: patient.mrn, portal_pin: pin })
+    .expect(200);
+
+  // A staff token is not a portal session and is not silently treated as anonymous.
+  await request(app)
+    .post('/api/portal/checkin')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ identifier: patient.mrn })
+    .expect(401);
+  await request(app)
+    .post('/api/portal/checkin')
+    .set('Authorization', 'Bearer not-a-real-token')
+    .send({ identifier: patient.mrn, portal_pin: pin })
+    .expect(401);
+
+  // A signed-in patient is checked in as themselves; a different identifier in
+  // the body cannot redirect the check-in to another patient.
+  const other = await createCheckinPatient(adminToken, 'other');
+  await request(app)
+    .post('/api/portal/checkin')
+    .set('Authorization', `Bearer ${portalLogin.body.token}`)
+    .send({ identifier: other.patient.mrn, purpose: 'follow-up' })
+    .expect(200);
+  const [mine] = await pool.query('SELECT COUNT(*) AS count FROM checkins WHERE patient_id = ?', [patient.id]);
+  const [theirs] = await pool.query('SELECT COUNT(*) AS count FROM checkins WHERE patient_id = ?', [other.patient.id]);
+  assert.equal(Number(mine[0].count), 1);
+  assert.equal(Number(theirs[0].count), 0);
 });
 
 test('AI appointment schedule uses the configured hospital timezone date', async () => {

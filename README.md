@@ -14,7 +14,7 @@ A full-stack Hospital Management System with a Vue 3 client and a Node.js/Expres
 - Billing, validated partial payments, summaries, and financial reports
 - Admission and bed management with occupancy protection
 - Notifications, operational dashboards, smart forecasts, and a rule-based assistant
-- Patient portal and kiosk APIs, including appointment, result, prescription, bill, and check-in access
+- Patient portal and kiosk APIs, including appointment, result, prescription, bill, and check-in access (kiosk check-in requires the patient's portal PIN or a signed-in portal session)
 
 ## Technology
 

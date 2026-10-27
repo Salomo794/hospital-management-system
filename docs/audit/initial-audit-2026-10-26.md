@@ -53,3 +53,14 @@ These observations are code-level only; they do not prove every route or workflo
 7. Complete qualified clinical, privacy, security, operational, and regulatory review before using real patient data.
 
 **Conclusion:** This is an initial evidence-based audit, not a declaration that the HMS is production-ready.
+
+## Follow-up — 2026-10-27
+
+Local verification on Node 22.23 (disposable SQLite database, demo seed only):
+`db:setup`, `db:seed`, `lint`, server tests, client tests, `build` and `audit` all ran.
+
+| ID | Update |
+| --- | --- |
+| HMS-006 | **Root cause established.** Runs 40339101273 and 40339968348 (on `main`, commit `644cc61`) ended in 0s with no jobs: GitHub reported "workflow file issue". `.github/workflows/node.js.yml` on `main` used the `runner` context in job-level `env`, which is not available there. Fixed by `c1ae844` on this branch (path exported from a step). Workflow run 40489058274 on this branch passed on Node 22.x and 24.x. `main` stays broken until this branch is merged. |
+| HMS-008 | **Fixed, verified locally.** `POST /api/portal/checkin` now requires either a valid portal session or an identifier plus the patient's portal PIN. Unknown, ambiguous, wrong-PIN and PIN-less records return the same 401; PIN guesses are limited per patient and address; the typed identifier is no longer stored in `checkins.qr_token`. Four regression tests in `server/test/api.test.js`. A purpose-built expiring kiosk token is still a possible later improvement; patients without a provisioned PIN cannot use anonymous check-in until staff issue one. |
+| HMS-005 | **Evidence gathered, not deleted.** `hospital-management-system/` is a single-commit older snapshot (no `productionReadiness.js`, no `AppIcon.vue`, older views). Nothing in CI, `render.yaml`, `vercel.json`, root `package.json` or the README references it. It appears obsolete, but removal needs the owner's confirmation. |

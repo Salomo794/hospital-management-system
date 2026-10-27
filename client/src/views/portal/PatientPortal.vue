@@ -175,9 +175,11 @@
 
       <section class="portal-card kiosk-card">
         <h2>Walk-in check-in</h2>
-        <p>Enter the MRN or access code printed on your patient card.</p>
+        <p v-if="token">You are signed in. Confirm your visit to join the queue.</p>
+        <p v-else>Enter the MRN or access code on your patient card and your portal PIN.</p>
         <form @submit.prevent="checkIn">
-          <label>MRN or access code<input v-model.trim="checkinForm.identifier" required /></label>
+          <label v-if="!token">MRN or access code<input v-model.trim="checkinForm.identifier" required autocomplete="off" /></label>
+          <label v-if="!token">Portal PIN<input v-model="checkinForm.portal_pin" type="password" inputmode="numeric" autocomplete="off" required /></label>
           <label>Visit purpose<input v-model.trim="checkinForm.purpose" placeholder="Optional" /></label>
           <button class="btn btn-secondary" :disabled="checkingIn">{{ checkingIn ? 'Checking in…' : 'Check in' }}</button>
         </form>
@@ -217,7 +219,7 @@ export default {
     const patient = ref(getStoredJson('portal-patient', value => !!value?.id))
     const loginForm = reactive({ identifier: '', portal_pin: '' })
     const showPin = ref(false)
-    const checkinForm = reactive({ identifier: '', purpose: '' })
+    const checkinForm = reactive({ identifier: '', portal_pin: '', purpose: '' })
     const activeTab = ref('appointments')
     const loading = ref(false)
     const loggingIn = ref(false)
@@ -349,6 +351,7 @@ export default {
       loginForm.identifier = ''
       loginForm.portal_pin = ''
       checkinForm.identifier = ''
+      checkinForm.portal_pin = ''
       checkinForm.purpose = ''
       activeTab.value = 'appointments'
       loading.value = false
@@ -490,7 +493,14 @@ export default {
       checkinController = controller
       checkingIn.value = true
       try {
-        const { data } = await portalApi.post('/portal/checkin', { ...checkinForm }, { signal: controller.signal })
+        const payload = requestToken
+          ? { purpose: checkinForm.purpose }
+          : { identifier: checkinForm.identifier, portal_pin: checkinForm.portal_pin, purpose: checkinForm.purpose }
+        const { data } = await portalApi.post(
+          '/portal/checkin',
+          payload,
+          { signal: controller.signal, ...(requestToken ? { headers: { Authorization: `Bearer ${requestToken}` } } : {}) }
+        )
         if (
           componentUnmounted ||
           controller.signal.aborted ||
@@ -499,6 +509,7 @@ export default {
           (requestToken && requestToken !== token.value)
         ) return
         checkinResult.value = data
+        checkinForm.portal_pin = ''
         if (token.value) await loadPortalData()
       } catch (requestError) {
         if (
@@ -643,6 +654,7 @@ export default {
       loginForm.identifier = ''
       loginForm.portal_pin = ''
       checkinForm.identifier = ''
+      checkinForm.portal_pin = ''
       checkinForm.purpose = ''
     })
 
