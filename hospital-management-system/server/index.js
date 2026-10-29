@@ -31,11 +31,25 @@ const portalRoutes = require('./routes/portal');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
+
+// Trust proxy when behind reverse proxies like Render, Railway, etc.
+// This ensures req.ip reflects the original client IP.
+if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
+
 const DEFAULT_PORT = 5000;
 const JWT_PLACEHOLDER = 'change_this_to_a_secure_random_string';
+const { assertProductionReadiness } = require('./config/productionReadiness');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === JWT_PLACEHOLDER || process.env.JWT_SECRET.length < 32) {
   throw new Error('[security] JWT_SECRET must be set to a unique random value of at least 32 characters.');
+}
+
+// Fail closed before accepting traffic if production-only deployment safeguards
+// are not configured. Development and test environments remain unaffected.
+if (process.env.NODE_ENV === 'production') {
+  assertProductionReadiness(process.env);
 }
 
 const developmentOrigins = new Set(['http://localhost:3000', 'http://127.0.0.1:3000']);
@@ -100,12 +114,17 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/smart', smartRoutes);
 app.use('/api/portal', portalRoutes);
 
-app.get('/api/health', async (req, res, next) => {
+app.get('/api/health', async (req, res) => {
   try {
     await pool.isReady();
     res.json({ status: 'OK', timestamp: new Date().toISOString() });
-  } catch (error) {
-    res.status(503).json({ status: 'UNAVAILABLE', message: error.message });
+  } catch (_) {
+    // Health checks are public operational endpoints. Do not return raw database
+    // errors here: they can expose filesystem paths, schema details, or internals.
+    res.status(503).json({
+      status: 'UNAVAILABLE',
+      message: 'Service temporarily unavailable',
+    });
   }
 });
 
