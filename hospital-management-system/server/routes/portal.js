@@ -3,7 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
-const { authenticate, authenticatePortal, authorize } = require('../middleware/auth');
+const { authenticate, authenticatePortal, authorize, readBearerToken } = require('../middleware/auth');
 const {
   ApiError, asyncHandler, parseFiniteNumber, parseInteger, withTransaction,
 } = require('../utils/http');
@@ -33,6 +33,20 @@ const CHECKIN_TRANSITIONS = {
 };
 const portalLoginLimiter = new FixedWindowRateLimiter({ windowMs: 15 * 60 * 1000, max: 8 });
 const checkinLimiter = new FixedWindowRateLimiter({ windowMs: 5 * 60 * 1000, max: 20 });
+// Guessing a PIN for one patient is limited separately from overall kiosk volume,
+// so a busy reception desk is not locked out by someone probing a single record.
+const checkinPinLimiter = new FixedWindowRateLimiter({ windowMs: 15 * 60 * 1000, max: 8 });
+// Compared against when no patient matches, so an unknown identifier costs the
+// same bcrypt work as a wrong PIN and response time does not reveal which exists.
+const DUMMY_PIN_HASH = bcrypt.hashSync('not-a-real-portal-pin', 10);
+const INVALID_CHECKIN_CREDENTIALS = 'Invalid patient credentials';
+
+// A patient who is already signed in to the portal proves who they are with that
+// session. Anyone else is treated as an anonymous kiosk user and must supply the
+// portal PIN. A malformed or revoked token is rejected, never silently downgraded.
+const portalSessionIfPresent = (req, res, next) => (
+  readBearerToken(req) ? authenticatePortal(req, res, next) : next()
+);
 
 function paymentsEnabled() {
   return (
@@ -245,21 +259,41 @@ router.post('/login', asyncHandler(async (req, res) => {
   });
 }));
 
-router.post('/checkin', asyncHandler(async (req, res) => {
-  const identifier = typeof req.body?.identifier === 'string' ? req.body.identifier.trim() : '';
+router.post('/checkin', portalSessionIfPresent, asyncHandler(async (req, res) => {
   const purpose = typeof req.body?.purpose === 'string' ? req.body.purpose.trim().slice(0, 200) : null;
-  if (!identifier) throw new ApiError(400, 'identifier is required');
   const limit = checkinLimiter.consume(`checkin:${req.ip}`);
   if (!limit.allowed) {
     res.setHeader('Retry-After', limit.retryAfterSeconds);
     throw new ApiError(429, 'Too many check-in attempts. Please wait before trying again.');
   }
 
-  const matches = await findPatientByIdentifier(identifier);
-  if (matches.length > 1) throw new ApiError(409, 'Identifier is ambiguous. Use the patient MRN or QR code.');
-  const patient = matches[0];
-  if (!patient) throw new ApiError(404, 'Patient not found. Please check your MRN or QR code.');
-  if (patient.status !== 'active') throw new ApiError(403, 'This patient record is inactive.');
+  let patient = req.patient;
+  if (!patient) {
+    // An MRN, phone number, email, or QR value is an identifier, not a secret, so
+    // it is never enough on its own to check someone in or to learn whether they
+    // are registered.
+    const identifier = typeof req.body?.identifier === 'string' ? req.body.identifier.trim() : '';
+    const portalPin = typeof req.body?.portal_pin === 'string' ? req.body.portal_pin : '';
+    if (!identifier || !portalPin) throw new ApiError(400, 'Identifier and portal PIN are required');
+
+    const pinKey = `checkin-pin:${req.ip}:${identifier.toLowerCase()}`;
+    const pinLimit = checkinPinLimiter.consume(pinKey);
+    if (!pinLimit.allowed) {
+      res.setHeader('Retry-After', pinLimit.retryAfterSeconds);
+      throw new ApiError(429, 'Too many check-in attempts. Please wait before trying again.');
+    }
+
+    const matches = await findPatientByIdentifier(identifier);
+    // Unknown, ambiguous, wrong-PIN and PIN-less records all answer identically.
+    const candidate = matches.length === 1 ? matches[0] : null;
+    const pinMatches = await bcrypt.compare(portalPin, candidate?.portal_pin || DUMMY_PIN_HASH);
+    if (!candidate || !candidate.portal_pin || !pinMatches) {
+      throw new ApiError(401, INVALID_CHECKIN_CREDENTIALS);
+    }
+    if (candidate.status !== 'active') throw new ApiError(403, 'This patient record is inactive.');
+    checkinPinLimiter.reset(pinKey);
+    patient = candidate;
+  }
 
   const result = await withTransaction(pool, async connection => {
     // The check-in clock is the hospital's wall clock, not the server's UTC one,
@@ -295,7 +329,7 @@ router.post('/checkin', asyncHandler(async (req, res) => {
          VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?)`,
         [
           randomUUID(), patient.id, todayAppointments[0]?.id || null, checkinTime, today,
-          purpose || todayAppointments[0]?.type || 'visit', identifier,
+          purpose || todayAppointments[0]?.type || 'visit', null,
         ]
       );
       const [created] = await connection.query('SELECT * FROM checkins WHERE id = ?', [insertResult.insertId]);
@@ -315,28 +349,16 @@ router.post('/checkin', asyncHandler(async (req, res) => {
   });
 
   const { checkin, todayAppointments, queuePosition } = result;
+  // This endpoint is intentionally usable at a public check-in kiosk. Do not
+  // return patient identifiers, demographics, or appointment/clinical details:
+  // the identifier used for check-in (such as an MRN) is not an authentication
+  // secret and may be visible to other people at reception.
   res.json({
     success: true,
     checked_in: true,
     queue_position: queuePosition,
     status: checkin.status,
-    patient: {
-      id: patient.id,
-      name: `${patient.first_name} ${patient.last_name}`,
-      mrn: patient.mrn,
-      dob: patient.date_of_birth,
-      gender: patient.gender,
-    },
-    appointment: todayAppointments[0]
-      ? {
-          time: todayAppointments[0].appointment_time.slice(0, 5),
-          type: todayAppointments[0].type,
-          reason: todayAppointments[0].reason,
-        }
-      : null,
-    message: todayAppointments[0]
-      ? `Checked in for your ${todayAppointments[0].appointment_time.slice(0, 5)} ${todayAppointments[0].type} appointment. Please take a seat and we will call you.`
-      : 'Checked in successfully. Please take a seat. A staff member will assist you shortly.',
+    message: 'Check-in successful. Please wait for a staff member to assist you.',
   });
 }));
 
