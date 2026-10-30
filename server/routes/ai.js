@@ -596,7 +596,7 @@ router.post('/chat', authenticate, async (req, res) => {
       response = helpResponse(req.user.role);
     }
 
-    res.json({ response, data });
+    res.json({ response, data, unverified: true, disclaimer: 'AI-generated summary of system data; verify before clinical use.' });
   } catch (error) {
     console.error('AI Error:', error);
     res.status(500).json({ response: 'Sorry, I encountered an error processing your request. Please try again.', data: null });

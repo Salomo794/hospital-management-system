@@ -398,3 +398,13 @@ NODE_ENV=production npm run server
 ```
 
 Use HTTPS, a strong `JWT_SECRET`, an explicit `CORS_ORIGINS` allowlist, encrypted database backups, and a process supervisor. SQLite database files and `.env` files are intentionally excluded from Git.
+
+## Known limitations
+
+- The folder `hospital-management-system/` inside this repository is a stale duplicate of the root application. Nothing in CI, `render.yaml`, `vercel.json` or `start-hms.cmd` references it. It is retained pending approval to remove it.
+- Drug-interaction screening ships with a small demonstration dataset. Production refuses to start with it unless `ALLOW_DEMO_INTERACTIONS=true` is set. A licensed, maintained dataset must be loaded with `npm run db:interactions` and clinically reviewed before use.
+- Multi-factor authentication is not implemented for admin/doctor accounts despite the schema having `user_mfa` tables. Account lockout is rate-limiter based only.
+- The UI is English only; Kinyarwanda and French are not yet supported. Currency formatting is not yet one configurable setting.
+- Rwanda mobile money: Paystack does not offer MTN MoMo or Airtel Money in Rwanda and no Mukuru adapter exists. The mock provider is development-only. Real sandbox testing is required before claiming support.
+- AI/assistant outputs are labelled `unverified` and are generated from local data only; they are not clinically validated.
+- Client tests cover helper functions only; component and end-to-end browser tests are not yet present.

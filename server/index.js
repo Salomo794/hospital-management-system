@@ -169,7 +169,14 @@ function startServer({ port = process.env.PORT || DEFAULT_PORT } = {}) {
 
 if (require.main === module) {
   pool.isReady()
-    .then(() => startServer())
+    .then(async () => {
+      const provenance = await readProvenance(pool);
+      startupWarning(provenance);
+      if (process.env.NODE_ENV === 'production' && !provenance.authoritative && process.env.ALLOW_DEMO_INTERACTIONS !== 'true') {
+        throw new Error('[clinical-safety] Refusing to start in production with demonstration drug-interaction data. Load a licensed, reviewed interaction dataset with npm run db:interactions, or set ALLOW_DEMO_INTERACTIONS=true only for an isolated demo.');
+      }
+      startServer();
+    })
     .catch(error => {
       console.error(`[startup] ${error.message}`);
       process.exitCode = 1;
