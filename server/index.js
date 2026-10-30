@@ -164,6 +164,24 @@ function startServer({ port = process.env.PORT || DEFAULT_PORT } = {}) {
     process.exitCode = 1;
   });
 
+  // Graceful shutdown: stop accepting new connections, finish in-flight
+  // requests, then close the database pool. A second signal forces exit.
+  let shuttingDown = false;
+  const shutdown = signal => {
+    if (shuttingDown) {
+      process.exit(1);
+    }
+    shuttingDown = true;
+    console.log(`[shutdown] ${signal} received, closing gracefully...`);
+    server.close(() => {
+      try { pool.close(); } catch (_) {}
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(1), 10000).unref();
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
+
   return server;
 }
 
