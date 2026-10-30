@@ -15,7 +15,7 @@
     "db:seed": "node config/seed.js",
     "db:backup": "node config/mysqlBackup.js",
     "test": "node --test --test-concurrency=1",
-    "check": "node --check index.js"
+    "check": "node scripts/check-syntax.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
