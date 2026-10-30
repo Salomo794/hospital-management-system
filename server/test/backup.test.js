@@ -26,6 +26,10 @@ function run(args, { dbPath, expect } = {}) {
       DB_PATH: dbPath || '',
       JWT_SECRET: 'test-secret-that-is-at-least-32-characters-long',
       NODE_ENV: 'test',
+      // Backups are plaintext in these tests so they can be opened directly
+      // with better-sqlite3 to assert their contents. Override any value
+      // loaded from .env so the suite is hermetic.
+      BACKUP_ENCRYPTION_KEY: '',
     },
     encoding: 'utf8',
   });
