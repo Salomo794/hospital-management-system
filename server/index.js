@@ -92,6 +92,10 @@ app.use(express.urlencoded({ extended: true, limit: process.env.JSON_LIMIT || '1
 app.use((req, res, next) => {
   req.requestId = req.header('X-Request-ID') || crypto.randomUUID();
   res.setHeader('X-Request-ID', req.requestId);
+  // Guard against hung requests consuming connections indefinitely.
+  res.setTimeout(Number(process.env.REQUEST_TIMEOUT_MS || 30000), () => {
+    if (!res.headersSent) res.status(504).json({ message: 'Request timed out' });
+  });
   next();
 });
 
