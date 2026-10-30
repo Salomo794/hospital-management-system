@@ -10,7 +10,12 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "setup": "node config/setup.js",
+    "db:setup": "node config/setup.js",
     "seed": "node config/seed.js",
+    "db:seed": "node config/seed.js",
+    "db:backup": "node config/mysqlBackup.js",
+    "db:backup:sqlite": "node config/backup.js",
+    "db:import-sqlite": "node scripts/import-sqlite.js",
     "test": "node --test --test-concurrency=1",
     "check": "node --check index.js"
   },
@@ -24,8 +29,10 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.12.1",
+    "mysql2": "^3.14.4",
     "nodemailer": "^10.0.10",
-    "object-assign": "^4.1.1"
+    "object-assign": "^4.1.1",
+    "otplib": "^13.5.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14",

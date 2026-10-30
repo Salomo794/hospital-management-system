@@ -27,12 +27,26 @@ export const useAuthStore = defineStore('auth', {
     },
     async login(email, password) {
       const { data } = await axios.post('/api/auth/login', { email, password })
+      if (data?.mfa_required) {
+        return data
+      }
       this.token = data.token
       this.user = data.user
       if (data.user?.timezone) setDisplayZone(data.user.timezone)
       setStoredItem('token', data.token)
       setStoredJson('user', data.user)
       axios.defaults.headers.common.Authorization = `Bearer ${data.token}`
+      return data
+    },
+    async loginWithMfa({ email, code, challenge }) {
+      const { data } = await axios.post('/api/auth/login/mfa', { email, code, challenge })
+      this.token = data.token
+      this.user = data.user
+      if (data.user?.timezone) setDisplayZone(data.user.timezone)
+      setStoredItem('token', data.token)
+      setStoredJson('user', data.user)
+      axios.defaults.headers.common.Authorization = `Bearer ${data.token}`
+      return data
     },
     // Updates the signed-in user's own display name and phone. The server
     // re-reads the user on every request, so the new name applies immediately

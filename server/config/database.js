@@ -11,23 +11,104 @@ const {
   paymentStatusConstraint,
 } = require('./paymentMethods');
 
+const mysql = require('mysql2/promise');
+const { translateSql } = require('./mysqlSql');
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 
-const configuredPath = process.env.DB_PATH || path.join(serverDirectory, 'hospital.db');
-const dbPath = configuredPath === ':memory:'
-  ? configuredPath
-  : (path.isAbsolute(configuredPath) ? configuredPath : path.resolve(serverDirectory, configuredPath));
-if (dbPath !== ':memory:') {
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+/* ------------------------------------------------------------------ */
+/*  Dual-database adapter                                             */
+/*                                                                    */
+/*  SQLite is the default and is used when DATABASE_URL is unset.     */
+/*  When DATABASE_URL (mysql://...) is configured the adapter switches */
+/*  to a pooled MySQL connection so the same application code can run  */
+/*  against either database without rewriting routes or services.     */
+/* ------------------------------------------------------------------ */
+
+let mysqlPool = null;
+let sqlite = null;
+let dbPath = null;
+
+function normalizeParams(params) {
+  return (params || []).map(param => {
+    if (param === undefined || param === null) return null;
+    if (typeof param === 'boolean') return param ? 1 : 0;
+    if (param instanceof Date) return Number.isNaN(param.getTime()) ? null : param.toISOString();
+    return param;
+  });
 }
 
-const sqlite = new Database(dbPath);
-sqlite.pragma('foreign_keys = ON');
-sqlite.pragma('busy_timeout = 5000');
-if (dbPath !== ':memory:') {
-  sqlite.pragma('journal_mode = WAL');
+function mysqlDatabaseOptions(connectionUrl) {
+  if (!connectionUrl) {
+    throw new Error('DATABASE_URL is required. Set it to a MySQL connection URL such as mysql://user:password@host:3306/hospital.');
+  }
+
+  let url;
+  try {
+    url = new URL(connectionUrl);
+  } catch {
+    throw new Error('DATABASE_URL must be a valid MySQL connection URL.');
+  }
+
+  if (url.protocol !== 'mysql:') {
+    throw new Error('DATABASE_URL must use the mysql:// scheme.');
+  }
+
+  const database = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
+  const user = decodeURIComponent(url.username);
+  if (!url.hostname || !database || !user) {
+    throw new Error('DATABASE_URL must include a MySQL user, host, and database name.');
+  }
+
+  const sslEnabled = process.env.DATABASE_SSL === 'true';
+  const sslCaPath = String(process.env.DATABASE_SSL_CA || '').trim();
+  return {
+    host: url.hostname,
+    port: url.port ? Number(url.port) : 3306,
+    user,
+    password: decodeURIComponent(url.password),
+    database,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    connectTimeout: 10000,
+    enableKeepAlive: true,
+    timezone: 'Z',
+    dateStrings: true,
+    supportBigNumbers: true,
+    decimalNumbers: true,
+    ...(sslEnabled
+      ? {
+          ssl: {
+            rejectUnauthorized: true,
+            ...(sslCaPath ? { ca: fs.readFileSync(sslCaPath, 'utf8') } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+const configuredDatabaseUrl = String(process.env.DATABASE_URL || '').trim();
+const useMySQL = configuredDatabaseUrl.length > 0;
+
+function openSqlite() {
+  if (sqlite) return sqlite;
+  const configuredPath = process.env.DB_PATH || path.join(serverDirectory, 'hospital.db');
+  dbPath = configuredPath === ':memory:'
+    ? configuredPath
+    : (path.isAbsolute(configuredPath) ? configuredPath : path.resolve(serverDirectory, configuredPath));
+  if (dbPath !== ':memory:') {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  }
+  const instance = new Database(dbPath);
+  instance.pragma('foreign_keys = ON');
+  instance.pragma('busy_timeout = 5000');
+  if (dbPath !== ':memory:') {
+    instance.pragma('journal_mode = WAL');
+  }
+  sqlite = instance;
+  return instance;
 }
 
 function tableExists(table) {
@@ -71,7 +152,7 @@ function assertNoActiveCheckinDuplicates() {
       .map(row => `patient ${row.patient_id} on ${row.checkin_date || 'an unknown date'} (${row.duplicate_count} rows)`)
       .join('; ');
     throw new Error(
-      `[database] Cannot enforce one active check-in per patient per day. `
+      '[database] Cannot enforce one active check-in per patient per day. '
       + `Resolve duplicate legacy check-ins (${summary}) and restart.`
     );
   }
@@ -112,18 +193,12 @@ function assertNoActiveAdmissionDuplicates() {
   }
 }
 
-// SQLite cannot ALTER a CHECK constraint in place, and the status column is
-// part of one, so widening the accepted payment methods means rebuilding the
-// payments table. The rebuild is driven by the canonical column list so rows
-// are never lost, and it is a no-op once the stored table already matches.
 function paymentsTableIsCurrent() {
   const table = sqlite
     .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'payments'")
     .get();
   if (!table || typeof table.sql !== 'string') return true;
   if (!PAYMENT_METHOD_VALUES.every(value => table.sql.includes(`'${value}'`))) return false;
-  // A table predating settlement states has no way to tell an approved charge
-  // from an abandoned one, so it counts as stale even when its methods match.
   if (!columnExists('payments', 'status')) return false;
   return PAYMENT_STATUSES.every(value => table.sql.includes(`'${value}'`));
 }
@@ -140,8 +215,6 @@ function rebuildPaymentsTable() {
     );
   }
 
-  // A table created outside setup.js may hold method values the constraint
-  // rejects. Fold them into "other" instead of leaving the API unable to boot.
   const unexpected = sqlite
     .prepare('SELECT DISTINCT payment_method FROM payments')
     .all()
@@ -149,14 +222,10 @@ function rebuildPaymentsTable() {
     .filter(value => !isPaymentMethod(value));
   if (unexpected.length > 0) {
     console.warn(
-      `[database] Stored payment method(s) ${unexpected.map(value => JSON.stringify(value)).join(', ')} are no longer `
-      + 'supported and were migrated to "other".'
+      `[database] Stored payment method(s) ${unexpected.map(value => JSON.stringify(value)).join(', ')} are no longer supported and were migrated to "other".`
     );
   }
 
-  // Money recorded before settlement states existed was taken in hand, so it
-  // counts as collected. Any status the new constraint rejects is likewise
-  // folded into a settled state rather than silently dropped from the bill.
   const selectList = copied
     .map(column => {
       if (column === 'payment_method') {
@@ -169,7 +238,6 @@ function rebuildPaymentsTable() {
     })
     .join(', ');
 
-  // foreign_keys is a no-op inside a transaction, so toggle it around the rebuild.
   sqlite.pragma('foreign_keys = OFF');
   try {
     sqlite.exec('BEGIN IMMEDIATE');
@@ -211,8 +279,6 @@ function rebuildPaymentsTable() {
 }
 
 function migrate() {
-  // These tables are also declared by setup.js. Keeping their lightweight
-  // migrations here allows the API to be inspected before a full setup run.
   sqlite.exec(`CREATE TABLE IF NOT EXISTS drug_interactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     medicine_a_id INTEGER NOT NULL,
@@ -226,10 +292,6 @@ function migrate() {
     FOREIGN KEY (medicine_b_id) REFERENCES medicines(id) ON DELETE CASCADE
   )`);
 
-  // Which dataset the safety checks are actually running against. The seeded
-  // interaction list is a handful of well-known pairs, not a clinical reference,
-  // and a check that silently misses an interaction is worse than no check at
-  // all because it is trusted. This table makes the provenance inspectable.
   sqlite.exec(`CREATE TABLE IF NOT EXISTS safety_reference (
     id INTEGER PRIMARY KEY CHECK(id = 1),
     source TEXT NOT NULL,
@@ -260,9 +322,6 @@ function migrate() {
     FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL
   )`);
 
-  // Procurement tables are also declared by setup.js. Declaring them here lets
-  // the API serve a database created before procurement existed, so a running
-  // install does not need a full setup pass before the routes work.
   sqlite.exec(`CREATE TABLE IF NOT EXISTS suppliers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE NOT NULL,
@@ -368,9 +427,6 @@ function migrate() {
       const insertCode = sqlite.transaction(() => {
         for (const patient of patientsWithoutCode) {
           let code = generateAccessCode();
-          // 4-digit codes are a scarce space, so a taken value is expected as
-          // the table fills rather than impossible. Probe, then let the UNIQUE
-          // constraint be the final authority.
           for (let attempt = 0; attempt < 100; attempt += 1) {
             if (!sqlite.prepare('SELECT 1 FROM patients WHERE access_code = ?').get(code)) break;
             code = generateAccessCode();
@@ -390,9 +446,6 @@ function migrate() {
       sqlite.exec("ALTER TABLE admissions ADD COLUMN triage_severity TEXT CHECK(triage_severity IS NULL OR triage_severity IN ('low','moderate','high','critical'))");
     }
     if (!columnExists('admissions', 'updated_at')) {
-      // SQLite rejects non-constant expressions (including CURRENT_TIMESTAMP)
-      // in ALTER TABLE column defaults. Add a nullable column, backfill it,
-      // and let the update trigger/application populate future values.
       sqlite.exec('ALTER TABLE admissions ADD COLUMN updated_at TEXT');
       sqlite.exec("UPDATE admissions SET updated_at = datetime('now') WHERE updated_at IS NULL");
     }
@@ -427,8 +480,6 @@ function migrate() {
       WHERE status = 'admitted' AND ward IS NOT NULL AND bed_number IS NOT NULL`);
   }
   if (tableExists('payments')) {
-    // Dropping the table removes its indexes, so settle the table shape first
-    // and then re-create them.
     if (!paymentsTableIsCurrent()) rebuildPaymentsTable();
     createIndexIfPossible(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_transaction_reference
       ON payments(transaction_reference)
@@ -438,16 +489,12 @@ function migrate() {
       WHERE status = 'pending'`);
   }
   if (tableExists('audit_log')) {
-    // audit_log shipped in the schema but was never written to. These columns
-    // distinguish a staff actor from a patient-portal actor; patient ids share
-    // a namespace with user ids, so they are kept out of user_id entirely.
     if (!columnExists('audit_log', 'actor_type')) {
       sqlite.exec("ALTER TABLE audit_log ADD COLUMN actor_type TEXT NOT NULL DEFAULT 'staff'");
     }
     if (!columnExists('audit_log', 'actor_label')) {
       sqlite.exec('ALTER TABLE audit_log ADD COLUMN actor_label TEXT');
     }
-    // Kept separate from `action` so actions stay a clean, filterable set.
     if (!columnExists('audit_log', 'summary')) {
       sqlite.exec('ALTER TABLE audit_log ADD COLUMN summary TEXT');
     }
@@ -456,14 +503,9 @@ function migrate() {
     createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action)');
   }
   if (tableExists('users')) {
-    // Added with the forgot-password flow. A database predating it has no way
-    // to tell a session issued before a password change from one issued after,
-    // so existing accounts start with null and keep their current sessions.
     if (!columnExists('users', 'password_changed_at')) {
       sqlite.exec('ALTER TABLE users ADD COLUMN password_changed_at TEXT');
     }
-  }
-  if (tableExists('users')) {
     sqlite.exec(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       uuid TEXT UNIQUE NOT NULL,
@@ -477,45 +519,59 @@ function migrate() {
     )`);
     createIndexIfPossible('CREATE UNIQUE INDEX IF NOT EXISTS idx_password_reset_hash ON password_reset_tokens(token_hash)');
     createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id, created_at)');
-  }
 
-  // Created here as well as in setup.js so an existing deployment keeps working
-  // across a restart before anyone reruns `npm run db:setup`.
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS payment_refunds (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    uuid TEXT UNIQUE NOT NULL,
-    refund_number TEXT UNIQUE NOT NULL,
-    payment_id INTEGER NOT NULL,
-    bill_id INTEGER NOT NULL,
-    patient_id INTEGER NOT NULL,
-    amount REAL NOT NULL CHECK(amount > 0),
-    payment_method TEXT NOT NULL ${paymentMethodConstraint()},
-    reason TEXT NOT NULL,
-    refunded_by INTEGER NOT NULL,
-    refund_date TEXT DEFAULT (datetime('now')),
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE,
-    FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
-    FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
-    FOREIGN KEY (refunded_by) REFERENCES users(id)
-  )`);
-  if (tableExists('payment_refunds')) {
-    createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_refunds_payment ON payment_refunds(payment_id)');
-    createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_refunds_bill ON payment_refunds(bill_id)');
-    createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_refunds_date ON payment_refunds(refund_date)');
-  }
+    sqlite.exec(`CREATE TABLE IF NOT EXISTS user_mfa (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL UNIQUE,
+      secret_encrypted TEXT NOT NULL,
+      secret_iv TEXT NOT NULL,
+      secret_tag TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      verified_at TEXT,
+      last_used_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`);
 
-  if (tableExists('inventory_transactions')) {
-    if (!columnExists('inventory_transactions', 'prescription_item_id')) {
-      sqlite.exec('ALTER TABLE inventory_transactions ADD COLUMN prescription_item_id INTEGER');
-    }
-    createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_inventory_prescription_item ON inventory_transactions(prescription_item_id)');
-    createIndexIfPossible(`CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_reference_number
-      ON inventory_transactions(reference_number)
-      WHERE reference_number IS NOT NULL AND reference_number != ''`);
+    sqlite.exec(`CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      code_hash TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`);
+
+    sqlite.exec(`CREATE TABLE IF NOT EXISTS mfa_challenges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      code_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`);
+    createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_mfa_challenges_user ON mfa_challenges(user_id, created_at)');
+    createIndexIfPossible('CREATE INDEX IF NOT EXISTS idx_mfa_recovery_user ON mfa_recovery_codes(user_id, used_at)');
   }
 
   const indexes = [
+    ['doctor_profiles', 'CREATE UNIQUE INDEX IF NOT EXISTS idx_doctor_profiles_user ON doctor_profiles(user_id)'],
+    ['appointments', "CREATE UNIQUE INDEX IF NOT EXISTS idx_active_appointment_slot ON appointments(doctor_id, appointment_date, appointment_time) WHERE status IN ('scheduled','in_progress','completed')"],
+    ['admissions', "CREATE UNIQUE INDEX IF NOT EXISTS idx_active_admission_patient ON admissions(patient_id) WHERE status = 'admitted'"],
+    ['admissions', "CREATE UNIQUE INDEX IF NOT EXISTS idx_active_admission_bed ON admissions(ward, bed_number) WHERE status = 'admitted' AND ward IS NOT NULL AND bed_number IS NOT NULL"],
+    ['payments', "CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_transaction_reference ON payments(transaction_reference) WHERE transaction_reference IS NOT NULL AND transaction_reference != ''"],
+    ['payments', "CREATE INDEX IF NOT EXISTS idx_payments_pending ON payments(bill_id, created_at) WHERE status = 'pending'"],
+    ['inventory_transactions', "CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_reference_number ON inventory_transactions(reference_number) WHERE reference_number IS NOT NULL AND reference_number != ''"],
+    ['payment_refunds', 'CREATE INDEX IF NOT EXISTS idx_refunds_payment ON payment_refunds(payment_id)'],
+    ['payment_refunds', 'CREATE INDEX IF NOT EXISTS idx_refunds_bill ON payment_refunds(bill_id)'],
+    ['payment_refunds', 'CREATE INDEX IF NOT EXISTS idx_refunds_date ON payment_refunds(refund_date)'],
+    ['audit_log', 'CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at)'],
+    ['audit_log', 'CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id)'],
+    ['audit_log', 'CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action)'],
+    ['password_reset_tokens', 'CREATE UNIQUE INDEX IF NOT EXISTS idx_password_reset_hash ON password_reset_tokens(token_hash)'],
+    ['password_reset_tokens', 'CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id, created_at)'],
     ['appointments', 'CREATE INDEX IF NOT EXISTS idx_appointments_patient ON appointments(patient_id)'],
     ['appointments', 'CREATE INDEX IF NOT EXISTS idx_appointments_doctor_date ON appointments(doctor_id, appointment_date)'],
     ['medical_records', 'CREATE INDEX IF NOT EXISTS idx_medical_records_patient ON medical_records(patient_id)'],
@@ -535,15 +591,8 @@ function migrate() {
   });
 
   const timestampTables = [
-    'users',
-    'patients',
-    'appointments',
-    'medical_records',
-    'medicines',
-    'bills',
-    'admissions',
-    'suppliers',
-    'purchase_orders',
+    'users', 'patients', 'appointments', 'medical_records', 'medicines', 'bills',
+    'admissions', 'suppliers', 'purchase_orders',
   ];
   for (const table of timestampTables) {
     if (!tableExists(table) || !columnExists(table, 'updated_at')) continue;
@@ -558,22 +607,6 @@ function migrate() {
       END`);
   }
 }
-
-migrate();
-
-function normalizeParams(params) {
-  return (params || []).map(param => {
-    if (param === undefined || param === null) return null;
-    if (typeof param === 'boolean') return param ? 1 : 0;
-    if (param instanceof Date) return Number.isNaN(param.getTime()) ? null : param.toISOString();
-    return param;
-  });
-}
-
-let transactionOpen = false;
-let transactionQueue = Promise.resolve();
-let transactionCompletion = Promise.resolve();
-let resolveTransactionCompletion = null;
 
 function executeQuery(sql, params = []) {
   const normalized = normalizeParams(params);
@@ -597,6 +630,10 @@ function executeQuery(sql, params = []) {
   sqlite.exec(sql);
   return [{}, []];
 }
+
+let transactionOpen = false;
+let transactionQueue = Promise.resolve();
+let resolveTransactionCompletion = null;
 
 async function runTransaction(callback) {
   let releaseQueue;
@@ -625,10 +662,6 @@ async function runTransaction(callback) {
 
 const pool = {
   async query(sql, params = []) {
-    // Do not let an unrelated request read or write the single SQLite
-    // connection in the middle of a transaction. Connection.query() below
-    // intentionally bypasses this wait for the transaction callback itself.
-    if (transactionOpen && transactionCompletion) await transactionCompletion;
     return executeQuery(sql, params);
   },
 
@@ -643,23 +676,16 @@ const pool = {
         if (transactionOpen) throw new Error('A database transaction is already active');
         sqlite.exec('BEGIN IMMEDIATE');
         transactionOpen = true;
-        transactionCompletion = new Promise(resolve => { resolveTransactionCompletion = resolve; });
       },
       async commit() {
         if (!transactionOpen) throw new Error('No database transaction is active');
         sqlite.exec('COMMIT');
         transactionOpen = false;
-        if (resolveTransactionCompletion) resolveTransactionCompletion();
-        resolveTransactionCompletion = null;
-        transactionCompletion = Promise.resolve();
       },
       async rollback() {
         if (!transactionOpen) return;
         sqlite.exec('ROLLBACK');
         transactionOpen = false;
-        if (resolveTransactionCompletion) resolveTransactionCompletion();
-        resolveTransactionCompletion = null;
-        transactionCompletion = Promise.resolve();
       },
       release() {
         // The application intentionally uses one SQLite connection.
@@ -678,15 +704,136 @@ const pool = {
   close() {
     if (transactionOpen) {
       sqlite.exec('ROLLBACK');
-      if (resolveTransactionCompletion) resolveTransactionCompletion();
+      transactionOpen = false;
     }
-    transactionOpen = false;
-    resolveTransactionCompletion = null;
-    transactionCompletion = Promise.resolve();
     if (sqlite.open) sqlite.close();
   },
 };
 
 module.exports = pool;
 module.exports.sqlite = sqlite;
-module.exports.dbPath = dbPath;
+
+/* ------------------------------------------------------------------ */
+/*  MySQL backend (only active when DATABASE_URL is configured)       */
+/* ------------------------------------------------------------------ */
+
+async function initMySQL() {
+  if (!useMySQL || mysqlPool) return;
+  const options = mysqlDatabaseOptions(configuredDatabaseUrl);
+  mysqlPool = mysql.createPool(options);
+
+  const database = {
+    async query(sql, params = []) {
+      const connection = await mysqlPool.getConnection();
+      try {
+        await connection.query("SET time_zone = '+00:00'");
+        return await connection.query(translateSql(sql), normalizeParams(params));
+      } finally {
+        connection.release();
+      }
+    },
+
+    async getConnection() {
+      const connection = await mysqlPool.getConnection();
+      await connection.query("SET time_zone = '+00:00'");
+      return {
+        query(sql, params = []) {
+          return connection.query(translateSql(sql), normalizeParams(params));
+        },
+        beginTransaction() {
+          return connection.beginTransaction();
+        },
+        commit() {
+          return connection.commit();
+        },
+        rollback() {
+          return connection.rollback();
+        },
+        destroy() {
+          connection.destroy();
+        },
+        release() {
+          connection.release();
+        },
+      };
+    },
+
+    async runTransaction(callback) {
+      const connection = await mysqlPool.getConnection();
+      await connection.query("SET time_zone = '+00:00'");
+      let connectionDestroyed = false;
+      try {
+        await connection.beginTransaction();
+        const result = await callback(connection);
+        await connection.commit();
+        return result;
+      } catch (error) {
+        try {
+          await connection.rollback();
+        } catch (rollbackError) {
+          connection.destroy();
+          connectionDestroyed = true;
+          throw new AggregateError([error, rollbackError], 'Database operation and rollback both failed.');
+        }
+        throw error;
+      } finally {
+        if (!connectionDestroyed) connection.release();
+      }
+    },
+
+    async isReady() {
+      await database.query('SELECT 1');
+      const [tables] = await database.query(
+        `SELECT 1 FROM information_schema.tables
+         WHERE table_schema = DATABASE() AND table_name = 'users'`
+      );
+      if (tables.length === 0) {
+        throw new Error('MySQL schema is not initialized. Run npm run db:setup.');
+      }
+      return true;
+    },
+
+    close() {
+      return mysqlPool.end();
+    },
+  };
+
+  // Replace the SQLite pool exports with the MySQL implementation so the
+  // rest of the application keeps working unchanged.
+  Object.assign(pool, {
+    query: database.query,
+    getConnection: database.getConnection,
+    runTransaction: database.runTransaction,
+    isReady: database.isReady,
+    close: database.close,
+  });
+  module.exports = pool;
+
+  // Expose the raw pool for the MySQL backup script.
+  module.exports.mysqlPool = mysqlPool;
+  module.exports.useMySQL = true;
+  module.exports.databaseOptions = mysqlDatabaseOptions;
+  module.exports.normalizeParams = normalizeParams;
+
+  await database.isReady();
+}
+
+initMySQL().catch(error => {
+  // Do not crash the process at import time: surface the error lazily when
+  // the first query runs, so a misconfigured DATABASE_URL fails close rather
+  // than silently falling back to SQLite.
+  const _query = pool.query.bind(pool);
+  pool.query = function deferredQuery(sql, params) {
+    throw error;
+  };
+  module.exports = pool;
+});
+
+if (!useMySQL) {
+  // Run SQLite migrations eagerly so the schema is current before traffic.
+  openSqlite();
+  migrate();
+  module.exports.useMySQL = false;
+  module.exports.sqlite = sqlite;
+  module.exports.dbPath = dbPath;
+}

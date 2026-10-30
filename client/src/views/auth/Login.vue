@@ -89,9 +89,22 @@
             <span class="field-error" v-if="passwordTouched && !password">Password is required</span>
           </div>
 
+          <div class="form-group" v-if="mfaRequired">
+            <label>Authenticator code</label>
+            <input
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              v-model="mfaCode"
+              maxlength="6"
+              placeholder="123456"
+            />
+            <span class="field-hint">Enter the 6-digit code from your authenticator app.</span>
+          </div>
+
           <button type="submit" class="btn btn-primary btn-block" :disabled="loading">
             <span v-if="loading" class="btn-spinner"></span>
-            {{ loading ? 'Signing in…' : 'Sign in' }}
+            {{ loading ? (mfaRequired ? 'Verifying…' : 'Signing in…') : (mfaRequired ? 'Verify code' : 'Sign in') }}
           </button>
 
           <div class="form-links">
@@ -138,30 +151,58 @@ export default {
     const toast = useToast()
     const email = ref('')
     const password = ref('')
+    const mfaCode = ref('')
     const loading = ref(false)
     const emailTouched = ref(false)
     const passwordTouched = ref(false)
     const showPassword = ref(false)
+    const mfaRequired = ref(false)
+    const mfaChallenge = ref('')
 
     const handleLogin = async () => {
       emailTouched.value = true
       passwordTouched.value = true
 
-      if (!email.value.trim() || !password.value) {
-        toast.warning('Please fill in all fields.')
-        return
+      if (mfaRequired.value) {
+        if (!/^\d{6}$/.test(mfaCode.value.trim())) {
+          toast.warning('Enter the 6-digit authenticator code.')
+          return
+        }
+      } else {
+        if (!email.value.trim() || !password.value) {
+          toast.warning('Please fill in all fields.')
+          return
+        }
       }
 
       loading.value = true
       try {
-        await authStore.login(email.value, password.value)
-        toast.success('Login successful!')
+        if (mfaRequired.value) {
+          await authStore.loginWithMfa({
+            email: email.value.trim(),
+            code: mfaCode.value.trim(),
+            challenge: mfaChallenge.value,
+          })
+          toast.success('Login successful!')
+        } else {
+          const data = await authStore.login(email.value, password.value)
+          if (data?.mfa_required) {
+            mfaRequired.value = true
+            mfaChallenge.value = data.challenge || ''
+            toast.info('Two-factor authentication required. Enter the code from your app.')
+            return
+          }
+          toast.success('Login successful!')
+        }
         const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
           ? route.query.redirect
           : '/dashboard'
         router.push(redirect)
       } catch (e) {
         toast.error(e.response?.data?.message || 'Login failed. Please check your credentials.')
+        if (mfaRequired.value && e.response?.status === 401) {
+          mfaCode.value = ''
+        }
       } finally {
         loading.value = false
       }
@@ -178,7 +219,8 @@ export default {
     }
 
     return {
-      email, password, loading, emailTouched, passwordTouched, showPassword,
+      email, password, mfaCode, loading, emailTouched, passwordTouched, showPassword,
+      mfaRequired, mfaChallenge,
       handleLogin, fillDemo, showDemo, brandIcon, eyeIcon, eyeOffIcon
     }
   }
@@ -461,6 +503,13 @@ export default {
 .field-error {
   font-size: 12px;
   color: var(--danger);
+  margin-top: 5px;
+  display: block;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--text-muted);
   margin-top: 5px;
   display: block;
 }

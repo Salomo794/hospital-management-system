@@ -50,11 +50,16 @@ function getPool() {
 }
 
 async function assertDemoFixtureTablesEmpty(conn) {
-  const [tableRows] = await conn.query("SELECT name FROM sqlite_master WHERE type = 'table'");
+  let tableRows;
+  if (getPool().useMySQL) {
+    [tableRows] = await conn.query("SELECT TABLE_NAME AS name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'");
+  } else {
+    [tableRows] = await conn.query("SELECT name AS name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'");
+  }
   const existingTables = new Set(tableRows.map(row => row.name));
   const populatedTables = [];
   for (const table of DEMO_FIXTURE_TABLES.filter(name => existingTables.has(name))) {
-    const [rows] = await conn.query(`SELECT COUNT(*) AS count FROM "${table}"`);
+    const [rows] = await conn.query(`SELECT COUNT(*) AS count FROM \`${table}\``);
     const count = Number(rows[0]?.count || 0);
     if (count > 0) populatedTables.push(`${table} (${count} rows)`);
   }

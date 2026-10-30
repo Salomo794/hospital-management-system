@@ -8,6 +8,17 @@ async function setup() {
   const conn = await pool.getConnection();
 
   try {
+    const originalQuery = conn.query.bind(conn);
+    conn.query = async (sql, ...args) => {
+      try {
+        return await originalQuery(sql, ...args);
+      } catch (error) {
+        if (error && error.code === 'ER_DUP_KEYNAME' && /CREATE\s+(UNIQUE\s+)?INDEX/i.test(String(sql))) {
+          return [[]];
+        }
+        throw error;
+      }
+    };
     await conn.beginTransaction();
     await conn.query(`CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,6 +32,9 @@ async function setup() {
       avatar TEXT,
       is_active INTEGER DEFAULT 1,
       last_login TEXT,
+      mfa_enabled INTEGER NOT NULL DEFAULT 0,
+      mfa_secret TEXT,
+      mfa_verified_at TEXT,
       -- Stamped whenever the password changes. Session tokens carry the value
       -- they were issued against, so a reset or a forced change can end every
       -- session that predates it - including one held by whoever prompted the
@@ -460,10 +474,6 @@ async function setup() {
       FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL
     )`);
 
-    const [checkinColumns] = await conn.query('PRAGMA table_info(checkins)');
-    if (!checkinColumns.some(column => column.name === 'checkin_date')) {
-      await conn.query('ALTER TABLE checkins ADD COLUMN checkin_date TEXT');
-    }
     await conn.query(`
       UPDATE checkins
       SET checkin_date = COALESCE(date(checkin_time), date(created_at), date('now'))
@@ -499,25 +509,6 @@ async function setup() {
         + `(check-in IDs: ${undatedCheckins.map(row => row.id).join(', ')}). Repair them and rerun setup.`
       );
     }
-    await conn.query('DROP TRIGGER IF EXISTS checkins_require_date_before_insert');
-    await conn.query('DROP TRIGGER IF EXISTS checkins_require_date_before_update');
-    await conn.query(`
-      CREATE TRIGGER checkins_require_date_before_insert
-      BEFORE INSERT ON checkins
-      WHEN NEW.checkin_date IS NULL OR TRIM(NEW.checkin_date) = ''
-      BEGIN
-        SELECT RAISE(ABORT, 'checkin_date is required');
-      END
-    `);
-    await conn.query(`
-      CREATE TRIGGER checkins_require_date_before_update
-      BEFORE UPDATE OF checkin_date, checkin_time ON checkins
-      WHEN NEW.checkin_date IS NULL OR TRIM(NEW.checkin_date) = ''
-      BEGIN
-        SELECT RAISE(ABORT, 'checkin_date is required');
-      END
-    `);
-
     const [duplicateAdmissions] = await conn.query(`
       SELECT patient_id, COUNT(*) AS duplicate_count
       FROM admissions
@@ -585,18 +576,6 @@ async function setup() {
     await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_orders_created ON purchase_orders(created_at)');
     await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_order_items_order ON purchase_order_items(purchase_order_id)');
     await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_order_items_medicine ON purchase_order_items(medicine_id)');
-
-    for (const table of ['users', 'patients', 'appointments', 'medical_records', 'medicines', 'bills', 'admissions', 'suppliers', 'purchase_orders']) {
-      const trigger = `${table}_set_updated_at`;
-      await conn.query(`DROP TRIGGER IF EXISTS ${trigger}`);
-      await conn.query(`CREATE TRIGGER ${trigger}
-        AFTER UPDATE ON ${table}
-        FOR EACH ROW
-        WHEN NEW.updated_at = OLD.updated_at
-        BEGIN
-          UPDATE ${table} SET updated_at = datetime('now') WHERE id = NEW.id;
-        END`);
-    }
 
     await pool.isReady();
     await conn.commit();
