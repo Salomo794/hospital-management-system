@@ -149,7 +149,8 @@ function withDecryptedCopy(file, action) {
       // A wrong key is an operator mistake, not a crash. Report it as one
       // instead of letting a stack trace be the user interface.
       console.error(`Could not open ${file}: ${error.message}`);
-      process.exit(1);
+      process.exitCode = 1;
+      return false;
     }
     return action(scratch);
   } finally {
@@ -170,7 +171,7 @@ function verify(file) {
     console.error(`${file} is encrypted, but BACKUP_ENCRYPTION_KEY is not set, so it cannot be checked.`);
     process.exit(1);
   }
-  withDecryptedCopy(file, decrypted => verifyDatabase(decrypted, file));
+  return withDecryptedCopy(file, decrypted => verifyDatabase(decrypted, file));
 }
 
 function verifyDatabase(target, original) {
@@ -179,9 +180,10 @@ function verifyDatabase(target, original) {
   try {
     // integrity_check is the only way to know a copy is actually usable.
     const [result] = db.pragma('integrity_check');
-    if (result.integrity_check !== 'ok') {
+    if (!result || result.integrity_check !== 'ok') {
       console.error(`Integrity check failed for ${original}: ${JSON.stringify(result)}`);
-      process.exit(1);
+      process.exitCode = 1;
+      return false;
     }
     const tableCount = db
       .prepare("SELECT COUNT(*) AS c FROM sqlite_master WHERE type = 'table'")
@@ -299,7 +301,10 @@ function create(options) {
   }
 
   // Never report success on a copy that cannot be read back.
-  verify(target);
+  if (!verify(target)) {
+    process.exitCode = 1;
+    return;
+  }
 
   const kept = rotate(directory, options.keep);
   console.log(`  retaining ${kept} backup(s) in ${directory}`);
@@ -308,7 +313,7 @@ function create(options) {
 }
 
 function restore(file) {
-  verify(file);
+  if (!verify(file)) return;
   const databasePath = resolveDatabasePath();
   const directory = path.dirname(databasePath);
 
@@ -344,7 +349,10 @@ function main() {
   loadEnvironment();
   const options = parseArgs(process.argv.slice(2));
   if (options.list) { listBackups(options); return; }
-  if (options.verify) { verify(path.resolve(options.verify)); return; }
+  if (options.verify) {
+    if (!verify(path.resolve(options.verify))) process.exitCode = 1;
+    return;
+  }
   if (options.restore) { restore(path.resolve(options.restore)); return; }
   create(options);
 }
