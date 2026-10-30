@@ -6,7 +6,7 @@ const path = require('node:path');
 const request = require('supertest');
 
 const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'hms-health-test-'));
-process.env.TEST_DATABASE_URL = 'mysql://root:rootpass@127.0.0.1:3306/hms_test';
+process.env.TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || 'mysql://root:rootpass@127.0.0.1:3306/hms_test';
 process.env.JWT_SECRET = 'health-test-secret-that-is-at-least-32-characters';
 process.env.NODE_ENV = 'test';
 
@@ -25,7 +25,7 @@ after(() => {
 
 test('health endpoint does not disclose internal database errors', async () => {
   app.pool.isReady = async () => {
-    throw new Error('SQLITE_CANTOPEN: /private/server/path/hospital.db credentials=secret-value');
+    throw new Error('ER_ACCESS_DENIED_ERROR: /private/server/connection credentials=secret-value');
   };
 
   const response = await request(app).get('/api/health').expect(503);
@@ -34,5 +34,5 @@ test('health endpoint does not disclose internal database errors', async () => {
     status: 'UNAVAILABLE',
     message: 'Service temporarily unavailable',
   });
-  assert.doesNotMatch(JSON.stringify(response.body), /SQLITE_CANTOPEN|private\/server\/path|secret-value/i);
+  assert.doesNotMatch(JSON.stringify(response.body), /ER_ACCESS_DENIED_ERROR|private\/server\/connection|secret-value/i);
 });

@@ -50,12 +50,9 @@ function getPool() {
 }
 
 async function assertDemoFixtureTablesEmpty(conn) {
-  let tableRows;
-  if (getPool().useMySQL) {
-    [tableRows] = await conn.query("SELECT TABLE_NAME AS name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'");
-  } else {
-    [tableRows] = await conn.query("SELECT name AS name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'");
-  }
+  const [tableRows] = await conn.query(
+    "SELECT TABLE_NAME AS name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
+  );
   const existingTables = new Set(tableRows.map(row => row.name));
   const populatedTables = [];
   for (const table of DEMO_FIXTURE_TABLES.filter(name => existingTables.has(name))) {
@@ -68,7 +65,7 @@ async function assertDemoFixtureTablesEmpty(conn) {
     throw new Error(
       'Demo seed requires an empty application database; refusing to add demo fixtures to existing data. '
       + `Non-empty tables: ${populatedTables.join(', ')}. `
-      + 'Set DB_PATH to a fresh empty SQLite file (or back up and clear the existing database), '
+      + 'Back up and clear the configured MySQL database, '
       + 'then run db:setup and db:seed again.'
     );
   }
@@ -96,8 +93,7 @@ async function seed() {
 
     await conn.beginTransaction();
     const demoPortalCredentials = [];
-    const backendLabel = getPool().useMySQL ? 'MySQL' : 'SQLite';
-    console.log(`Seeding database (${backendLabel})...`);
+    console.log('Seeding database (MySQL)...');
 
     // --- Specialties ---
     const [specRows] = await conn.query('SELECT id FROM specialties LIMIT 1');

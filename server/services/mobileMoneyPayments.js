@@ -1,10 +1,8 @@
 // Orchestration shared by the staff billing route and the patient portal.
 //
-// The order of operations matters more than it looks. SQLite here is a single
-// connection behind a serialized write queue, so holding a transaction open
-// across a provider HTTP call would block every other write in the process for
-// the length of that call. Each step below therefore commits before the next
-// network round trip:
+// Commit each state change before the next provider HTTP call so a duplicate
+// tap cannot open two charges and a provider outage leaves an auditable pending
+// row:
 //
 //   1. validate and write the 'pending' row   (transaction)
 //   2. ask the provider to send the prompt   (no lock held)

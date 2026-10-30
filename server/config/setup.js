@@ -603,8 +603,7 @@ async function setup() {
 
     await pool.isReady();
     await conn.commit();
-    const backend = pool.useMySQL ? 'MySQL' : 'SQLite';
-    console.log(`All tables and indexes created successfully (${backend})!`);
+    console.log('All tables and indexes created successfully (MySQL)!');
   } catch (error) {
     try { await conn.rollback(); } catch (_) { /* preserve original error */ }
     console.error('Error creating tables:', error);

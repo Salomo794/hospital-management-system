@@ -203,17 +203,11 @@ async function run() {
         [row.a, row.b, row.severity, row.description, row.management, sourceLabel]
       );
     }
+    await connection.query('DELETE FROM safety_reference WHERE id = 1');
     await connection.query(
       `INSERT INTO safety_reference
          (id, source, description, reference_name, reference_version, loaded_at, interaction_count)
-       VALUES (1,?,?,?,?,datetime('now'),?)
-       ON CONFLICT(id) DO UPDATE SET
-         source = excluded.source,
-         description = excluded.description,
-         reference_name = excluded.reference_name,
-         reference_version = excluded.reference_version,
-         loaded_at = excluded.loaded_at,
-         interaction_count = excluded.interaction_count`,
+       VALUES (1,?,?,?,?,datetime('now'),?)`,
       [source, options.description || null, options.name || null, options.version || null, valid.length]
     );
   });

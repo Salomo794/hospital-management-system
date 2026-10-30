@@ -9,13 +9,13 @@ The server serves the built client from `client/dist`. No CORS needed between cl
    - Build Command: `npm run install:all && npm run build`
    - Pre Deploy Command: `npm run db:setup` (idempotent)
    - Start Command: `npm run start` (or `npm run start:prod`)
-4. Add a Persistent Disk: name `hms-data`, mount path `/var/data`, size 1GB (or more). This is required for SQLite persistence; ephemeral disk will lose data on restarts/deploys.
+4. Configure a managed MySQL 8 database and set its connection URL as a secret environment variable.
 5. Set environment variables:
    - NODE_ENV=production
    - PORT=10000 (Render sets this automatically; set explicitly if needed)
    - JWT_SECRET=generate a secure random >=32 chars
    - CORS_ORIGINS=leave empty for same-origin
-   - DB_PATH=/var/data/hospital.db
+   - DATABASE_URL=mysql://<user>:<password>@<host>:3306/<database>
    - PUBLIC_URL=https://your-render-app.onrender.com
    - APP_TIMEZONE=Africa/Kigali
    - SMTP_* as needed for password resets
@@ -26,7 +26,6 @@ The server serves the built client from `client/dist`. No CORS needed between cl
 Notes:
 - Seed is blocked in production; only seed with ALLOW_DEMO_SEED=true on an isolated DB.
 - DB backups: `npm run db:backup` can run as a cron job or manually. Consider offsite copy.
-- Better-sqlite3 needs native build (Render Node 22 will handle).
 
 ## Option 2: Vercel frontend + Render backend (split)
 Client uses relative `/api` paths; so Vercel must rewrite `/api/*` to Render backend.
@@ -37,15 +36,12 @@ Client uses relative `/api` paths; so Vercel must rewrite `/api/*` to Render bac
 4. Set frontend env vars if needed: `VITE_API_BASE_URL` is NOT currently used; rewrites handle it. If you want to keep client using base URL, you can inject it - but current code is fine with rewrites.
 5. CORS on Render: add frontend origin to CORS_ORIGINS (e.g., https://your-frontend.vercel.app).
 
-## Important: SQLite persistence on Render
-Render free tier has ephemeral filesystem. To persist data, you MUST attach a Render Persistent Disk to the web service and set DB_PATH to the mount path (e.g. /var/data/hospital.db). Disk is a paid add-on for persistent storage. Backups are still recommended.
-
 ## Environment variables required
-See README.md and server/.env.example. Critical: JWT_SECRET (>=32), DB_PATH, PUBLIC_URL (https in prod), CORS_ORIGINS (if split), SMTP for password resets in prod.
+See README.md and server/.env.example. Critical: JWT_SECRET (>=32), DATABASE_URL, PUBLIC_URL (https in prod), CORS_ORIGINS (if split), SMTP for password resets in prod.
 
 ## First run checklist
 - [ ] Set strong JWT_SECRET
-- [ ] Set DB_PATH to persistent location
+- [ ] Set DATABASE_URL to the managed MySQL instance
 - [ ] Configure PUBLIC_URL to your app URL
 - [ ] Ensure HTTPS (Render/Vercel provide)
 - [ ] Run `npm run db:setup` (done by preDeployCommand)

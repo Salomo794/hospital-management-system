@@ -23,12 +23,12 @@ function errorHandler(error, req, res, next) {
     return res.status(error.status).json(payload);
   }
 
-  if (String(error.code || '').startsWith('SQLITE_CONSTRAINT')) {
-    const message = String(error.message || '');
-    let friendly = 'The request conflicts with existing data';
-    if (/UNIQUE/i.test(message)) friendly = 'A record with these values already exists';
-    else if (/FOREIGN KEY/i.test(message)) friendly = 'A related record was not found';
-    else if (/CHECK/i.test(message)) friendly = 'One or more values are invalid';
+  if (['ER_DUP_ENTRY', 'ER_NO_REFERENCED_ROW_2', 'ER_CHECK_CONSTRAINT_VIOLATED'].includes(error.code)) {
+    const friendly = error.code === 'ER_DUP_ENTRY'
+      ? 'A record with these values already exists'
+      : error.code === 'ER_NO_REFERENCED_ROW_2'
+        ? 'A related record was not found'
+        : 'One or more values are invalid';
     return res.status(409).json({ message: friendly });
   }
 

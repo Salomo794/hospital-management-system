@@ -1,13 +1,8 @@
 const { after, before, test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 const request = require('supertest');
 
-const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'hms-procurement-test-'));
-const dbPath = path.join(tempDirectory, 'hospital.test.db');
-process.env.TEST_DATABASE_URL = 'mysql://root:rootpass@127.0.0.1:3306/hms_test';
+process.env.TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || 'mysql://root:rootpass@127.0.0.1:3306/hms_test';
 process.env.JWT_SECRET = 'test-secret-that-is-at-least-32-characters-long';
 process.env.NODE_ENV = 'test';
 
@@ -38,11 +33,7 @@ before(async () => {
 });
 
 after(async () => {
-  pool.close();
-  for (const suffix of ['', '-shm', '-wal']) {
-    fs.rmSync(`${dbPath}${suffix}`, { force: true });
-  }
-  fs.rmSync(tempDirectory, { recursive: true, force: true });
+  await pool.close();
 });
 
 // Picks two seeded medicines and reports the stock each started with, so

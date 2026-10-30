@@ -329,7 +329,7 @@ router.get('/insights', authenticate, authorize('admin', 'receptionist', 'doctor
     // Revenue pulse (today vs yesterday)
     if (canViewBilling) {
       // Yesterday's window is derived from the hospital's calendar rather than
-      // SQLite's 'now', so the two figures being compared share a timezone.
+      // UTC is used by both the database and application for these windows.
       const todayRange = zonedDayRange(today);
       const yesterdayRange = zonedDayRange(addDays(today, -1));
       const [[todayRev], [yesterdayRev]] = await Promise.all([

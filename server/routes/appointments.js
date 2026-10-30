@@ -181,7 +181,7 @@ router.post('/', authenticate, authorize(...APPOINTMENT_ROLES), validateAppointm
     });
     res.status(201).json(appointment);
   } catch (error) {
-    if (String(error.code || '').startsWith('SQLITE_CONSTRAINT')) {
+    if (error.code === 'ER_DUP_ENTRY') {
       throw new ApiError(409, 'Time slot already booked');
     }
     throw error;

@@ -204,9 +204,9 @@ The API integration tests run against a dedicated MySQL test database, so they n
 | `server/test/api.test.js` | Scheduling, lab results, billing, portal payments, medication safety, AI and dashboard scoping |
 | `server/test/audit-refunds.test.js` | Audit-log filtering and role boundaries, payment refunds |
 | `server/test/procurement.test.js` | Purchase-order workflow, separation of duties, partial receipts, stock-ledger consistency |
-| `server/test/migrations.test.js` | Schema invariants and legacy-data migrations |
+| `server/test/database.test.js` | MySQL connection, datetime normalization, and schema constraints |
 | `server/test/time.test.js` | Hospital-timezone and daylight-saving handling |
-| `server/test/backup.test.js` | Backup contents, verification, rotation, collision, and a restore round trip |
+| `server/test/backup.test.js` | MySQL backup contents and manifest verification |
 | `server/test/backup-crypto.test.js` | Backup encryption, wrong-key rejection, tamper and truncation detection |
 | `server/test/rate-limit.test.js` | Patient-data throttling, per-person budgets, and that clinical work stays under them |
 | `server/test/safety-provenance.test.js` | Interaction-data provenance, CSV import, and refusal of a bad dataset |
@@ -248,7 +248,7 @@ The API returns JSON for successful requests, validation failures, unknown route
 
 The configured methods are cash, card, credit card, mobile wallet, mobile money, UPI/QR, online, bank transfer, cheque/demand draft, insurance, and other.
 
-Widening the list widens a MySQL `CHECK` constraint, which cannot be altered in place. The API therefore rebuilds the `payments` table on start, copying every existing row and preserving the transaction-reference index; stored values that are no longer supported are folded into `other` with a warning. The rebuild is skipped once the stored table already matches, so restarting is safe and idempotent.
+The payment-method and status `CHECK` constraints are created from the shared configuration when the schema is initialized. MySQL does not alter an existing table's checks through `CREATE TABLE IF NOT EXISTS`; changing these values on an already initialized database requires a schema migration.
 
 ### Mobile money (MTN MoMo, Airtel Money)
 
@@ -331,18 +331,18 @@ Anything that means "today" to staff — the day's takings, the check-in queue, 
 
 `npm run db:backup` writes a verified, consistent logical dump of the MySQL database into `server/backups` and keeps a rolling window. It exports the schema and data in a transaction-safe format, so the backup can be restored without a half-written database file.
 
-Every backup is integrity-checked and reopened before the command reports success, and each one gets a small JSON manifest recording when it was taken and why. Retained backups are ignored by Git.
+Each backup is checksummed and verified against its manifest before the command reports success. Retained backups are ignored by Git.
 
 | Command | Description |
 | --- | --- |
-| `npm run db:backup` | Take a verified backup and rotate old ones |
+| `npm run db:backup` | Take a verified MySQL backup and rotate old ones |
 | `npm run db:backup -- --label nightly` | Record why the backup was taken |
 | `npm run db:backup -- --keep 30` | Retain 30 instead of the default 14 |
 | `npm run db:backup -- --list` | List retained backups |
-| `npm run db:backup -- --verify <file>` | Check a backup opens and passes `integrity_check` |
-| `npm run db:backup -- --restore <file>` | Restore a backup, keeping a pre-restore copy first |
+| `npm run db:backup -- --verify <file>` | Verify a MySQL backup and its manifest |
+| `npm run db:backup -- --decrypt <file> --output <path>` | Decrypt a verified backup for restore |
 
-An untested backup is not a backup. Schedule the command, and occasionally run `--verify` or a restore into a scratch database. The `--restore` path copies the current database aside before replacing it, so a restore is itself reversible.
+An untested backup is not a backup. Schedule the command, and occasionally run `--verify` or restore it into a scratch database with the MySQL client.
 
 `start-hms.cmd` takes a verified backup **before** it applies schema migrations, and refuses to migrate if that backup fails. A bad migration is the one situation you genuinely need a rollback for, and it should not depend on somebody having remembered to make one. Set `BACKUP_ON_LAUNCH=false` to skip it. On a first run there is no database yet, which is reported and passed over rather than treated as a failure.
 
@@ -350,7 +350,7 @@ A backup that runs only on restart is not enough for a server left up for weeks,
 
 ```bat
 schtasks /create /tn "MediCare HMS backup" /sc daily /st 02:30 ^
-  /tr "\"C:\Program Files\nodejs\node.exe\" \"C:\path\to\hospital-management-system\server\config\backup.js\" --label nightly --require" /f
+  /tr "\"C:\Program Files\nodejs\node.exe\" \"C:\path\to\hospital-management-system\server\config\mysqlBackup.js\" --label nightly --require" /f
 ```
 
 `--require` makes a missing database a failure, so a typo in the path is noticed in the morning rather than silently skipped. The command exits non-zero on any real failure, which is what makes it usable from a scheduler or a monitoring check.

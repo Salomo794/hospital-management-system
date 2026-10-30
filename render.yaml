@@ -15,8 +15,8 @@ services:
         generateValue: true
       - key: CORS_ORIGINS
         sync: false
-      - key: DB_PATH
-        value: /var/data/hospital.db
+      - key: DATABASE_URL
+        sync: false
       - key: PUBLIC_URL
         sync: false
       - key: APP_TIMEZONE
@@ -43,7 +43,3 @@ services:
         value: false
       - key: TRUST_PROXY
         value: true
-    disk:
-      name: hms-data
-      mountPath: /var/data
-      sizeGB: 1

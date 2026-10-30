@@ -197,7 +197,7 @@ async function createBackup(options = {}) {
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   if (options.label && options.label.length > 200) throw new Error('label must be 200 characters or fewer.');
 
-  const connection = await pool.pool.getConnection();
+  const connection = await pool.mysqlPool.getConnection();
   let temporaryDirectory;
   let output;
   let outputFinished;

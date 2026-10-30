@@ -14,8 +14,6 @@
     "seed": "node config/seed.js",
     "db:seed": "node config/seed.js",
     "db:backup": "node config/mysqlBackup.js",
-    "db:backup:sqlite": "node config/backup.js",
-    "db:import-sqlite": "node scripts/import-sqlite.js",
     "test": "node --test --test-concurrency=1",
     "check": "node --check index.js"
   },
@@ -35,7 +33,6 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.14",
-    "supertest": "^7.1.4",
-    "better-sqlite3": "^13.0.3"
+    "supertest": "^7.1.4"
   }
 }

@@ -96,7 +96,7 @@ export const useAuthStore = defineStore('auth', {
           response => response,
           error => {
             const url = String(error.config?.url || '')
-            const isPublicAuthRequest = /\/api\/auth\/(login|register)(?:\?|$)/.test(url)
+            const isPublicAuthRequest = /\/api\/auth\/(login(?:\/mfa)?|register)(?:\?|$)/.test(url)
             if (error.response?.status === 401 && !isPublicAuthRequest) {
               this.logout()
               if (window.location.pathname !== '/login') {
