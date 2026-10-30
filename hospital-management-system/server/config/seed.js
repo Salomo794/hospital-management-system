@@ -50,11 +50,13 @@ function getPool() {
 }
 
 async function assertDemoFixtureTablesEmpty(conn) {
-  const [tableRows] = await conn.query("SELECT name FROM sqlite_master WHERE type = 'table'");
+  const [tableRows] = await conn.query(
+    "SELECT TABLE_NAME AS name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
+  );
   const existingTables = new Set(tableRows.map(row => row.name));
   const populatedTables = [];
   for (const table of DEMO_FIXTURE_TABLES.filter(name => existingTables.has(name))) {
-    const [rows] = await conn.query(`SELECT COUNT(*) AS count FROM "${table}"`);
+    const [rows] = await conn.query(`SELECT COUNT(*) AS count FROM \`${table}\``);
     const count = Number(rows[0]?.count || 0);
     if (count > 0) populatedTables.push(`${table} (${count} rows)`);
   }
@@ -63,7 +65,7 @@ async function assertDemoFixtureTablesEmpty(conn) {
     throw new Error(
       'Demo seed requires an empty application database; refusing to add demo fixtures to existing data. '
       + `Non-empty tables: ${populatedTables.join(', ')}. `
-      + 'Set DB_PATH to a fresh empty SQLite file (or back up and clear the existing database), '
+      + 'Back up and clear the configured MySQL database, '
       + 'then run db:setup and db:seed again.'
     );
   }
@@ -91,7 +93,7 @@ async function seed() {
 
     await conn.beginTransaction();
     const demoPortalCredentials = [];
-    console.log('Seeding database (SQLite)...');
+    console.log('Seeding database (MySQL)...');
 
     // --- Specialties ---
     const [specRows] = await conn.query('SELECT id FROM specialties LIMIT 1');
@@ -184,10 +186,15 @@ async function seed() {
         { first_name: 'Christopher', last_name: 'Lopez', dob: '1995-08-03', gender: 'male', phone: '555-0109', blood: 'AB-', insurance: 'Aetna', allergies: 'None', conditions: '' },
         { first_name: 'Margaret', last_name: 'Clark', dob: '1940-02-14', gender: 'female', phone: '555-0110', blood: 'A+', insurance: 'Medicare', allergies: 'Penicillin, Morphine', conditions: 'Heart Failure, Diabetes Type 2' },
       ];
+      // 4-digit codes can repeat by chance, so dedupe within the seed run. The
+      // access_code column is UNIQUE, which would otherwise abort seeding.
+      const usedAccessCodes = new Set();
       for (const p of patients) {
         const uuid = randomUUID();
         const mrn = `MRN-${uuid.substring(0, 8).toUpperCase()}`;
-        const accessCode = generateAccessCode(mrn);
+        let accessCode = generateAccessCode();
+        while (usedAccessCodes.has(accessCode)) accessCode = generateAccessCode();
+        usedAccessCodes.add(accessCode);
         const [result] = await conn.query(
           `INSERT INTO patients (uuid, mrn, access_code, first_name, last_name, date_of_birth, gender, phone, blood_type, address, insurance_provider, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, status)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
@@ -345,18 +352,19 @@ async function seed() {
         const usable = lines.filter(line => medByName[line.medicine]);
         if (usable.length === 0) return;
         const received = status === 'received';
-        // Timestamps are SQLite expressions rather than bound values, because
-        // datetime('now', ?) is not evaluated in a parameter slot.
+        const toSqlDateTime = (daysAgo) => {
+          if (daysAgo === null || daysAgo === undefined) return null;
+          const date = new Date(Date.now() - (daysAgo * 24 * 60 * 60 * 1000));
+          return date.toISOString().slice(0, 19).replace('T', ' ');
+        };
+        const expectedExpr = (expectedDate === null || expectedDate === undefined)
+          ? 'NULL'
+          : `date('now', '${String(expectedDate).replace(/'/g, "''")}')`;
         const [poResult] = await conn.query(
           `INSERT INTO purchase_orders
            (uuid, order_number, supplier_id, status, total_amount, ordered_by, approved_by,
             expected_date, notes, submitted_at, approved_at, received_at)
-           VALUES (?, ?, ?, ?, 0, ?, ?,
-                   CASE WHEN ? IS NULL THEN NULL ELSE date('now', ?) END,
-                   ?,
-                   datetime('now', ?),
-                   CASE WHEN ? THEN datetime('now', ?) ELSE NULL END,
-                   CASE WHEN ? THEN datetime('now', ?) ELSE NULL END)`,
+           VALUES (?, ?, ?, ?, 0, ?, ?, ${expectedExpr}, ?, ?, ?, ?)`,
           [
             randomUUID(),
             number,
@@ -364,14 +372,10 @@ async function seed() {
             status,
             doctorUserId1,
             received ? adminUserId : null,
-            expectedDate || null,
-            expectedDate || null,
             note,
-            submittedOffsetDays === null ? null : `-${submittedOffsetDays} days`,
-            received ? 1 : 0,
-            approvedOffsetDays === null ? null : `-${approvedOffsetDays} days`,
-            received ? 1 : 0,
-            receivedOffsetDays === null ? null : `-${receivedOffsetDays} days`,
+            submittedOffsetDays === null ? null : toSqlDateTime(submittedOffsetDays),
+            received ? (approvedOffsetDays === null ? null : toSqlDateTime(approvedOffsetDays)) : null,
+            received ? (receivedOffsetDays === null ? null : toSqlDateTime(receivedOffsetDays)) : null,
           ]
         );
         for (const line of usable) {
@@ -636,21 +640,24 @@ async function seed() {
         const w = wards[i];
         const uuid = randomUUID();
         const admNum = `ADM-${Date.now().toString(36).toUpperCase()}-${i + 1}`;
+        const admDate = new Date(Date.now() - ((i % 5) * 24 * 60 * 60 * 1000)).toISOString().slice(0, 19).replace('T', ' ');
         await conn.query(
           `INSERT INTO admissions (uuid, admission_number, patient_id, doctor_id, ward, bed_number, diagnosis, treatment_plan, status, notes, admission_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?, datetime('now', ?))`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?, ?)`,
           [uuid, admNum, patientIdList[w.patientIdx % patientIdList.length], i % 2 === 0 ? doctorUserId1 : doctorUserId2,
            w.ward, w.bed, w.diagnosis, w.plan,
-           `${w.bed} days stay, review daily`, `-${i % 5} days`]
+           `${w.bed} days stay, review daily`, admDate]
         );
       }
       const dischargedUuid = randomUUID();
       await conn.query(
         `INSERT INTO admissions (uuid, admission_number, patient_id, doctor_id, ward, bed_number, diagnosis, treatment_plan, status, notes, admission_date, discharge_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'discharged', ?, datetime('now', '-10 days'), datetime('now', '-3 days'))`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'discharged', ?, ?, ?)`,
         [dischargedUuid, `ADM-${Date.now().toString(36).toUpperCase()}-X`, patientIdList[8], doctorUserId2,
          'Surgery', 'B-04', 'Appendectomy', 'Wound care, follow-up in clinic',
-         'Recovered well, discharged to home care']
+         'Recovered well, discharged to home care',
+         new Date(Date.now() - (10 * 24 * 60 * 60 * 1000)).toISOString().slice(0, 19).replace('T', ' '),
+         new Date(Date.now() - (3 * 24 * 60 * 60 * 1000)).toISOString().slice(0, 19).replace('T', ' ')]
       );
     }
     console.log('  Admissions seeded');

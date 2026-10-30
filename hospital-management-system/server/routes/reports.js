@@ -300,7 +300,7 @@ router.get('/insights', authenticate, authorize('admin', 'receptionist', 'doctor
           severity: 'warning',
           icon: '💰',
           title: 'Unpaid bills outstanding',
-          message: `${pendingBills[0].count} bill(s) totaling ${pendingBills[0].amount.toLocaleString()} currency units are pending or partially paid.`,
+          message: `${pendingBills[0].count} bill(s) worth ${pendingBills[0].amount.toLocaleString()} in total are pending or partially paid.`,
           link: '/billing'
         });
       }
@@ -329,7 +329,7 @@ router.get('/insights', authenticate, authorize('admin', 'receptionist', 'doctor
     // Revenue pulse (today vs yesterday)
     if (canViewBilling) {
       // Yesterday's window is derived from the hospital's calendar rather than
-      // SQLite's 'now', so the two figures being compared share a timezone.
+      // UTC is used by both the database and application for these windows.
       const todayRange = zonedDayRange(today);
       const yesterdayRange = zonedDayRange(addDays(today, -1));
       const [[todayRev], [yesterdayRev]] = await Promise.all([

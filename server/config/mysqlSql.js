@@ -102,6 +102,15 @@ function translateSql(sql) {
     translated = translateCreateTable(translated);
   }
 
+  const concatOperand = "(?:[A-Za-z_][\\w$.]*|'(?:''|[^'])*'|\\?)";
+  const concatChain = new RegExp(
+    `(${concatOperand}(?:\\s*\\|\\|\\s*${concatOperand})+)`,
+    'g'
+  );
+  translated = translated.replace(concatChain, expression =>
+    `CONCAT(${expression.split(/\s*\|\|\s*/).join(', ')})`
+  );
+
   translated = translated.replace(
     /\b(datetime|date)\(\s*('now'|\?)\s*,\s*'([+-])(\d+)\s+(minute|hour|day|week|month|year)s?'\s*\)/gi,
     (_match, fn, source, direction, amount, unit) => intervalExpression(

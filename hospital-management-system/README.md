@@ -1,6 +1,6 @@
 # Hospital Management System
 
-A full-stack Hospital Management System with a Vue 3 client and a Node.js/Express + SQLite API.
+A full-stack Hospital Management System with a Vue 3 client and a Node.js/Express API backed by MySQL.
 
 ## Features
 
@@ -13,8 +13,8 @@ A full-stack Hospital Management System with a Vue 3 client and a Node.js/Expres
 - Procurement: suppliers, purchase orders with draft/submit/approve/receive workflow, partial deliveries, and reorder suggestions priced from cost price
 - Billing, validated partial payments, summaries, and financial reports
 - Admission and bed management with occupancy protection
-- Notifications, operational dashboards, smart forecasts, and a rule-based assistant
-- Patient portal and kiosk APIs, including appointment, result, prescription, bill, and check-in access
+- Notifications, operational dashboards, smart forecasts, and an assistant with role-checked hospital lookups plus optional general AI
+- Patient portal and kiosk APIs, including appointment, result, prescription, bill, and check-in access (kiosk check-in requires the patient's portal PIN or a signed-in portal session)
 
 ## Technology
 
@@ -22,7 +22,7 @@ A full-stack Hospital Management System with a Vue 3 client and a Node.js/Expres
 | --- | --- |
 | Client | Vue 3, Vue Router, Pinia, Axios, Vite, Chart.js |
 | API | Node.js 22+, Express, JWT, bcryptjs |
-| Database | SQLite via `better-sqlite3` |
+| Database | MySQL 8+ via `mysql2` |
 | Tests | Node test runner and Supertest |
 
 ## Setup
@@ -54,9 +54,15 @@ Important optional settings:
 | `JWT_EXPIRE` | `7d` | Staff-session lifetime |
 | `PORTAL_JWT_EXPIRE` | `24h` | Patient-portal session lifetime |
 | `CORS_ORIGINS` | local dev origins | Comma-separated production client origins |
-| `DB_PATH` | `server/hospital.db` | SQLite database path; relative paths resolve from `server/` |
+| `DATABASE_URL` | none | Required MySQL connection string, for example `mysql://user:pass@host:3306/hospital` |
+| `TEST_DATABASE_URL` | none | Optional dedicated MySQL database for isolated test runs |
 | `APP_TIMEZONE` | `Africa/Kigali` | IANA zone the hospital operates in; see [Timezones](#timezones) |
 | `ALLOW_SIMULATED_PAYMENTS` | `false` | Enables demo portal payments only when `NODE_ENV` is `development` or `test` |
+| `AI_PROVIDER_ENABLED` | `false` | Explicit opt-in before general prompts are sent to an AI provider |
+| `AI_API_KEY` | none | Provider key; keep it only in `server/.env` or the hosting secret store |
+| `AI_MODEL` | `gpt-4o-mini` | Model name for an OpenAI-compatible chat-completions API |
+| `AI_CHAT_COMPLETIONS_URL` | OpenAI chat completions | Full provider endpoint URL |
+| `AI_TIMEOUT_MS` | `15000` | Maximum wait for a general AI response |
 | `PUBLIC_URL` | `http://localhost:3000` | Public client address used to build password reset links |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | none / `587` / `false` | Outbound mail server; `SMTP_USER` and `SMTP_PASS` are also required |
 | `SMTP_FROM` | derived from `SMTP_HOST` | Optional `From` address for reset email |
@@ -70,6 +76,8 @@ To use a non-default API port during client development, create `client/.env.loc
 VITE_API_PROXY_TARGET=http://localhost:5001
 ```
 
+The assistant's hospital lookups continue to run through the app's authenticated, role-checked database queries. To enable general conversational responses, set `AI_PROVIDER_ENABLED=true`, `AI_API_KEY`, and (if needed) `AI_MODEL` / `AI_CHAT_COMPLETIONS_URL` in `server/.env`. Only the user's typed message is sent to that provider; patient records and lookup results are not included. Do not enter patient identifiers or clinical details. Review the provider's privacy and regulatory terms before enabling this with real hospital data. General AI responses are not for clinical decisions.
+
 ### 3. Initialize the database
 
 ```bash
@@ -77,7 +85,7 @@ npm run db:setup
 npm run db:seed
 ```
 
-`db:setup` is idempotent and applies schema migrations. `db:seed` is for isolated demo environments and refuses to run in production unless `ALLOW_DEMO_SEED=true` is explicitly set. It prints generated patient portal PINs once.
+`db:setup` is idempotent and applies the MySQL schema. `db:seed` is for isolated demo environments and refuses to run in production unless `ALLOW_DEMO_SEED=true` is explicitly set. It prints generated patient portal PINs once.
 
 ### 4. Run in development
 
@@ -152,6 +160,21 @@ Refusing in production is the point. Silently not sending would leave a user wai
 
 The application is in good shape. The deployment is not, and that difference matters more than any feature still missing. These are the outstanding items, in the order they should be dealt with.
 
+**Production startup guard.** When `NODE_ENV=production`, the API now refuses to start unless the public URL uses HTTPS, every `CORS_ORIGINS` entry is an exact HTTPS origin (no path or trailing slash), SMTP host/user/password are configured, the backup encryption key is non-placeholder and at least 16 characters, and `DATABASE_URL` is set to a valid MySQL connection. This is a configuration check, not a replacement for a real TLS deployment or a verified restore test.
+
+Before deploying, set these in your hosting provider's secret/environment settings (not in Git):
+```dotenv
+NODE_ENV=production
+PUBLIC_URL=https://hms.example.org
+CORS_ORIGINS=https://hms.example.org,https://portal.example.org
+DATABASE_URL=mysql://hms_user:strong_password@prod-db.internal:3306/hospital
+SMTP_HOST=your-smtp-host
+SMTP_USER=your-smtp-user
+SMTP_PASS=your-smtp-password
+BACKUP_ENCRYPTION_KEY=use-a-long-unique-secret-from-your-secret-manager
+```
+Replace the example URLs, values and credentials with real deployment values. Do not commit `server/.env`, and never copy the example secret into production. Run the GitHub Actions checks before merging the readiness pull request; tests/build have not yet been confirmed as passing.
+
 **1. Terminate TLS in front of the application.** There is no HTTPS anywhere in the server; the only `https` in the codebase is the Paystack API URL. Every record, login and session token currently crosses the network in clear text. Put a reverse proxy in front — Caddy is the shortest path, since it obtains and renews certificates itself — and set `PUBLIC_URL` to the `https://` origin so reset links point at it.
 
 **2. Load a real drug-interaction dataset.** This is the one item that can physically hurt someone rather than merely expose data. The bundled list is 16 well-known pairs across 20 demo medicines; a maintained reference covers thousands of medicines and tens of thousands of pairs. Until one is loaded the screening check will report most real interactions as absent, and silence from a check is read as safety.
@@ -174,16 +197,16 @@ The CSV needs `medicine_a,medicine_b,severity,description,clinical_management`. 
 
 ## Tests
 
-The API integration tests run against a throwaway SQLite database, so they never touch development data. Current coverage:
+The API integration tests run against a dedicated MySQL test database, so they never touch development data. Current coverage:
 
 | File | Focus |
 | --- | --- |
 | `server/test/api.test.js` | Scheduling, lab results, billing, portal payments, medication safety, AI and dashboard scoping |
 | `server/test/audit-refunds.test.js` | Audit-log filtering and role boundaries, payment refunds |
 | `server/test/procurement.test.js` | Purchase-order workflow, separation of duties, partial receipts, stock-ledger consistency |
-| `server/test/migrations.test.js` | Schema invariants and legacy-data migrations |
+| `server/test/database.test.js` | MySQL connection, datetime normalization, and schema constraints |
 | `server/test/time.test.js` | Hospital-timezone and daylight-saving handling |
-| `server/test/backup.test.js` | Backup contents, verification, rotation, collision, and a restore round trip |
+| `server/test/backup.test.js` | MySQL backup contents and manifest verification |
 | `server/test/backup-crypto.test.js` | Backup encryption, wrong-key rejection, tamper and truncation detection |
 | `server/test/rate-limit.test.js` | Patient-data throttling, per-person budgets, and that clinical work stays under them |
 | `server/test/safety-provenance.test.js` | Interaction-data provenance, CSV import, and refusal of a bad dataset |
@@ -225,7 +248,7 @@ The API returns JSON for successful requests, validation failures, unknown route
 
 The configured methods are cash, card, credit card, mobile wallet, mobile money, UPI/QR, online, bank transfer, cheque/demand draft, insurance, and other.
 
-Widening the list widens a SQLite `CHECK` constraint, which cannot be altered in place. The API therefore rebuilds the `payments` table on start, copying every existing row and preserving the transaction-reference index; stored values that are no longer supported are folded into `other` with a warning. The rebuild is skipped once the stored table already matches, so restarting is safe and idempotent.
+The payment-method and status `CHECK` constraints are created from the shared configuration when the schema is initialized. MySQL does not alter an existing table's checks through `CREATE TABLE IF NOT EXISTS`; changing these values on an already initialized database requires a schema migration.
 
 ### Mobile money (MTN MoMo, Airtel Money)
 
@@ -306,20 +329,20 @@ Anything that means "today" to staff — the day's takings, the check-in queue, 
 
 ### Backups
 
-`npm run db:backup` writes a verified, consistent copy of the database into `server/backups` and keeps a rolling window. It uses SQLite's `VACUUM INTO` rather than copying the file, so it is safe to run against a live database and cannot capture a half-written page.
+`npm run db:backup` writes a verified, consistent logical dump of the MySQL database into `server/backups` and keeps a rolling window. It exports the schema and data in a transaction-safe format, so the backup can be restored without a half-written database file.
 
-Every backup is integrity-checked and reopened before the command reports success, and each one gets a small JSON manifest recording when it was taken and why. Retained backups are ignored by Git.
+Each backup is checksummed and verified against its manifest before the command reports success. Retained backups are ignored by Git.
 
 | Command | Description |
 | --- | --- |
-| `npm run db:backup` | Take a verified backup and rotate old ones |
+| `npm run db:backup` | Take a verified MySQL backup and rotate old ones |
 | `npm run db:backup -- --label nightly` | Record why the backup was taken |
 | `npm run db:backup -- --keep 30` | Retain 30 instead of the default 14 |
 | `npm run db:backup -- --list` | List retained backups |
-| `npm run db:backup -- --verify <file>` | Check a backup opens and passes `integrity_check` |
-| `npm run db:backup -- --restore <file>` | Restore a backup, keeping a pre-restore copy first |
+| `npm run db:backup -- --verify <file>` | Verify a MySQL backup and its manifest |
+| `npm run db:backup -- --decrypt <file> --output <path>` | Decrypt a verified backup for restore |
 
-An untested backup is not a backup. Schedule the command, and occasionally run `--verify` or a restore into a scratch database. The `--restore` path copies the current database aside before replacing it, so a restore is itself reversible.
+An untested backup is not a backup. Schedule the command, and occasionally run `--verify` or restore it into a scratch database with the MySQL client.
 
 `start-hms.cmd` takes a verified backup **before** it applies schema migrations, and refuses to migrate if that backup fails. A bad migration is the one situation you genuinely need a rollback for, and it should not depend on somebody having remembered to make one. Set `BACKUP_ON_LAUNCH=false` to skip it. On a first run there is no database yet, which is reported and passed over rather than treated as a failure.
 
@@ -327,7 +350,7 @@ A backup that runs only on restart is not enough for a server left up for weeks,
 
 ```bat
 schtasks /create /tn "MediCare HMS backup" /sc daily /st 02:30 ^
-  /tr "\"C:\Program Files\nodejs\node.exe\" \"C:\path\to\hospital-management-system\server\config\backup.js\" --label nightly --require" /f
+  /tr "\"C:\Program Files\nodejs\node.exe\" \"C:\path\to\hospital-management-system\server\config\mysqlBackup.js\" --label nightly --require" /f
 ```
 
 `--require` makes a missing database a failure, so a typo in the path is noticed in the morning rather than silently skipped. The command exits non-zero on any real failure, which is what makes it usable from a scheduler or a monitoring check.
@@ -382,4 +405,14 @@ npm run build
 NODE_ENV=production npm run server
 ```
 
-Use HTTPS, a strong `JWT_SECRET`, an explicit `CORS_ORIGINS` allowlist, encrypted database backups, and a process supervisor. SQLite database files and `.env` files are intentionally excluded from Git.
+Use HTTPS, a strong `JWT_SECRET`, an explicit `CORS_ORIGINS` allowlist, encrypted database backups, and a process supervisor. MySQL credentials and `.env` files are intentionally excluded from Git.
+
+## Known limitations
+
+- The folder `hospital-management-system/` inside this repository is a stale duplicate of the root application. Nothing in CI, `render.yaml`, `vercel.json` or `start-hms.cmd` references it. It is retained pending approval to remove it.
+- Drug-interaction screening ships with a small demonstration dataset. Production refuses to start with it unless `ALLOW_DEMO_INTERACTIONS=true` is set. A licensed, maintained dataset must be loaded with `npm run db:interactions` and clinically reviewed before use.
+- Multi-factor authentication is not implemented for admin/doctor accounts despite the schema having `user_mfa` tables. Account lockout is rate-limiter based only.
+- The UI is English only; Kinyarwanda and French are not yet supported. Currency formatting is not yet one configurable setting.
+- Rwanda mobile money: Paystack does not offer MTN MoMo or Airtel Money in Rwanda and no Mukuru adapter exists. The mock provider is development-only. Real sandbox testing is required before claiming support.
+- AI/assistant outputs are labelled `unverified` and are generated from local data only; they are not clinically validated.
+- Client tests cover helper functions only; component and end-to-end browser tests are not yet present.

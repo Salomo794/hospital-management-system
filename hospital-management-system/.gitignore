@@ -7,10 +7,10 @@ _old_modules/
 *.db-shm
 *.db-wal
 *.db.bak-*
-backups/
-pre-restore-*.db
 *.sqlite
 *.sqlite3
+backups/
+pre-restore-*.db
 dist/
 .DS_Store
 *.log

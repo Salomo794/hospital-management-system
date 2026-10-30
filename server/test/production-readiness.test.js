@@ -90,7 +90,7 @@ test('rejects missing email and weak or placeholder backup encryption configurat
 test('rejects missing or invalid MySQL database URLs for production', () => {
   assert.ok(productionReadinessErrors({ ...validEnvironment, DATABASE_URL: '' })
     .some(error => error.includes('DATABASE_URL')));
-  assert.ok(productionReadinessErrors({ ...validEnvironment, DATABASE_URL: 'sqlite:///tmp/hospital.db' })
+  assert.ok(productionReadinessErrors({ ...validEnvironment, DATABASE_URL: 'postgres://db.internal/hospital' })
     .some(error => error.includes('DATABASE_URL')));
 });
 

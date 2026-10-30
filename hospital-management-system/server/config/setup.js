@@ -8,6 +8,27 @@ async function setup() {
   const conn = await pool.getConnection();
 
   try {
+    const originalQuery = conn.query.bind(conn);
+    conn.query = async (sql, ...args) => {
+      try {
+        return await originalQuery(sql, ...args);
+      } catch (error) {
+        if (error && error.code === 'ER_DUP_KEYNAME' && /CREATE\s+(UNIQUE\s+)?INDEX/i.test(String(sql))) {
+          return [[]];
+        }
+        throw error;
+      }
+    };
+    if (process.env.NODE_ENV === 'test') {
+      await conn.query('SET FOREIGN_KEY_CHECKS = 0');
+      const [existingTables] = await conn.query(
+        "SELECT TABLE_NAME AS table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
+      );
+      for (const { table_name: tableName } of existingTables) {
+        await conn.query(`DROP TABLE IF EXISTS \`${tableName}\``);
+      }
+      await conn.query('SET FOREIGN_KEY_CHECKS = 1');
+    }
     await conn.beginTransaction();
     await conn.query(`CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,6 +42,9 @@ async function setup() {
       avatar TEXT,
       is_active INTEGER DEFAULT 1,
       last_login TEXT,
+      mfa_enabled INTEGER NOT NULL DEFAULT 0,
+      mfa_secret TEXT,
+      mfa_verified_at TEXT,
       -- Stamped whenever the password changes. Session tokens carry the value
       -- they were issued against, so a reset or a forced change can end every
       -- session that predates it - including one held by whoever prompted the
@@ -147,7 +171,8 @@ async function setup() {
       cost_price REAL CHECK(cost_price IS NULL OR cost_price >= 0),
       stock_quantity INTEGER NOT NULL DEFAULT 0 CHECK(stock_quantity >= 0),
       min_stock_level INTEGER NOT NULL DEFAULT 10 CHECK(min_stock_level >= 0),
-      max_stock_level INTEGER NOT NULL DEFAULT 1000 CHECK(max_stock_level >= min_stock_level),
+      max_stock_level INTEGER NOT NULL DEFAULT 1000,
+      CHECK(max_stock_level >= min_stock_level),
       unit TEXT DEFAULT 'tablet',
       expiry_date TEXT,
       batch_number TEXT,
@@ -182,7 +207,8 @@ async function setup() {
       duration TEXT,
       instructions TEXT,
       quantity INTEGER NOT NULL CHECK(quantity > 0),
-      dispensed_quantity INTEGER NOT NULL DEFAULT 0 CHECK(dispensed_quantity >= 0 AND dispensed_quantity <= quantity),
+      dispensed_quantity INTEGER NOT NULL DEFAULT 0 CHECK(dispensed_quantity >= 0),
+      CHECK(dispensed_quantity <= quantity),
       dispensed INTEGER NOT NULL DEFAULT 0 CHECK(dispensed IN (0,1)),
       dispensed_date TEXT,
       created_at TEXT DEFAULT (datetime('now')),
@@ -440,9 +466,21 @@ async function setup() {
       severity TEXT NOT NULL CHECK(severity IN ('mild','moderate','severe','contraindicated')),
       description TEXT,
       clinical_management TEXT,
+      source TEXT NOT NULL DEFAULT 'demo',
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (medicine_a_id) REFERENCES medicines(id) ON DELETE CASCADE,
       FOREIGN KEY (medicine_b_id) REFERENCES medicines(id) ON DELETE CASCADE
+    )`);
+
+    await conn.query(`CREATE TABLE IF NOT EXISTS safety_reference (
+      id INTEGER PRIMARY KEY,
+      source TEXT NOT NULL,
+      description TEXT,
+      reference_name TEXT,
+      reference_version TEXT,
+      loaded_at TEXT,
+      loaded_by INTEGER,
+      interaction_count INTEGER NOT NULL DEFAULT 0
     )`);
 
     await conn.query(`CREATE TABLE IF NOT EXISTS checkins (
@@ -460,10 +498,6 @@ async function setup() {
       FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL
     )`);
 
-    const [checkinColumns] = await conn.query('PRAGMA table_info(checkins)');
-    if (!checkinColumns.some(column => column.name === 'checkin_date')) {
-      await conn.query('ALTER TABLE checkins ADD COLUMN checkin_date TEXT');
-    }
     await conn.query(`
       UPDATE checkins
       SET checkin_date = COALESCE(date(checkin_time), date(created_at), date('now'))
@@ -499,25 +533,6 @@ async function setup() {
         + `(check-in IDs: ${undatedCheckins.map(row => row.id).join(', ')}). Repair them and rerun setup.`
       );
     }
-    await conn.query('DROP TRIGGER IF EXISTS checkins_require_date_before_insert');
-    await conn.query('DROP TRIGGER IF EXISTS checkins_require_date_before_update');
-    await conn.query(`
-      CREATE TRIGGER checkins_require_date_before_insert
-      BEFORE INSERT ON checkins
-      WHEN NEW.checkin_date IS NULL OR TRIM(NEW.checkin_date) = ''
-      BEGIN
-        SELECT RAISE(ABORT, 'checkin_date is required');
-      END
-    `);
-    await conn.query(`
-      CREATE TRIGGER checkins_require_date_before_update
-      BEFORE UPDATE OF checkin_date, checkin_time ON checkins
-      WHEN NEW.checkin_date IS NULL OR TRIM(NEW.checkin_date) = ''
-      BEGIN
-        SELECT RAISE(ABORT, 'checkin_date is required');
-      END
-    `);
-
     const [duplicateAdmissions] = await conn.query(`
       SELECT patient_id, COUNT(*) AS duplicate_count
       FROM admissions
@@ -586,21 +601,9 @@ async function setup() {
     await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_order_items_order ON purchase_order_items(purchase_order_id)');
     await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_order_items_medicine ON purchase_order_items(medicine_id)');
 
-    for (const table of ['users', 'patients', 'appointments', 'medical_records', 'medicines', 'bills', 'admissions', 'suppliers', 'purchase_orders']) {
-      const trigger = `${table}_set_updated_at`;
-      await conn.query(`DROP TRIGGER IF EXISTS ${trigger}`);
-      await conn.query(`CREATE TRIGGER ${trigger}
-        AFTER UPDATE ON ${table}
-        FOR EACH ROW
-        WHEN NEW.updated_at = OLD.updated_at
-        BEGIN
-          UPDATE ${table} SET updated_at = datetime('now') WHERE id = NEW.id;
-        END`);
-    }
-
     await pool.isReady();
     await conn.commit();
-    console.log('All tables and indexes created successfully (SQLite)!');
+    console.log('All tables and indexes created successfully (MySQL)!');
   } catch (error) {
     try { await conn.rollback(); } catch (_) { /* preserve original error */ }
     console.error('Error creating tables:', error);

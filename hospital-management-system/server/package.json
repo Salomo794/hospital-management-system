@@ -10,13 +10,15 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "setup": "node config/setup.js",
+    "db:setup": "node config/setup.js",
     "seed": "node config/seed.js",
+    "db:seed": "node config/seed.js",
+    "db:backup": "node config/mysqlBackup.js",
     "test": "node --test --test-concurrency=1",
     "check": "node --check index.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "better-sqlite3": "12.11.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "4.22.3",
@@ -24,8 +26,10 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.12.1",
+    "mysql2": "^3.14.4",
     "nodemailer": "^10.0.10",
-    "object-assign": "^4.1.1"
+    "object-assign": "^4.1.1",
+    "otplib": "^13.5.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14",

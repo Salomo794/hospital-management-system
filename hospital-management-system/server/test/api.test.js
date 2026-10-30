@@ -1,14 +1,9 @@
 const { after, before, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 const request = require('supertest');
 
-const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'hms-test-'));
-const dbPath = path.join(tempDirectory, 'hospital.test.db');
-process.env.DB_PATH = dbPath;
+process.env.TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || 'mysql://root:root@127.0.0.1:3306/hms_test';
 process.env.JWT_SECRET = 'test-secret-that-is-at-least-32-characters-long';
 process.env.NODE_ENV = 'test';
 process.env.ALLOW_SIMULATED_PAYMENTS = 'true';
@@ -80,10 +75,6 @@ before(async () => {
 
 after(async () => {
   pool.close();
-  for (const suffix of ['', '-shm', '-wal']) {
-    fs.rmSync(`${dbPath}${suffix}`, { force: true });
-  }
-  fs.rmSync(tempDirectory, { recursive: true, force: true });
 });
 
 test('health checks the initialized database', async () => {
@@ -329,15 +320,14 @@ test('payment methods are published to the client and accepted when recorded', a
     .expect(400);
 
   // The database constraint is the last line of defence for a non-API writer.
-  assert.throws(
-    () => pool.sqlite
-      .prepare(
-        `INSERT INTO payments
-         (uuid, payment_number, bill_id, patient_id, amount, payment_method, received_by)
-         VALUES (?, ?, ?, ?, 1, 'cryptocurrency', NULL)`
-      )
-      .run(randomUUID(), `PAY-BAD-${Date.now()}`, bill.body.id, patient.body.patient.id),
-    /CHECK constraint failed/i
+  await assert.rejects(
+    () => pool.query(
+      `INSERT INTO payments
+       (uuid, payment_number, bill_id, patient_id, amount, payment_method, received_by)
+       VALUES (?, ?, ?, ?, 1, 'cryptocurrency', NULL)`,
+      [randomUUID(), `PAY-BAD-${Date.now()}`, bill.body.id, patient.body.patient.id]
+    ),
+    /check constraint/i
   );
 });
 

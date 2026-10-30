@@ -6,8 +6,7 @@ const path = require('path');
 const { spawnSync } = require('node:child_process');
 
 const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'hms-interactions-test-'));
-const dbPath = path.join(tempDirectory, 'hospital.test.db');
-process.env.DB_PATH = dbPath;
+process.env.TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || 'mysql://root:root@127.0.0.1:3306/hms_test';
 process.env.JWT_SECRET = 'test-secret-that-is-at-least-32-characters-long';
 process.env.NODE_ENV = 'test';
 
@@ -26,9 +25,6 @@ before(async () => {
 
 after(async () => {
   pool.close();
-  for (const suffix of ['', '-shm', '-wal']) {
-    fs.rmSync(`${dbPath}${suffix}`, { force: true });
-  }
   fs.rmSync(tempDirectory, { recursive: true, force: true });
 });
 
@@ -37,7 +33,7 @@ function importCsv(rows, args = []) {
   fs.writeFileSync(file, rows.join('\n'));
   return spawnSync(process.execPath, [script, '--file', file, ...args], {
     cwd: serverDirectory,
-    env: { ...process.env, DB_PATH: dbPath, JWT_SECRET: process.env.JWT_SECRET },
+    env: { ...process.env, TEST_DATABASE_URL: process.env.TEST_DATABASE_URL, JWT_SECRET: process.env.JWT_SECRET },
     encoding: 'utf8',
   });
 }
@@ -207,7 +203,7 @@ test('a missing required column is refused up front', async () => {
 test('a missing file is refused rather than creating an empty reference', async () => {
   const result = spawnSync(process.execPath, [script, '--file', path.join(tempDirectory, 'nope.csv')], {
     cwd: serverDirectory,
-    env: { ...process.env, DB_PATH: dbPath },
+    env: { ...process.env, TEST_DATABASE_URL: process.env.TEST_DATABASE_URL },
     encoding: 'utf8',
   });
   assert.equal(result.status, 1);

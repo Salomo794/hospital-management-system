@@ -1,13 +1,8 @@
 const { after, before, test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 const request = require('supertest');
 
-const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'hms-audit-test-'));
-const dbPath = path.join(tempDirectory, 'hospital.test.db');
-process.env.DB_PATH = dbPath;
+process.env.TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || 'mysql://root:root@127.0.0.1:3306/hms_test';
 process.env.JWT_SECRET = 'test-secret-that-is-at-least-32-characters-long';
 process.env.NODE_ENV = 'test';
 process.env.ALLOW_SIMULATED_PAYMENTS = 'true';
@@ -36,10 +31,6 @@ before(async () => {
 
 after(async () => {
   pool.close();
-  for (const suffix of ['', '-shm', '-wal']) {
-    fs.rmSync(`${dbPath}${suffix}`, { force: true });
-  }
-  fs.rmSync(tempDirectory, { recursive: true, force: true });
 });
 
 async function createBill({ unitPrice = 80, adminToken }) {

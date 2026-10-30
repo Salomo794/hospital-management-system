@@ -7,13 +7,16 @@
     "node": ">=22"
   },
   "scripts": {
-    "install:all": "npm install && npm --prefix server install && npm --prefix client install",
+    "install:all": "npm install --include=dev && npm --prefix server install --include=dev && npm --prefix client install --include=dev",
+    "install:ci": "npm ci --include=dev && npm --prefix server ci --include=dev && npm --prefix client ci --include=dev",
+    "start": "node server/index.js",
+    "start:prod": "npm run db:setup && node server/index.js",
     "server": "node server/index.js",
     "client": "npm --prefix client run dev",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "db:setup": "node server/config/setup.js",
     "db:seed": "node server/config/seed.js",
-    "db:backup": "node server/config/backup.js",
+    "db:backup": "node server/config/mysqlBackup.js",
     "db:interactions": "node server/config/interactions.js",
     "build": "npm run build --prefix client",
     "lint": "npm run lint --prefix client",
@@ -25,6 +28,7 @@
     "audit": "npm audit --omit=dev && npm audit --omit=dev --prefix server && npm audit --omit=dev --prefix client"
   },
   "dependencies": {
-    "concurrently": "^8.2.0"
+    "concurrently": "^8.2.0",
+    "validator": "^13.15.35"
   }
 }

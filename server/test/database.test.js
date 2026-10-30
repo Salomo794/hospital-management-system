@@ -7,6 +7,7 @@ process.env.NODE_ENV = 'test';
 
 const pool = require('../config/database');
 const setupDatabase = require('../config/setup');
+const { translateSql } = require('../config/mysqlSql');
 
 before(async () => {
   await setupDatabase();
@@ -33,6 +34,13 @@ test('normalizes UTC dates to MySQL DATETIME values', async () => {
   ]);
   assert.equal(rows[0].date_from_object, '2026-10-30 16:33:14');
   assert.equal(rows[0].date_from_string, '2026-10-30 16:33:14');
+});
+
+test('translates legacy string concatenation to MySQL CONCAT', () => {
+  assert.equal(
+    translateSql("SELECT first_name || ' ' || last_name AS full_name FROM users"),
+    "SELECT CONCAT(first_name, ' ', last_name) AS full_name FROM users"
+  );
 });
 
 test('schema setup creates MySQL tables with the payment constraints', async () => {

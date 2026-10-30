@@ -15,8 +15,8 @@ const backupCrypto = require('../utils/backupCrypto');
 // file fails loudly instead of producing a corrupt database that looks fine.
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'hms-crypto-test-'));
-const source = path.join(temp, 'source.db');
-const target = path.join(temp, 'target.db');
+const source = path.join(temp, 'source.sql');
+const target = path.join(temp, 'target.sql');
 const KEY = 'a long passphrase that is not a dictionary word';
 
 function writeSource() {
@@ -55,8 +55,8 @@ test('a backup round trips back to the original bytes', () => {
   writeSource();
   withKey(KEY, () => {
     backupCrypto.encryptFile(source, target);
-    backupCrypto.decryptFile(target, path.join(temp, 'back.db'));
-    assert.deepEqual(fs.readFileSync(path.join(temp, 'back.db')), fs.readFileSync(source));
+    backupCrypto.decryptFile(target, path.join(temp, 'back.sql'));
+    assert.deepEqual(fs.readFileSync(path.join(temp, 'back.sql')), fs.readFileSync(source));
   });
 });
 
@@ -78,7 +78,7 @@ test('the wrong key is rejected rather than producing garbage', () => {
   withKey(KEY, () => backupCrypto.encryptFile(source, target));
   withKey('a completely different passphrase', () => {
     assert.throws(
-      () => backupCrypto.decryptFile(target, path.join(temp, 'wrong.db')),
+      () => backupCrypto.decryptFile(target, path.join(temp, 'wrong.sql')),
       /integrity check|corrupt|wrong/i
     );
   });
@@ -95,7 +95,7 @@ test('a tampered backup is rejected', () => {
     raw[tamperedAt] ^= 0xff;
     fs.writeFileSync(target, raw);
     assert.throws(
-      () => backupCrypto.decryptFile(target, path.join(temp, 'tampered.db')),
+      () => backupCrypto.decryptFile(target, path.join(temp, 'tampered.sql')),
       /integrity check|corrupt|wrong/i
     );
   });
@@ -108,7 +108,7 @@ test('a truncated backup is rejected', () => {
     const raw = fs.readFileSync(target);
     fs.writeFileSync(target, raw.subarray(0, Math.floor(raw.length / 2)));
     assert.throws(
-      () => backupCrypto.decryptFile(target, path.join(temp, 'short.db')),
+      () => backupCrypto.decryptFile(target, path.join(temp, 'short.sql')),
       /integrity check|corrupt|wrong|not an encrypted/i
     );
   });
@@ -123,7 +123,7 @@ test('a plaintext file is not mistaken for an encrypted one', () => {
     // Opening a plaintext file as if it were encrypted must be refused clearly,
     // because that is what an operator restoring an old unencrypted backup does.
     assert.throws(
-      () => backupCrypto.decryptFile(source, path.join(temp, 'nope.db')),
+      () => backupCrypto.decryptFile(source, path.join(temp, 'nope.sql')),
       /not an encrypted backup/i
     );
   });
@@ -134,7 +134,7 @@ test('a missing key is a clear refusal, not a crash', () => {
   withKey(KEY, () => backupCrypto.encryptFile(source, target));
   withKey('', () => {
     assert.throws(
-      () => backupCrypto.decryptFile(target, path.join(temp, 'nokey.db')),
+      () => backupCrypto.decryptFile(target, path.join(temp, 'nokey.sql')),
       /BACKUP_ENCRYPTION_KEY is not set/i
     );
   });
