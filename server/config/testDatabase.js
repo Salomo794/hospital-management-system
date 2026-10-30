@@ -1,20 +1,31 @@
-const configuredUrl = String(process.env.TEST_DATABASE_URL || '').trim();
-if (!configuredUrl) {
-  throw new Error('TEST_DATABASE_URL must point to a dedicated MySQL test database.');
-}
-
-let testDatabaseName;
-try {
-  const url = new URL(configuredUrl);
-  testDatabaseName = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
-  if (url.protocol !== 'mysql:' || !/^hms_test(?:_[a-z0-9_]+)?$/i.test(testDatabaseName)) {
-    throw new Error('TEST_DATABASE_URL must target a MySQL database named hms_test or hms_test_<suffix>.');
+function validateTestDatabaseUrl(value) {
+  const configuredUrl = String(value || '').trim();
+  if (!configuredUrl) {
+    throw new Error('TEST_DATABASE_URL must point to a dedicated local MySQL test database.');
   }
-} catch (error) {
-  if (error.message.startsWith('TEST_DATABASE_URL must target')) throw error;
-  throw new Error('TEST_DATABASE_URL must be a valid MySQL URL for a dedicated test database.');
+
+  try {
+    const url = new URL(configuredUrl);
+    const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    const databaseName = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
+    const isLoopbackHost = ['localhost', '127.0.0.1', '::1'].includes(hostname);
+
+    if (url.protocol !== 'mysql:' || !isLoopbackHost ||
+        !/^hms_test(?:_[a-z0-9_]+)?$/i.test(databaseName) ||
+        !url.username || !url.port.match(/^\d+$/) && url.port !== '') {
+      throw new Error(
+        'TEST_DATABASE_URL must use mysql://, connect to localhost/127.0.0.1/::1, and target hms_test or hms_test_<suffix>.'
+      );
+    }
+  } catch (error) {
+    if (error.message.startsWith('TEST_DATABASE_URL must use')) throw error;
+    throw new Error('TEST_DATABASE_URL must be a valid MySQL URL for a dedicated local test database.');
+  }
+
+  return configuredUrl;
 }
 
+const configuredUrl = validateTestDatabaseUrl(process.env.TEST_DATABASE_URL);
 process.env.DATABASE_URL = configuredUrl;
 
 async function resetAndSeed(pool, setup, seed) {
@@ -48,4 +59,4 @@ async function resetAndSeed(pool, setup, seed) {
   await seed();
 }
 
-module.exports = { resetAndSeed };
+module.exports = { resetAndSeed, validateTestDatabaseUrl };
