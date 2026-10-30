@@ -50,6 +50,8 @@ jobs:
         npm ci
         npm ci --prefix client
         npm ci --prefix server
+    - name: Check backend JavaScript syntax
+      run: npm run check --prefix server
     - name: Initialize and seed database
       run: |
         npm run db:setup
