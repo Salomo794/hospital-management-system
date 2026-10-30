@@ -12,7 +12,7 @@ function validateTestDatabaseUrl(value) {
 
     if (url.protocol !== 'mysql:' || !isLoopbackHost ||
         !/^hms_test(?:_[a-z0-9_]+)?$/i.test(databaseName) ||
-        !url.username || !url.port.match(/^\d+$/) && url.port !== '') {
+        !url.username) {
       throw new Error(
         'TEST_DATABASE_URL must use mysql://, connect to localhost/127.0.0.1/::1, and target hms_test or hms_test_<suffix>.'
       );
