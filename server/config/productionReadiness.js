@@ -68,8 +68,21 @@ function productionReadinessErrors(env = process.env) {
     errors.push('BACKUP_ENCRYPTION_KEY must be a non-placeholder secret of at least 16 characters, stored outside the repository.');
   }
 
-  if (String(env.DB_PATH || '').trim() === ':memory:') {
-    errors.push('DB_PATH must point to a persistent database file in production.');
+  const databaseUrl = String(env.DATABASE_URL || '').trim();
+  if (!databaseUrl) {
+    errors.push('DATABASE_URL must be configured to a MySQL deployment database before production can start.');
+  } else {
+    try {
+      const url = new URL(databaseUrl);
+      if (url.protocol !== 'mysql:') {
+        errors.push('DATABASE_URL must use the mysql:// scheme.');
+      }
+      if (!url.hostname || !url.pathname || url.pathname === '/') {
+        errors.push('DATABASE_URL must include a valid MySQL host and database name.');
+      }
+    } catch {
+      errors.push('DATABASE_URL must be a valid MySQL connection URL.');
+    }
   }
 
   return errors;

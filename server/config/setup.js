@@ -19,6 +19,16 @@ async function setup() {
         throw error;
       }
     };
+    if (process.env.NODE_ENV === 'test') {
+      await conn.query('SET FOREIGN_KEY_CHECKS = 0');
+      const [existingTables] = await conn.query(
+        "SELECT TABLE_NAME AS table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
+      );
+      for (const { table_name: tableName } of existingTables) {
+        await conn.query(`DROP TABLE IF EXISTS \`${tableName}\``);
+      }
+      await conn.query('SET FOREIGN_KEY_CHECKS = 1');
+    }
     await conn.beginTransaction();
     await conn.query(`CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,7 +171,8 @@ async function setup() {
       cost_price REAL CHECK(cost_price IS NULL OR cost_price >= 0),
       stock_quantity INTEGER NOT NULL DEFAULT 0 CHECK(stock_quantity >= 0),
       min_stock_level INTEGER NOT NULL DEFAULT 10 CHECK(min_stock_level >= 0),
-      max_stock_level INTEGER NOT NULL DEFAULT 1000 CHECK(max_stock_level >= min_stock_level),
+      max_stock_level INTEGER NOT NULL DEFAULT 1000,
+      CHECK(max_stock_level >= min_stock_level),
       unit TEXT DEFAULT 'tablet',
       expiry_date TEXT,
       batch_number TEXT,
@@ -196,7 +207,8 @@ async function setup() {
       duration TEXT,
       instructions TEXT,
       quantity INTEGER NOT NULL CHECK(quantity > 0),
-      dispensed_quantity INTEGER NOT NULL DEFAULT 0 CHECK(dispensed_quantity >= 0 AND dispensed_quantity <= quantity),
+      dispensed_quantity INTEGER NOT NULL DEFAULT 0 CHECK(dispensed_quantity >= 0),
+      CHECK(dispensed_quantity <= quantity),
       dispensed INTEGER NOT NULL DEFAULT 0 CHECK(dispensed IN (0,1)),
       dispensed_date TEXT,
       created_at TEXT DEFAULT (datetime('now')),
@@ -454,9 +466,21 @@ async function setup() {
       severity TEXT NOT NULL CHECK(severity IN ('mild','moderate','severe','contraindicated')),
       description TEXT,
       clinical_management TEXT,
+      source TEXT NOT NULL DEFAULT 'demo',
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (medicine_a_id) REFERENCES medicines(id) ON DELETE CASCADE,
       FOREIGN KEY (medicine_b_id) REFERENCES medicines(id) ON DELETE CASCADE
+    )`);
+
+    await conn.query(`CREATE TABLE IF NOT EXISTS safety_reference (
+      id INTEGER PRIMARY KEY,
+      source TEXT NOT NULL,
+      description TEXT,
+      reference_name TEXT,
+      reference_version TEXT,
+      loaded_at TEXT,
+      loaded_by INTEGER,
+      interaction_count INTEGER NOT NULL DEFAULT 0
     )`);
 
     await conn.query(`CREATE TABLE IF NOT EXISTS checkins (
@@ -579,7 +603,8 @@ async function setup() {
 
     await pool.isReady();
     await conn.commit();
-    console.log('All tables and indexes created successfully (SQLite)!');
+    const backend = pool.useMySQL ? 'MySQL' : 'SQLite';
+    console.log(`All tables and indexes created successfully (${backend})!`);
   } catch (error) {
     try { await conn.rollback(); } catch (_) { /* preserve original error */ }
     console.error('Error creating tables:', error);

@@ -10,7 +10,7 @@ const validEnvironment = {
   SMTP_USER: 'hms@example.org',
   SMTP_PASS: 'test-only-secret',
   BACKUP_ENCRYPTION_KEY: 'a-long-non-placeholder-backup-secret',
-  DB_PATH: '/var/lib/hms/hospital.db',
+  DATABASE_URL: 'mysql://hms:secret@db.example.org:3306/hospital',
 };
 
 test('accepts a production environment with HTTPS, mail, encrypted backups and persistent storage', () => {
@@ -87,9 +87,11 @@ test('rejects missing email and weak or placeholder backup encryption configurat
   }
 });
 
-test('rejects in-memory database storage for production', () => {
-  assert.ok(productionReadinessErrors({ ...validEnvironment, DB_PATH: ':memory:' })
-    .some(error => error.includes('persistent database file')));
+test('rejects missing or invalid MySQL database URLs for production', () => {
+  assert.ok(productionReadinessErrors({ ...validEnvironment, DATABASE_URL: '' })
+    .some(error => error.includes('DATABASE_URL')));
+  assert.ok(productionReadinessErrors({ ...validEnvironment, DATABASE_URL: 'sqlite:///tmp/hospital.db' })
+    .some(error => error.includes('DATABASE_URL')));
 });
 
 test('reports all blockers together', () => {

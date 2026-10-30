@@ -5,6 +5,7 @@ const { authenticate } = require('../middleware/auth');
 const { FixedWindowRateLimiter } = require('../utils/rateLimiter');
 const { WARDS: WARD_CAPACITY } = require('../config/wards');
 const { zonedDate, zonedDayRange } = require('../config/time');
+const { generateAssistantReply, isAssistantConfigured } = require('../services/aiAssistant');
 
 const MAX_MESSAGE_LENGTH = 500;
 const CLINICAL_ROLES = ['admin', 'receptionist', 'doctor', 'nurse'];
@@ -78,6 +79,10 @@ function helpResponse(role) {
   }
   return `I can help you with:\n\n${items.map((item, index) => `${index + 1}. ${item}`).join('\n')}\n\nJust type your question and I'll help you find the information.`;
 }
+
+router.get('/status', authenticate, (req, res) => {
+  res.json({ enabled: isAssistantConfigured() });
+});
 
 // AI Assistant endpoint - processes natural language queries
 router.post('/chat', authenticate, async (req, res) => {
@@ -593,7 +598,7 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     // Help / Default
     else {
-      response = helpResponse(req.user.role);
+      response = await generateAssistantReply(message) || helpResponse(req.user.role);
     }
 
     res.json({ response, data, unverified: true, disclaimer: 'AI-generated summary of system data; verify before clinical use.' });

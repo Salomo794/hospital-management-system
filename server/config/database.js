@@ -18,12 +18,11 @@ const fs = require('fs');
 const path = require('path');
 
 /* ------------------------------------------------------------------ */
-/*  Dual-database adapter                                             */
+/*  MySQL-first database adapter                                       */
 /*                                                                    */
-/*  SQLite is the default and is used when DATABASE_URL is unset.     */
-/*  When DATABASE_URL (mysql://...) is configured the adapter switches */
-/*  to a pooled MySQL connection so the same application code can run  */
-/*  against either database without rewriting routes or services.     */
+/*  Production and normal deployment use MySQL. SQLite remains only as  */
+/*  a legacy fallback for isolated local/test runs when the environment  */
+/*  opts in explicitly.                                                */
 /* ------------------------------------------------------------------ */
 
 let mysqlPool = null;
@@ -89,7 +88,19 @@ function mysqlDatabaseOptions(connectionUrl) {
   };
 }
 
-const configuredDatabaseUrl = String(process.env.DATABASE_URL || '').trim();
+const configuredDatabaseUrl = String(
+  process.env.DATABASE_URL ||
+  process.env.TEST_DATABASE_URL ||
+  (process.env.NODE_ENV === 'test' ? 'mysql://root:rootpass@127.0.0.1:3306/hms_test' : '')
+).trim();
+const allowLegacySqlite = process.env.ALLOW_SQLITE_FALLBACK === 'true';
+const legacySqliteEnabled = allowLegacySqlite || process.env.NODE_ENV === 'test';
+if (!configuredDatabaseUrl && !legacySqliteEnabled) {
+  throw new Error('MySQL is the required deployment database. Set DATABASE_URL=mysql://user:pass@host:3306/hospital.');
+}
+if (process.env.NODE_ENV === 'test' && !process.env.DATABASE_URL && configuredDatabaseUrl) {
+  process.env.DATABASE_URL = configuredDatabaseUrl;
+}
 const useMySQL = configuredDatabaseUrl.length > 0;
 
 function openSqlite() {
@@ -762,9 +773,29 @@ async function initMySQL() {
       const connection = await mysqlPool.getConnection();
       await connection.query("SET time_zone = '+00:00'");
       let connectionDestroyed = false;
+      const wrappedConnection = {
+        query(sql, params = []) {
+          return connection.query(translateSql(sql), normalizeParams(params));
+        },
+        beginTransaction() {
+          return connection.beginTransaction();
+        },
+        commit() {
+          return connection.commit();
+        },
+        rollback() {
+          return connection.rollback();
+        },
+        release() {
+          return connection.release();
+        },
+        destroy() {
+          return connection.destroy();
+        },
+      };
       try {
         await connection.beginTransaction();
-        const result = await callback(connection);
+        const result = await callback(wrappedConnection);
         await connection.commit();
         return result;
       } catch (error) {

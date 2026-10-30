@@ -10,7 +10,7 @@ const otplib = require('otplib');
 
 const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'hms-mfa-'));
 const dbPath = path.join(tempDirectory, 'hospital.test.db');
-process.env.DB_PATH = dbPath;
+process.env.TEST_DATABASE_URL = 'mysql://root:rootpass@127.0.0.1:3306/hms_test';
 process.env.JWT_SECRET = 'test-secret-that-is-at-least-32-characters-long';
 process.env.NODE_ENV = 'test';
 

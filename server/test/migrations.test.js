@@ -10,7 +10,7 @@ const Database = require('better-sqlite3');
 const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'hms-migration-test-'));
 const serverDirectory = path.join(__dirname, '..');
 const dbPath = path.join(tempDirectory, 'legacy.test.db');
-process.env.DB_PATH = dbPath;
+process.env.TEST_DATABASE_URL = 'mysql://root:rootpass@127.0.0.1:3306/hms_test';
 process.env.JWT_SECRET = 'test-secret-that-is-at-least-32-characters-long';
 process.env.NODE_ENV = 'test';
 
@@ -150,7 +150,7 @@ test('duplicate active legacy check-ins fail with an actionable migration error'
   try {
     const result = spawnSync(process.execPath, ['-e', "require('./config/database')"], {
       cwd: serverDirectory,
-      env: { ...process.env, DB_PATH: duplicatePath, JWT_SECRET: process.env.JWT_SECRET },
+      env: { ...process.env, TEST_DATABASE_URL: 'mysql://root:rootpass@127.0.0.1:3306/hms_test', JWT_SECRET: process.env.JWT_SECRET },
       encoding: 'utf8',
     });
     assert.notEqual(result.status, 0);
@@ -209,7 +209,7 @@ test('widening the payment method constraint preserves existing payments', () =>
       cwd: serverDirectory,
       env: {
         ...process.env,
-        DB_PATH: paymentsPath,
+        TEST_DATABASE_URL: 'mysql://root:rootpass@127.0.0.1:3306/hms_test',
         JWT_SECRET: process.env.JWT_SECRET,
         HMS_DATABASE_MODULE: path.join(serverDirectory, 'config', 'database.js'),
       },
@@ -222,7 +222,7 @@ test('widening the payment method constraint preserves existing payments', () =>
       cwd: serverDirectory,
       env: {
         ...process.env,
-        DB_PATH: paymentsPath,
+        TEST_DATABASE_URL: 'mysql://root:rootpass@127.0.0.1:3306/hms_test',
         JWT_SECRET: process.env.JWT_SECRET,
         HMS_DATABASE_MODULE: path.join(serverDirectory, 'config', 'database.js'),
       },
@@ -271,7 +271,7 @@ test('production demo seeding is rejected before a database is created', () => {
     cwd: serverDirectory,
     env: {
       ...process.env,
-      DB_PATH: guardedPath,
+      TEST_DATABASE_URL: 'mysql://root:rootpass@127.0.0.1:3306/hms_test',
       NODE_ENV: 'production',
       ALLOW_DEMO_SEED: 'false',
     },
@@ -287,7 +287,7 @@ test('demo seeding refuses to add fixtures to a non-empty database', () => {
   removeDatabase(guardedPath);
   const setup = spawnSync(process.execPath, ['config/setup.js'], {
     cwd: serverDirectory,
-    env: { ...process.env, DB_PATH: guardedPath, NODE_ENV: 'test' },
+    env: { ...process.env, TEST_DATABASE_URL: 'mysql://root:rootpass@127.0.0.1:3306/hms_test', NODE_ENV: 'test' },
     encoding: 'utf8',
   });
   assert.equal(setup.status, 0, setup.stderr);
@@ -298,7 +298,7 @@ test('demo seeding refuses to add fixtures to a non-empty database', () => {
 
   const seedResult = spawnSync(process.execPath, ['config/seed.js'], {
     cwd: serverDirectory,
-    env: { ...process.env, DB_PATH: guardedPath, NODE_ENV: 'test' },
+    env: { ...process.env, TEST_DATABASE_URL: 'mysql://root:rootpass@127.0.0.1:3306/hms_test', NODE_ENV: 'test' },
     encoding: 'utf8',
   });
   assert.notEqual(seedResult.status, 0);
