@@ -675,7 +675,7 @@ async function seed() {
       const dischargedUuid = randomUUID();
       await conn.query(
         `INSERT INTO admissions (uuid, admission_number, patient_id, doctor_id, ward, bed_number, diagnosis, treatment_plan, status, notes, admission_date, discharge_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'discharged', ?, datetime('now', '-10 days'), datetime('now', '-3 days'))`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'discharged', ?, DATE_SUB(NOW(), INTERVAL 10 DAY), DATE_SUB(NOW(), INTERVAL 3 DAY))`,
         [dischargedUuid, `ADM-${Date.now().toString(36).toUpperCase()}-X`, patientIdList[8], doctorUserId2,
          'Surgery', 'B-04', 'Appendectomy', 'Wound care, follow-up in clinic',
          'Recovered well, discharged to home care']
