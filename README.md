@@ -191,7 +191,7 @@ The CSV needs `medicine_a,medicine_b,severity,description,clinical_management`. 
 
 **4. Enable backup encryption and move one copy offsite.** `BACKUP_ENCRYPTION_KEY` encrypts every backup with AES-256-GCM, which is what makes a copy safe to move to a share or an object store. `server/backups` sits beside the database, so a disk failure currently takes both. Point `--dir` at a network location, or copy from there. Store the key away from the repository: a backup that cannot be opened is not a backup.
 
-**5. Enable multi-factor authentication.** Not implemented. Every role, including administrator, sits behind a password alone.
+**5. Turn on multi-factor authentication for staff.** Authenticator-app (TOTP) sign-in is implemented: any account can enable it from the profile menu, and the sign-in then asks for a code (`/api/auth/mfa/setup`, `/verify`, `/disable`, `/login/mfa`). It is opt-in per account and is not yet mandatory for any role, so an administrator who has not enabled it still sits behind a password alone. Make enabling it part of onboarding for administrators and doctors until enforcement is added.
 
 **6. Decide on database encryption at rest.** Backups are encrypted; the live database is not. That needs SQLCipher and a native rebuild, which is a deliberate deployment decision rather than something to slip in silently.
 
@@ -290,6 +290,19 @@ So a Rwandan market is **off by default**, with a reason that names the country,
 Also required: the sandbox base URL, the credential pair (plus an app id if one is issued), the country code, and the network codes for Rwanda — which are `mtn` and `atl` in this codebase, matching the two Rwandan networks already defined. Credentials belong in `server/.env`, which is gitignored; `server/.env.example` reserves the variable names.
 
 Provider access is behind a small adapter in `server/services/mobileMoney.js` (`initializeCharge`, `verifyCharge`, `verifyWebhook`), so adding another aggregator is a new adapter rather than a change to the billing routes.
+
+### Language and currency
+
+**Language.** The header has a language picker (English, Français, Kinyarwanda). The choice is stored in the browser and applied immediately. Strings live in `client/src/i18n/messages.js`; English is the source of truth and `tests/i18n.spec.js` fails if French or Kinyarwanda lose a key or a `{placeholder}`. To translate another screen, add its keys to all three tables and call `t('key')` in the component, as `Dashboard.vue` does. Dates use the browser's data for the chosen language and fall back to English where the browser has none for Kinyarwanda.
+
+**Currency.** Amounts are written by `client/src/utils/currency.js`. The default is USD, which is what the screens always showed. For a Rwandan deployment set these when building the client (for example in `client/.env.local` or the hosting build settings):
+
+```dotenv
+VITE_CURRENCY=RWF
+VITE_CURRENCY_LOCALE=en-US
+```
+
+RWF is written without decimals. The setting only changes how numbers are displayed; it does not convert stored amounts. Confirm what currency your existing billing records were entered in before switching an installation that already holds data.
 
 ### Passwords
 
@@ -411,8 +424,8 @@ Use HTTPS, a strong `JWT_SECRET`, an explicit `CORS_ORIGINS` allowlist, encrypte
 
 - The folder `hospital-management-system/` inside this repository is a stale duplicate of the root application. Nothing in CI, `render.yaml`, `vercel.json` or `start-hms.cmd` references it. It is retained pending approval to remove it.
 - Drug-interaction screening ships with a small demonstration dataset. Production refuses to start with it unless `ALLOW_DEMO_INTERACTIONS=true` is set. A licensed, maintained dataset must be loaded with `npm run db:interactions` and clinically reviewed before use.
-- Multi-factor authentication is not implemented for admin/doctor accounts despite the schema having `user_mfa` tables. Account lockout is rate-limiter based only.
-- The UI is English only; Kinyarwanda and French are not yet supported. Currency formatting is not yet one configurable setting.
+- Multi-factor authentication exists but is opt-in; it is not enforced for admin or doctor accounts. Account lockout is rate-limiter based only.
+- Only the sidebar, page header and dashboard are translated into French and Kinyarwanda (see [Language and currency](#language-and-currency)); every other screen is still English, as is text sent by the API. The Kinyarwanda strings need review by a native speaker before go-live.
 - Rwanda mobile money: Paystack does not offer MTN MoMo or Airtel Money in Rwanda and no Mukuru adapter exists. The mock provider is development-only. Real sandbox testing is required before claiming support.
 - AI/assistant outputs are labelled `unverified` and are generated from local data only; they are not clinically validated.
-- Client tests cover helper functions only; component and end-to-end browser tests are not yet present.
+- Client tests cover helpers, translations and the dashboard component; the other views and end-to-end browser tests are not yet covered.

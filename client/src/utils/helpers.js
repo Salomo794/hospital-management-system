@@ -1,3 +1,4 @@
+import { formatMoney } from './currency'
 // Timestamps are formatted through utils/datetime.js. The API stores instants in
 // UTC and sends them without a marker, so they have to be read as UTC and shown
 // in the hospital's timezone; doing that inline in every view is how the offset
@@ -20,10 +21,9 @@ export function formatTime(time) {
   return formatClockTime(time)
 }
 
+// Currency is configurable (see utils/currency.js); the default is still USD.
 export function formatCurrency(amount) {
-  const value = Number(amount)
-  if (!Number.isFinite(value)) return '$0.00'
-  return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return formatMoney(amount)
 }
 
 export function getStatusColor(status) {
