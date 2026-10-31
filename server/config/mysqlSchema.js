@@ -179,6 +179,24 @@ async function triggerExists(trigger) {
 }
 
 /**
+ * Columns added after the first MySQL schema was published.
+ *
+ * `CREATE TABLE IF NOT EXISTS` does not alter an existing table, so a database
+ * created before a column existed would never gain it. The interaction importer
+ * writes `drug_interactions.source` and the safety-provenance reader groups by
+ * it, so without this back-fill those queries fail with ER_BAD_FIELD_ERROR on
+ * any pre-existing database while a fresh one works.
+ */
+const ADDED_COLUMNS = [
+  {
+    table: 'drug_interactions',
+    column: 'source',
+    definition: 'VARCHAR(255) DEFAULT NULL',
+    comment: 'dataset an imported interaction row came from',
+  },
+];
+
+/**
  * SQLite partial unique indexes, expressed as generated columns.
  *
  * `keyExpression` must evaluate to NULL for rows that should not participate in
