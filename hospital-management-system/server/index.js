@@ -29,6 +29,7 @@ const aiRoutes = require('./routes/ai');
 const smartRoutes = require('./routes/smart');
 const portalRoutes = require('./routes/portal');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
+const { structuredLogger } = require('./middleware/structuredLogger');
 
 const app = express();
 
@@ -89,9 +90,17 @@ app.use(express.json({
   },
 }));
 app.use(express.urlencoded({ extended: true, limit: process.env.JSON_LIMIT || '1mb' }));
+
+// Structured JSON request logging in production (stdout, log-aggregator ready).
+// Morgan handles text logging in non-production environments.
+app.use(structuredLogger);
 app.use((req, res, next) => {
   req.requestId = req.header('X-Request-ID') || crypto.randomUUID();
   res.setHeader('X-Request-ID', req.requestId);
+  // Guard against hung requests consuming connections indefinitely.
+  res.setTimeout(Number(process.env.REQUEST_TIMEOUT_MS || 30000), () => {
+    if (!res.headersSent) res.status(504).json({ message: 'Request timed out' });
+  });
   next();
 });
 
@@ -164,12 +173,37 @@ function startServer({ port = process.env.PORT || DEFAULT_PORT } = {}) {
     process.exitCode = 1;
   });
 
+  // Graceful shutdown: stop accepting new connections, finish in-flight
+  // requests, then close the database pool. A second signal forces exit.
+  let shuttingDown = false;
+  const shutdown = signal => {
+    if (shuttingDown) {
+      process.exit(1);
+    }
+    shuttingDown = true;
+    console.log(`[shutdown] ${signal} received, closing gracefully...`);
+    server.close(() => {
+      try { pool.close(); } catch (_) {}
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(1), 10000).unref();
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
+
   return server;
 }
 
 if (require.main === module) {
   pool.isReady()
-    .then(() => startServer())
+    .then(async () => {
+      const provenance = await readProvenance(pool);
+      startupWarning(provenance);
+      if (process.env.NODE_ENV === 'production' && !provenance.authoritative && process.env.ALLOW_DEMO_INTERACTIONS !== 'true') {
+        throw new Error('[clinical-safety] Refusing to start in production with demonstration drug-interaction data. Load a licensed, reviewed interaction dataset with npm run db:interactions, or set ALLOW_DEMO_INTERACTIONS=true only for an isolated demo.');
+      }
+      startServer();
+    })
     .catch(error => {
       console.error(`[startup] ${error.message}`);
       process.exitCode = 1;

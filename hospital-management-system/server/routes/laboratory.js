@@ -277,7 +277,7 @@ router.put('/orders/:id/results', authenticate, authorize('lab_technician', 'adm
       const [update] = await connection.query(
         `UPDATE lab_order_items
          SET result_value=?, result_unit=?, reference_range=?, is_abnormal=?, notes=?,
-             technician_id=?, result_date=datetime('now')
+             technician_id=?, result_date=CURRENT_TIMESTAMP
          WHERE id=? AND lab_order_id=?`,
         [value.resultValue, resultUnit, referenceRange, isAbnormal, value.notes, req.user.id, item.id, orderId]
       );
@@ -285,7 +285,7 @@ router.put('/orders/:id/results', authenticate, authorize('lab_technician', 'adm
     }
 
     await connection.query(
-      "UPDATE lab_orders SET status = 'completed', completed_date = datetime('now') WHERE id = ?",
+      "UPDATE lab_orders SET status = 'completed', completed_date = CURRENT_TIMESTAMP WHERE id = ?",
       [orderId]
     );
     await connection.query(

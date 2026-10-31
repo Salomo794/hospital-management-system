@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('node:crypto');
 const request = require('supertest');
 
-process.env.TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || 'mysql://root:root@127.0.0.1:3306/hms_test';
+process.env.TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || 'mysql://root:rootpass@127.0.0.1:3306/hms_test';
 process.env.JWT_SECRET = 'test-secret-that-is-at-least-32-characters-long';
 process.env.NODE_ENV = 'test';
 // No SMTP: the mailer logs instead of sending, which keeps the same code path
@@ -47,9 +47,9 @@ beforeEach(() => {
   });
 });
 
-after(() => {
+after(async () => {
   mailer.resetTransport();
-  pool.close();
+  await pool.close();
 });
 
 /**
@@ -168,7 +168,7 @@ test('an expired token is refused', async () => {
   await requestReset(user.email);
   const token = tokenFromLastEmail();
   await pool.query(
-    "UPDATE password_reset_tokens SET expires_at = datetime('now', '-1 minute') WHERE token_hash = ?",
+    "UPDATE password_reset_tokens SET expires_at = DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 MINUTE) WHERE token_hash = ?",
     [hashToken(token)]
   );
   const expired = await request(app)

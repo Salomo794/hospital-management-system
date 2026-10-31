@@ -2,13 +2,14 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { requireMfa } = require('../middleware/requireMfa');
 const { ApiError, asyncHandler, getPagination, isDateOnly, parseInteger } = require('../utils/http');
 
 // The audit log is read-only and admin-only: it records who touched patient
 // records and money, so it must not be writable or readable by the actors it
 // describes.
 
-router.get('/', authenticate, authorize('admin'), asyncHandler(async (req, res) => {
+router.get('/', authenticate, authorize('admin'), requireMfa(), asyncHandler(async (req, res) => {
   const { page, limit, offset } = getPagination(req.query);
   const { user_id, actor_type, action, table_name, from_date, to_date } = req.query;
 

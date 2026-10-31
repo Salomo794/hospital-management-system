@@ -175,7 +175,7 @@ export default {
       return f + l
     })
 
-    /** Split "HMS-L9XQ-R4A2B" → ['HMS', 'L9XQ', 'R4A2B'] */
+    /** Access codes are 4 digits, e.g. "4821" → ['4821'] (split kept for grouped codes). */
     const codeChunks = computed(() =>
       (props.patient.access_code || '').split('-').filter(Boolean)
     )

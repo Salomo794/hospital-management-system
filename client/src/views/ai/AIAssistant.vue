@@ -128,14 +128,26 @@ export default {
       const msg = text || input.value
       if (!msg.trim() || loading.value) return
 
-      messages.value.push({ role: 'user', text: msg, timestamp: new Date() })
+      const userMessage = { role: 'user', text: msg, timestamp: new Date(), generalAi: false }
+      messages.value.push(userMessage)
       input.value = ''
       loading.value = true
       scrollToBottom()
 
       try {
-        const { data } = await axios.post('/api/ai/chat', { message: msg })
-        messages.value.push({ role: 'system', text: data.response, data: data.data, timestamp: new Date() })
+        const history = messages.value
+          .filter(item => item.generalAi)
+          .slice(-12)
+          .map(item => ({ role: item.role === 'user' ? 'user' : 'assistant', content: item.text }))
+        const { data } = await axios.post('/api/ai/chat', { message: msg, history })
+        userMessage.generalAi = data.general_ai === true
+        messages.value.push({
+          role: 'system',
+          text: data.response,
+          data: data.data,
+          timestamp: new Date(),
+          generalAi: userMessage.generalAi
+        })
       } catch (e) {
         const responseText = e.response?.data?.response || e.response?.data?.message || 'Sorry, I encountered an error. Please try again.'
         toast.error(responseText)

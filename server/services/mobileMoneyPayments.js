@@ -150,7 +150,7 @@ async function applyGatewayResult({ connection, req, paymentId, result }) {
   await connection.query(
     `UPDATE payments
      SET status = ?, provider_reference = COALESCE(?, provider_reference),
-         failure_reason = ?, completed_at = CASE WHEN ? = 'completed' THEN datetime('now') ELSE NULL END
+         failure_reason = ?, completed_at = CASE WHEN ? = 'completed' THEN CURRENT_TIMESTAMP ELSE NULL END
      WHERE id = ?`,
     [status, result.providerReference || null, result.failureReason || null, status, paymentId]
   );

@@ -161,7 +161,7 @@ router.get('/:id/schedule', authenticate, authorize(...CLINICAL_ROLES), asyncHan
     query += ' AND a.appointment_date = ?';
     params.push(date);
   } else if (week) {
-    query += " AND a.appointment_date BETWEEN date(?, '-7 days') AND ?";
+    query += " AND a.appointment_date BETWEEN DATE_SUB(?, INTERVAL 7 DAY) AND ?";
     params.push(week, week);
   }
   query += ' ORDER BY a.appointment_date, a.appointment_time';

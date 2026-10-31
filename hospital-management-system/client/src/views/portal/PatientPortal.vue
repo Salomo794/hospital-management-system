@@ -28,7 +28,24 @@
         <p>Use the MRN or access code and the 6-digit PIN provided by your care team.</p>
         <form @submit.prevent="login">
           <label>MRN or access code<input v-model.trim="loginForm.identifier" autocomplete="username" required /></label>
-          <label>Portal PIN<input v-model="loginForm.portal_pin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="current-password" required /></label>
+          <label>Portal PIN
+            <span class="input-wrap">
+              <input
+                v-model="loginForm.portal_pin"
+                :type="showPin ? 'text' : 'password'"
+                inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+                autocomplete="current-password" required
+              />
+              <button
+                type="button" class="reveal"
+                @click="showPin = !showPin"
+                :aria-label="showPin ? 'Hide PIN' : 'Show PIN'"
+                :title="showPin ? 'Hide PIN' : 'Show PIN'"
+              >
+                <span v-html="showPin ? eyeOffIcon : eyeIcon"></span>
+              </button>
+            </span>
+          </label>
           <div v-if="error" class="error-message" role="alert">{{ error }}</div>
           <button class="btn btn-primary btn-block" :disabled="loggingIn">{{ loggingIn ? 'Signing in…' : 'Sign in' }}</button>
         </form>
@@ -158,9 +175,11 @@
 
       <section class="portal-card kiosk-card">
         <h2>Walk-in check-in</h2>
-        <p>Enter the MRN or access code printed on your patient card.</p>
+        <p v-if="token">You are signed in. Confirm your visit to join the queue.</p>
+        <p v-else>Enter the MRN or access code on your patient card and your portal PIN.</p>
         <form @submit.prevent="checkIn">
-          <label>MRN or access code<input v-model.trim="checkinForm.identifier" required /></label>
+          <label v-if="!token">MRN or access code<input v-model.trim="checkinForm.identifier" required autocomplete="off" /></label>
+          <label v-if="!token">Portal PIN<input v-model="checkinForm.portal_pin" type="password" inputmode="numeric" autocomplete="off" required /></label>
           <label>Visit purpose<input v-model.trim="checkinForm.purpose" placeholder="Optional" /></label>
           <button class="btn btn-secondary" :disabled="checkingIn">{{ checkingIn ? 'Checking in…' : 'Check in' }}</button>
         </form>
@@ -186,6 +205,10 @@ const svg = body =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
 const moonIcon = svg('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/>')
 const sunIcon = svg('<circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4 7 7M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6"/>')
+// Reveal control for the PIN field, matching the eye pair used on the sign-in
+// and reset screens so the same affordance looks the same everywhere.
+const eyeIcon = svg('<path d="M2.2 12S5.6 5.5 12 5.5 21.8 12 21.8 12 18.4 18.5 12 18.5 2.2 12 2.2 12Z"/><circle cx="12" cy="12" r="3.1"/>')
+const eyeOffIcon = svg('<path d="M9.9 5.7A9.6 9.6 0 0 1 12 5.5c6.4 0 9.8 6.5 9.8 6.5a17.6 17.6 0 0 1-3.4 4.2"/><path d="M6.4 7.4A17.4 17.4 0 0 0 2.2 12S5.6 18.5 12 18.5a9.7 9.7 0 0 0 4.2-.9"/><path d="M9.9 9.9a3.1 3.1 0 0 0 4.3 4.3"/><path d="M3 3l18 18"/>')
 
 export default {
   name: 'PatientPortal',
@@ -195,7 +218,8 @@ export default {
     const token = ref(getStoredItem('portal-token'))
     const patient = ref(getStoredJson('portal-patient', value => !!value?.id))
     const loginForm = reactive({ identifier: '', portal_pin: '' })
-    const checkinForm = reactive({ identifier: '', purpose: '' })
+    const showPin = ref(false)
+    const checkinForm = reactive({ identifier: '', portal_pin: '', purpose: '' })
     const activeTab = ref('appointments')
     const loading = ref(false)
     const loggingIn = ref(false)
@@ -327,6 +351,7 @@ export default {
       loginForm.identifier = ''
       loginForm.portal_pin = ''
       checkinForm.identifier = ''
+      checkinForm.portal_pin = ''
       checkinForm.purpose = ''
       activeTab.value = 'appointments'
       loading.value = false
@@ -468,7 +493,14 @@ export default {
       checkinController = controller
       checkingIn.value = true
       try {
-        const { data } = await portalApi.post('/portal/checkin', { ...checkinForm }, { signal: controller.signal })
+        const payload = requestToken
+          ? { purpose: checkinForm.purpose }
+          : { identifier: checkinForm.identifier, portal_pin: checkinForm.portal_pin, purpose: checkinForm.purpose }
+        const { data } = await portalApi.post(
+          '/portal/checkin',
+          payload,
+          { signal: controller.signal, ...(requestToken ? { headers: { Authorization: `Bearer ${requestToken}` } } : {}) }
+        )
         if (
           componentUnmounted ||
           controller.signal.aborted ||
@@ -477,6 +509,7 @@ export default {
           (requestToken && requestToken !== token.value)
         ) return
         checkinResult.value = data
+        checkinForm.portal_pin = ''
         if (token.value) await loadPortalData()
       } catch (requestError) {
         if (
@@ -621,18 +654,19 @@ export default {
       loginForm.identifier = ''
       loginForm.portal_pin = ''
       checkinForm.identifier = ''
+      checkinForm.portal_pin = ''
       checkinForm.purpose = ''
     })
 
     return {
-      token, patient, loginForm, checkinForm, activeTab, tabs, loading, loggingIn,
+      token, patient, loginForm, checkinForm, activeTab, tabs, loading, loggingIn, showPin,
       checkingIn, error, paymentsEnabled, paymentMessages, paymentMessageTypes, checkinResult, checkin,
       aheadInQueue, appointments, labResults, prescriptions, bills, paymentAmounts,
       paymentMethods, mobileMoneyPhones, mobileMoneyNetworks, mobileMoneyConfig, mobileMoneyPaymentIds,
       canPayAnything, paymentMethodOptions,
       canPayBill, isBillCancelled, isPayingBill, login, logout, loadPortalData, checkIn, payBill,
       outstanding, formatCurrency, formatDate, formatTime, formatLabel, getStatusColor,
-      uiStore, moonIcon, sunIcon
+      uiStore, moonIcon, sunIcon, eyeIcon, eyeOffIcon
     }
   }
 }
@@ -665,6 +699,18 @@ h1, h2, p { margin-top: 0; }
 form, .payment-controls { display: grid; gap: 14px; }
 label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
 input, select { width: 100%; padding: 10px 12px; border: 1px solid var(--gray-300); border-radius: 8px; font: inherit; background: var(--surface-elevated); color: var(--gray-800); }
+/* PIN reveal, styled to match the sign-in and reset screens. */
+.input-wrap { position: relative; display: flex; align-items: center; }
+.input-wrap input { padding-right: 44px; }
+.reveal {
+  position: absolute; right: 8px;
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0;
+  background: none; border: none; border-radius: 7px;
+  color: var(--text-subtle); cursor: pointer;
+}
+.reveal:hover { color: var(--brand-600, #0d9488); background: var(--brand-50, #f0fdfa); }
+.reveal :deep(svg) { width: 17px; height: 17px; }
 .btn-block { width: 100%; }
 .welcome-card { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
 .eyebrow { color: var(--brand-600); font-size: 12px; font-weight: 700; text-transform: uppercase; }

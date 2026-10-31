@@ -27,7 +27,7 @@ router.get('/forecast', authenticate, authorize(...OPERATIONS_ROLES), async (req
     // 1) Next 7 day appointment load, predicted from weekday history over last 6 weeks
     const [history] = await pool.query(
       `SELECT appointment_date, COUNT(*) as count FROM appointments
-       WHERE appointment_date >= date(?, '-42 days') AND appointment_date < ?
+       WHERE appointment_date >= DATE_SUB(?, INTERVAL 42 DAY) AND appointment_date < ?
        GROUP BY appointment_date`,
       [today, today]
     );
@@ -76,11 +76,11 @@ router.get('/forecast', authenticate, authorize(...OPERATIONS_ROLES), async (req
     const totalBeds = wardRows.reduce((s, w) => s + w.total, 0);
     const totalOccupied = wardRows.reduce((s, w) => s + w.occupied, 0);
     const [discharged7] = await pool.query(
-      'SELECT COUNT(*) as count FROM admissions WHERE status = ? AND discharge_date >= date(?, \'-7 days\')',
+      'SELECT COUNT(*) as count FROM admissions WHERE status = ? AND discharge_date >= DATE_SUB(?, INTERVAL 7 DAY)',
       ['discharged', today]
     );
     const [admitted7] = await pool.query(
-      "SELECT COUNT(*) as count FROM admissions WHERE date(admission_date) >= date(?, '-7 days')",
+      "SELECT COUNT(*) as count FROM admissions WHERE date(admission_date) >= DATE_SUB(?, INTERVAL 7 DAY)",
       [today]
     );
     const bedForecast = {
@@ -102,7 +102,7 @@ router.get('/forecast', authenticate, authorize(...OPERATIONS_ROLES), async (req
                   FROM inventory_transactions it
                   WHERE it.medicine_id = m.id
                     AND it.transaction_type = 'dispense'
-                    AND date(it.created_at) >= date('now', '-30 days')
+                    AND date(it.created_at) >= DATE_SUB(CURRENT_DATE, INTERVAL 30 DAY)
                 ), 0) AS dispensed_30d
          FROM medicines m
          WHERE m.is_active = 1
@@ -198,8 +198,8 @@ router.get('/command-center', authenticate, authorize(...OPERATIONS_ROLES), asyn
     // Today's appointment timeline
     const [timeline] = await pool.query(
       `SELECT a.id, a.appointment_time, a.status, a.type, a.reason,
-         p.first_name || ' ' || p.last_name as patient_name, p.mrn,
-         u.first_name || ' ' || u.last_name as doctor_name
+         CONCAT(p.first_name, ' ', p.last_name) as patient_name, p.mrn,
+         CONCAT(u.first_name, ' ', u.last_name) as doctor_name
        FROM appointments a
        JOIN patients p ON a.patient_id = p.id
        JOIN users u ON a.doctor_id = u.id

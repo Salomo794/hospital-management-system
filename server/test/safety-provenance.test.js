@@ -33,7 +33,7 @@ function importCsv(rows, args = []) {
   fs.writeFileSync(file, rows.join('\n'));
   return spawnSync(process.execPath, [script, '--file', file, ...args], {
     cwd: serverDirectory,
-    env: { ...process.env, TEST_DATABASE_URL: 'mysql://root:rootpass@127.0.0.1:3306/hms_test', JWT_SECRET: process.env.JWT_SECRET },
+    env: { ...process.env, TEST_DATABASE_URL: process.env.TEST_DATABASE_URL, JWT_SECRET: process.env.JWT_SECRET },
     encoding: 'utf8',
   });
 }

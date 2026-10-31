@@ -38,11 +38,16 @@
 
         <div class="form-group">
           <label for="confirm-password">Confirm New Password</label>
-          <input
-            id="confirm-password" :type="show ? 'text' : 'password'"
-            v-model="confirm" placeholder="Type it again" @input="touched = true"
-            autocomplete="new-password"
-          />
+          <div class="input-wrap">
+            <input
+              id="confirm-password" :type="show ? 'text' : 'password'"
+              v-model="confirm" placeholder="Type it again" @input="touched = true"
+              autocomplete="new-password"
+            />
+            <button type="button" class="reveal" @click="show = !show" :aria-label="show ? 'Hide password' : 'Show password'" :title="show ? 'Hide password' : 'Show password'">
+              <span v-html="show ? eyeOffIcon : eyeIcon"></span>
+            </button>
+          </div>
           <span class="field-error" v-if="touched && mismatch">Passwords do not match</span>
         </div>
 

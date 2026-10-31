@@ -11,7 +11,7 @@ router.get('/pending-items', authenticate, authorize('admin', 'pharmacist'), asy
             pi.quantity - COALESCE(pi.dispensed_quantity, 0) AS quantity_remaining,
             pi.dispensed, pi.medicine_id, pi.dosage, pi.frequency,
             m.name AS medicine_name, m.generic_name AS medicine_generic,
-            pr.patient_id, p.first_name || ' ' || p.last_name AS patient_name,
+            pr.patient_id, CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
             p.mrn AS patient_mrn, p.allergies AS patient_allergies
      FROM prescription_items pi
      JOIN medicines m ON pi.medicine_id = m.id

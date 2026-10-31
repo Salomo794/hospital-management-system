@@ -3,14 +3,19 @@
     <div class="card chat-container">
       <div class="card-header">
         <h3>AI Assistant</h3>
-        <span class="badge badge-success">Online</span>
+        <span class="badge" :class="aiEnabled ? 'badge-success' : 'badge-warning'">
+          {{ aiEnabled ? 'AI enabled' : 'Rules only' }}
+        </span>
+      </div>
+      <div class="assistant-notice">
+        General AI may send your message to the configured provider. Do not enter patient names, IDs, or clinical details. It is not for medical decisions.
       </div>
       <div class="chat-messages" ref="chatContainer">
         <!-- Welcome message -->
         <div class="message system">
           <div class="message-avatar">&#129302;</div>
           <div class="message-content">
-            <div class="message-text">Hello! I'm your AI Hospital Assistant. I can help you find patient information, check schedules, and more. Try asking me:</div>
+            <div class="message-text">Hello! I can look up authorized hospital information and help with general, non-clinical questions. Try asking me:</div>
             <div class="quick-actions">
               <button v-for="action in quickActions" :key="action.label" @click="sendMessage(action.message)">
                 {{ action.label }}
@@ -49,7 +54,7 @@
 
         <!-- Empty state -->
         <div v-if="!messages.length && !loading" class="empty-chat">
-          <span class="empty-icon">🤖</span>
+          <span class="empty-icon"><AppIcon name="sparkles" :size="30" /></span>
           <p>Start a conversation by typing a message below.</p>
         </div>
 
@@ -78,6 +83,7 @@
 </template>
 
 <script>
+import AppIcon from '../../components/AppIcon.vue'
 import { ref, computed, nextTick, onMounted } from 'vue'
 import axios from 'axios'
 import { useToast } from '../../store/toast'
@@ -85,6 +91,7 @@ import { useAuthStore } from '../../store/auth'
 import { formatDateTime } from '../../utils/helpers'
 
 export default {
+  components: { AppIcon },
   name: 'AIAssistant',
   setup() {
     const toast = useToast()
@@ -105,6 +112,7 @@ export default {
     const messages = ref([])
     const input = ref('')
     const loading = ref(false)
+    const aiEnabled = ref(false)
     const chatContainer = ref(null)
     const chatInput = ref(null)
 
@@ -120,14 +128,26 @@ export default {
       const msg = text || input.value
       if (!msg.trim() || loading.value) return
 
-      messages.value.push({ role: 'user', text: msg, timestamp: new Date() })
+      const userMessage = { role: 'user', text: msg, timestamp: new Date(), generalAi: false }
+      messages.value.push(userMessage)
       input.value = ''
       loading.value = true
       scrollToBottom()
 
       try {
-        const { data } = await axios.post('/api/ai/chat', { message: msg })
-        messages.value.push({ role: 'system', text: data.response, data: data.data, timestamp: new Date() })
+        const history = messages.value
+          .filter(item => item.generalAi)
+          .slice(-12)
+          .map(item => ({ role: item.role === 'user' ? 'user' : 'assistant', content: item.text }))
+        const { data } = await axios.post('/api/ai/chat', { message: msg, history })
+        userMessage.generalAi = data.general_ai === true
+        messages.value.push({
+          role: 'system',
+          text: data.response,
+          data: data.data,
+          timestamp: new Date(),
+          generalAi: userMessage.generalAi
+        })
       } catch (e) {
         const responseText = e.response?.data?.response || e.response?.data?.message || 'Sorry, I encountered an error. Please try again.'
         toast.error(responseText)
@@ -148,11 +168,17 @@ export default {
       try { return formatDateTime(date) } catch { return '' }
     }
 
-    onMounted(() => {
+    onMounted(async () => {
       chatInput.value?.focus()
+      try {
+        const { data } = await axios.get('/api/ai/status')
+        aiEnabled.value = data.enabled === true
+      } catch {
+        aiEnabled.value = false
+      }
     })
 
-    return { messages, input, loading, chatContainer, chatInput, quickActions, sendMessage, formatKey, formatValue, formatTime }
+    return { messages, input, loading, aiEnabled, chatContainer, chatInput, quickActions, sendMessage, formatKey, formatValue, formatTime }
   }
 }
 </script>
@@ -160,6 +186,7 @@ export default {
 <style scoped>
 .ai-assistant { height: calc(100vh - 140px); display: flex; flex-direction: column; }
 .chat-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.assistant-notice { padding: 10px 20px; border-bottom: 1px solid var(--gray-200); color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .chat-messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
 .message { display: flex; gap: 12px; max-width: 80%; }
 .message.user { align-self: flex-end; flex-direction: row-reverse; }
@@ -197,6 +224,7 @@ export default {
   .ai-assistant { height: calc(100vh - 120px); }
   .message { max-width: 100%; }
   .chat-messages { padding: 14px; }
+  .assistant-notice { padding: 10px 14px; }
   .chat-input { padding: 12px 14px; }
   .chat-input .btn { padding: 12px 16px; }
   .data-key { min-width: 90px; }

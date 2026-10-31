@@ -2,505 +2,101 @@ const { loadEnvironment } = require('./environment');
 loadEnvironment();
 
 const pool = require('./database');
-const { paymentMethodConstraint, paymentStatusConstraint } = require('./paymentMethods');
+const schemaTables = require('./mysqlSchema');
+
+const generatedColumns = [
+  ['appointments', 'active_slot', "TINYINT GENERATED ALWAYS AS (CASE WHEN status IN ('scheduled','in_progress','completed') THEN 1 ELSE NULL END) STORED"],
+  ['admissions', 'active_admission_slot', "TINYINT GENERATED ALWAYS AS (CASE WHEN status = 'admitted' THEN 1 ELSE NULL END) STORED"],
+  ['admissions', 'active_bed_slot', "TINYINT GENERATED ALWAYS AS (CASE WHEN status = 'admitted' AND ward IS NOT NULL AND bed_number IS NOT NULL THEN 1 ELSE NULL END) STORED"],
+  ['checkins', 'active_checkin_slot', "TINYINT GENERATED ALWAYS AS (CASE WHEN status IN ('waiting','in_consultation') THEN 1 ELSE NULL END) STORED"],
+  ['payments', 'transaction_reference_key', "VARCHAR(255) COLLATE utf8mb4_0900_bin GENERATED ALWAYS AS (NULLIF(transaction_reference, '')) STORED"],
+  ['inventory_transactions', 'reference_number_key', "VARCHAR(255) COLLATE utf8mb4_0900_bin GENERATED ALWAYS AS (NULLIF(reference_number, '')) STORED"],
+];
+
+const indexes = [
+  ['idx_active_appointment_slot', 'appointments', ['doctor_id', 'appointment_date', 'appointment_time', 'active_slot'], true],
+  ['idx_active_admission_patient', 'admissions', ['patient_id', 'active_admission_slot'], true],
+  ['idx_active_checkin_patient_date', 'checkins', ['patient_id', 'checkin_date', 'active_checkin_slot'], true],
+  ['idx_active_admission_bed', 'admissions', ['ward', 'bed_number', 'active_bed_slot'], true],
+  ['idx_payment_transaction_reference', 'payments', ['transaction_reference_key'], true],
+  ['idx_payments_pending', 'payments', ['status', 'bill_id', 'created_at'], false],
+  ['idx_inventory_reference_number', 'inventory_transactions', ['reference_number_key'], true],
+  ['idx_refunds_payment', 'payment_refunds', ['payment_id'], false],
+  ['idx_refunds_bill', 'payment_refunds', ['bill_id'], false],
+  ['idx_refunds_date', 'payment_refunds', ['refund_date'], false],
+  ['idx_audit_log_created', 'audit_log', ['created_at'], false],
+  ['idx_audit_log_user', 'audit_log', ['user_id'], false],
+  ['idx_audit_log_action', 'audit_log', ['action'], false],
+  ['idx_password_reset_hash', 'password_reset_tokens', ['token_hash'], true],
+  ['idx_password_reset_user', 'password_reset_tokens', ['user_id', 'created_at'], false],
+  ['idx_appointments_patient', 'appointments', ['patient_id'], false],
+  ['idx_appointments_doctor_date', 'appointments', ['doctor_id', 'appointment_date'], false],
+  ['idx_medical_records_patient', 'medical_records', ['patient_id'], false],
+  ['idx_lab_orders_patient', 'lab_orders', ['patient_id'], false],
+  ['idx_bills_patient', 'bills', ['patient_id'], false],
+  ['idx_admissions_ward_status', 'admissions', ['ward', 'status'], false],
+  ['idx_notifications_user_read', 'notifications', ['user_id', 'is_read'], false],
+  ['idx_prescription_items_medicine', 'prescription_items', ['medicine_id'], false],
+  ['idx_purchase_orders_status', 'purchase_orders', ['status'], false],
+  ['idx_purchase_orders_supplier', 'purchase_orders', ['supplier_id'], false],
+  ['idx_purchase_orders_created', 'purchase_orders', ['created_at'], false],
+  ['idx_purchase_order_items_order', 'purchase_order_items', ['purchase_order_id'], false],
+  ['idx_purchase_order_items_medicine', 'purchase_order_items', ['medicine_id'], false],
+];
+
+async function ensureGeneratedColumn(conn, table, column, definition) {
+  const [existing] = await conn.query(
+    `SELECT 1 FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+    [table, column]
+  );
+  if (existing.length === 0) {
+    await conn.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
+  }
+}
+
+async function ensureIndex(conn, name, table, columns, unique) {
+  const [existing] = await conn.query(
+    `SELECT COLUMN_NAME AS column_name, NON_UNIQUE AS non_unique
+     FROM information_schema.statistics
+     WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?
+     ORDER BY SEQ_IN_INDEX`,
+    [table, name]
+  );
+  const matches = existing.length === columns.length &&
+    existing.every((row, index) =>
+      row.column_name === columns[index] && Number(row.non_unique) === (unique ? 0 : 1)
+    );
+  if (matches) return;
+  if (existing.length > 0) await conn.query(`DROP INDEX \`${name}\` ON \`${table}\``);
+  const quotedColumns = columns.map(column => `\`${column}\``).join(', ');
+  await conn.query(
+    `CREATE ${unique ? 'UNIQUE ' : ''}INDEX \`${name}\` ON \`${table}\` (${quotedColumns})`
+  );
+}
 
 async function setup() {
   const conn = await pool.getConnection();
 
   try {
-    const originalQuery = conn.query.bind(conn);
-    conn.query = async (sql, ...args) => {
-      try {
-        return await originalQuery(sql, ...args);
-      } catch (error) {
-        if (error && error.code === 'ER_DUP_KEYNAME' && /CREATE\s+(UNIQUE\s+)?INDEX/i.test(String(sql))) {
-          return [[]];
-        }
-        throw error;
-      }
-    };
     if (process.env.NODE_ENV === 'test') {
       await conn.query('SET FOREIGN_KEY_CHECKS = 0');
-      const [existingTables] = await conn.query(
-        "SELECT TABLE_NAME AS table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
-      );
-      for (const { table_name: tableName } of existingTables) {
-        await conn.query(`DROP TABLE IF EXISTS \`${tableName}\``);
+      try {
+        const [existingTables] = await conn.query(
+          "SELECT TABLE_NAME AS table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
+        );
+        for (const { table_name: tableName } of existingTables) {
+          await conn.query(`DROP TABLE IF EXISTS \`${tableName}\``);
+        }
+      } finally {
+        await conn.query('SET FOREIGN_KEY_CHECKS = 1');
       }
-      await conn.query('SET FOREIGN_KEY_CHECKS = 1');
     }
-    await conn.beginTransaction();
-    await conn.query(`CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT UNIQUE NOT NULL,
-      email TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('admin','doctor','nurse','receptionist','pharmacist','lab_technician')),
-      first_name TEXT NOT NULL,
-      last_name TEXT NOT NULL,
-      phone TEXT,
-      avatar TEXT,
-      is_active INTEGER DEFAULT 1,
-      last_login TEXT,
-      mfa_enabled INTEGER NOT NULL DEFAULT 0,
-      mfa_secret TEXT,
-      mfa_verified_at TEXT,
-      -- Stamped whenever the password changes. Session tokens carry the value
-      -- they were issued against, so a reset or a forced change can end every
-      -- session that predates it - including one held by whoever prompted the
-      -- reset. Without this a password reset would not actually lock anyone out.
-      password_changed_at TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    )`);
-
-    // Single-use, expiring reset links. Only the SHA-256 of the token is
-    // stored: a leaked database backup must not hand out working reset links.
-    await conn.query(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT UNIQUE NOT NULL,
-      user_id INTEGER NOT NULL,
-      token_hash TEXT UNIQUE NOT NULL,
-      expires_at TEXT NOT NULL,
-      used_at TEXT,
-      ip_address TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS patients (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT UNIQUE NOT NULL,
-      mrn TEXT UNIQUE NOT NULL,
-      first_name TEXT NOT NULL,
-      last_name TEXT NOT NULL,
-      date_of_birth TEXT NOT NULL,
-      gender TEXT NOT NULL CHECK(gender IN ('male','female','other')),
-      blood_type TEXT CHECK(blood_type IN ('A+','A-','B+','B-','AB+','AB-','O+','O-')),
-      phone TEXT,
-      email TEXT,
-      address TEXT,
-      emergency_contact_name TEXT,
-      emergency_contact_phone TEXT,
-      insurance_provider TEXT,
-      insurance_number TEXT,
-      allergies TEXT,
-      chronic_conditions TEXT,
-      portal_pin TEXT,
-      portal_session_version INTEGER NOT NULL DEFAULT 1,
-      access_code TEXT UNIQUE,
-      photo TEXT,
-      status TEXT DEFAULT 'active' CHECK(status IN ('active','inactive','deceased')),
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS specialties (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT UNIQUE NOT NULL,
-      description TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS doctor_profiles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL UNIQUE,
-      specialty_id INTEGER,
-      license_number TEXT UNIQUE NOT NULL,
-      qualification TEXT,
-      years_of_experience INTEGER,
-      consultation_fee REAL DEFAULT 0,
-      bio TEXT,
-      schedule TEXT,
-      is_available INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (specialty_id) REFERENCES specialties(id) ON DELETE SET NULL
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS appointments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT UNIQUE NOT NULL,
-      appointment_number TEXT UNIQUE NOT NULL,
-      patient_id INTEGER NOT NULL,
-      doctor_id INTEGER NOT NULL,
-      appointment_date TEXT NOT NULL,
-      appointment_time TEXT NOT NULL,
-      end_time TEXT,
-      type TEXT NOT NULL DEFAULT 'consultation' CHECK(type IN ('consultation','follow_up','emergency','procedure','vaccination','other')),
-      status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','in_progress','completed','cancelled','no_show')),
-      reason TEXT,
-      notes TEXT,
-      created_by INTEGER,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
-      FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (created_by) REFERENCES users(id)
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS medical_records (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT UNIQUE NOT NULL,
-      patient_id INTEGER NOT NULL,
-      doctor_id INTEGER NOT NULL,
-      appointment_id INTEGER,
-      record_date TEXT DEFAULT (datetime('now')),
-      chief_complaint TEXT,
-      history_of_present_illness TEXT,
-      vital_signs TEXT,
-      physical_examination TEXT,
-      diagnosis TEXT,
-      treatment_plan TEXT,
-      notes TEXT,
-      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','final','amended')),
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
-      FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS medicines (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      generic_name TEXT,
-      category TEXT,
-      manufacturer TEXT,
-      unit_price REAL NOT NULL CHECK(unit_price >= 0),
-      cost_price REAL CHECK(cost_price IS NULL OR cost_price >= 0),
-      stock_quantity INTEGER NOT NULL DEFAULT 0 CHECK(stock_quantity >= 0),
-      min_stock_level INTEGER NOT NULL DEFAULT 10 CHECK(min_stock_level >= 0),
-      max_stock_level INTEGER NOT NULL DEFAULT 1000,
-      CHECK(max_stock_level >= min_stock_level),
-      unit TEXT DEFAULT 'tablet',
-      expiry_date TEXT,
-      batch_number TEXT,
-      requires_prescription INTEGER DEFAULT 1,
-      is_active INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS prescriptions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT UNIQUE NOT NULL,
-      prescription_number TEXT UNIQUE NOT NULL,
-      medical_record_id INTEGER,
-      patient_id INTEGER NOT NULL,
-      doctor_id INTEGER NOT NULL,
-      prescribed_date TEXT DEFAULT (date('now')),
-      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','completed','cancelled')),
-      notes TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (medical_record_id) REFERENCES medical_records(id) ON DELETE SET NULL,
-      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
-      FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS prescription_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      prescription_id INTEGER NOT NULL,
-      medicine_id INTEGER NOT NULL,
-      dosage TEXT NOT NULL,
-      frequency TEXT NOT NULL,
-      duration TEXT,
-      instructions TEXT,
-      quantity INTEGER NOT NULL CHECK(quantity > 0),
-      dispensed_quantity INTEGER NOT NULL DEFAULT 0 CHECK(dispensed_quantity >= 0),
-      CHECK(dispensed_quantity <= quantity),
-      dispensed INTEGER NOT NULL DEFAULT 0 CHECK(dispensed IN (0,1)),
-      dispensed_date TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (prescription_id) REFERENCES prescriptions(id) ON DELETE CASCADE,
-      FOREIGN KEY (medicine_id) REFERENCES medicines(id) ON DELETE CASCADE
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS lab_tests (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      category TEXT,
-      description TEXT,
-      normal_range TEXT,
-      unit TEXT,
-      price REAL NOT NULL DEFAULT 0 CHECK(price >= 0),
-      turnaround_time TEXT DEFAULT '24 hours',
-      is_active INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now'))
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS lab_orders (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT UNIQUE NOT NULL,
-      order_number TEXT UNIQUE NOT NULL,
-      patient_id INTEGER NOT NULL,
-      doctor_id INTEGER NOT NULL,
-      medical_record_id INTEGER,
-      order_date TEXT DEFAULT (datetime('now')),
-      status TEXT NOT NULL DEFAULT 'ordered' CHECK(status IN ('ordered','in_progress','completed','cancelled')),
-      priority TEXT NOT NULL DEFAULT 'routine' CHECK(priority IN ('routine','urgent','stat')),
-      clinical_notes TEXT,
-      completed_date TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
-      FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (medical_record_id) REFERENCES medical_records(id) ON DELETE SET NULL
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS lab_order_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      lab_order_id INTEGER NOT NULL,
-      lab_test_id INTEGER NOT NULL,
-      result_value TEXT,
-      result_unit TEXT,
-      reference_range TEXT,
-      is_abnormal INTEGER DEFAULT 0,
-      notes TEXT,
-      technician_id INTEGER,
-      result_date TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (lab_order_id) REFERENCES lab_orders(id) ON DELETE CASCADE,
-      FOREIGN KEY (lab_test_id) REFERENCES lab_tests(id) ON DELETE CASCADE,
-      FOREIGN KEY (technician_id) REFERENCES users(id)
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS bills (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT UNIQUE NOT NULL,
-      bill_number TEXT UNIQUE NOT NULL,
-      patient_id INTEGER NOT NULL,
-      appointment_id INTEGER,
-      total_amount REAL NOT NULL DEFAULT 0 CHECK(total_amount >= 0),
-      discount REAL NOT NULL DEFAULT 0 CHECK(discount >= 0),
-      tax REAL NOT NULL DEFAULT 0 CHECK(tax >= 0),
-      net_amount REAL NOT NULL DEFAULT 0 CHECK(net_amount >= 0),
-      paid_amount REAL NOT NULL DEFAULT 0 CHECK(paid_amount >= 0),
-      payment_status TEXT NOT NULL DEFAULT 'pending' CHECK(payment_status IN ('pending','partial','paid','cancelled')),
-      payment_method TEXT,
-      insurance_claim_amount REAL DEFAULT 0,
-      due_date TEXT,
-      notes TEXT,
-      created_by INTEGER,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
-      FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL,
-      FOREIGN KEY (created_by) REFERENCES users(id)
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS bill_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      bill_id INTEGER NOT NULL,
-      description TEXT NOT NULL,
-      category TEXT NOT NULL,
-      reference_id INTEGER,
-      quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity > 0),
-      unit_price REAL NOT NULL CHECK(unit_price >= 0),
-      total REAL NOT NULL CHECK(total >= 0),
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS payments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT UNIQUE NOT NULL,
-      payment_number TEXT UNIQUE NOT NULL,
-      bill_id INTEGER NOT NULL,
-      patient_id INTEGER NOT NULL,
-      amount REAL NOT NULL CHECK(amount > 0),
-      payment_method TEXT NOT NULL ${paymentMethodConstraint()},
-      status TEXT NOT NULL DEFAULT 'completed' ${paymentStatusConstraint()},
-      transaction_reference TEXT,
-      provider TEXT,
-      provider_reference TEXT,
-      failure_reason TEXT,
-      received_by INTEGER,
-      payment_date TEXT DEFAULT (datetime('now')),
-      completed_at TEXT,
-      notes TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
-      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
-      FOREIGN KEY (received_by) REFERENCES users(id)
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS payment_refunds (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT UNIQUE NOT NULL,
-      refund_number TEXT UNIQUE NOT NULL,
-      payment_id INTEGER NOT NULL,
-      bill_id INTEGER NOT NULL,
-      patient_id INTEGER NOT NULL,
-      amount REAL NOT NULL CHECK(amount > 0),
-      payment_method TEXT NOT NULL ${paymentMethodConstraint()},
-      reason TEXT NOT NULL,
-      refunded_by INTEGER NOT NULL,
-      refund_date TEXT DEFAULT (datetime('now')),
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE,
-      FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
-      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
-      FOREIGN KEY (refunded_by) REFERENCES users(id)
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS notifications (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER,
-      type TEXT DEFAULT 'system',
-      title TEXT NOT NULL,
-      message TEXT NOT NULL,
-      is_read INTEGER DEFAULT 0,
-      link TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS audit_log (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER,
-      actor_type TEXT NOT NULL DEFAULT 'staff',
-      actor_label TEXT,
-      action TEXT NOT NULL,
-      summary TEXT,
-      table_name TEXT,
-      record_id INTEGER,
-      old_values TEXT,
-      new_values TEXT,
-      ip_address TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS inventory_transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      medicine_id INTEGER NOT NULL,
-      prescription_item_id INTEGER,
-      transaction_type TEXT NOT NULL,
-      quantity INTEGER NOT NULL,
-      reference_number TEXT,
-      notes TEXT,
-      performed_by INTEGER,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (medicine_id) REFERENCES medicines(id) ON DELETE CASCADE,
-      FOREIGN KEY (prescription_item_id) REFERENCES prescription_items(id) ON DELETE SET NULL,
-      FOREIGN KEY (performed_by) REFERENCES users(id)
-    )`);
-
-    // Procurement closes the loop the low-stock forecast opens: a reorder
-    // suggestion has to be raisable as an order, and a received order has to
-    // land in inventory_transactions so stock levels stay truthful.
-    await conn.query(`CREATE TABLE IF NOT EXISTS suppliers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT UNIQUE NOT NULL,
-      contact_name TEXT,
-      email TEXT,
-      phone TEXT,
-      address TEXT,
-      lead_time_days INTEGER NOT NULL DEFAULT 7 CHECK(lead_time_days >= 0),
-      notes TEXT,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS purchase_orders (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT UNIQUE NOT NULL,
-      order_number TEXT UNIQUE NOT NULL,
-      supplier_id INTEGER NOT NULL,
-      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','approved','partially_received','received','cancelled')),
-      total_amount REAL NOT NULL DEFAULT 0 CHECK(total_amount >= 0),
-      ordered_by INTEGER,
-      approved_by INTEGER,
-      expected_date TEXT,
-      notes TEXT,
-      cancellation_reason TEXT,
-      submitted_at TEXT,
-      approved_at TEXT,
-      received_at TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE RESTRICT,
-      FOREIGN KEY (ordered_by) REFERENCES users(id) ON DELETE SET NULL,
-      FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS purchase_order_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      purchase_order_id INTEGER NOT NULL,
-      medicine_id INTEGER NOT NULL,
-      quantity INTEGER NOT NULL CHECK(quantity > 0),
-      unit_cost REAL NOT NULL DEFAULT 0 CHECK(unit_cost >= 0),
-      quantity_received INTEGER NOT NULL DEFAULT 0 CHECK(quantity_received >= 0),
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
-      FOREIGN KEY (medicine_id) REFERENCES medicines(id) ON DELETE RESTRICT
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS admissions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT UNIQUE NOT NULL,
-      admission_number TEXT UNIQUE NOT NULL,
-      patient_id INTEGER NOT NULL,
-      doctor_id INTEGER NOT NULL,
-      ward TEXT,
-      bed_number TEXT,
-      admission_date TEXT DEFAULT (datetime('now')),
-      discharge_date TEXT,
-      diagnosis TEXT,
-      treatment_plan TEXT,
-      chief_complaint TEXT,
-      triage_severity TEXT CHECK(triage_severity IS NULL OR triage_severity IN ('low','moderate','high','critical')),
-      status TEXT NOT NULL DEFAULT 'admitted' CHECK(status IN ('admitted','discharged')),
-      notes TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
-      FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS drug_interactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      medicine_a_id INTEGER NOT NULL,
-      medicine_b_id INTEGER NOT NULL,
-      severity TEXT NOT NULL CHECK(severity IN ('mild','moderate','severe','contraindicated')),
-      description TEXT,
-      clinical_management TEXT,
-      source TEXT NOT NULL DEFAULT 'demo',
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (medicine_a_id) REFERENCES medicines(id) ON DELETE CASCADE,
-      FOREIGN KEY (medicine_b_id) REFERENCES medicines(id) ON DELETE CASCADE
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS safety_reference (
-      id INTEGER PRIMARY KEY,
-      source TEXT NOT NULL,
-      description TEXT,
-      reference_name TEXT,
-      reference_version TEXT,
-      loaded_at TEXT,
-      loaded_by INTEGER,
-      interaction_count INTEGER NOT NULL DEFAULT 0
-    )`);
-
-    await conn.query(`CREATE TABLE IF NOT EXISTS checkins (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT UNIQUE NOT NULL,
-      patient_id INTEGER NOT NULL,
-      appointment_id INTEGER,
-      checkin_time TEXT DEFAULT (datetime('now')),
-      checkin_date TEXT NOT NULL DEFAULT (date('now')),
-      purpose TEXT,
-      status TEXT DEFAULT 'waiting' CHECK(status IN ('waiting','in_consultation','completed','no_show','cancelled')),
-      qr_token TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
-      FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL
-    )`);
+    for (const statement of schemaTables) await conn.query(statement);
 
     await conn.query(`
       UPDATE checkins
-      SET checkin_date = COALESCE(date(checkin_time), date(created_at), date('now'))
+      SET checkin_date = COALESCE(DATE(checkin_time), DATE(created_at), CURRENT_DATE)
       WHERE checkin_date IS NULL OR TRIM(checkin_date) = ''
     `);
 
@@ -552,60 +148,16 @@ async function setup() {
       );
     }
 
-    await conn.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_doctor_profiles_user ON doctor_profiles(user_id)');
-    await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_active_appointment_slot
-      ON appointments(doctor_id, appointment_date, appointment_time)
-      WHERE status IN ('scheduled','in_progress','completed')`);
-    await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_active_admission_patient
-      ON admissions(patient_id)
-      WHERE status = 'admitted'`);
-    await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_active_checkin_patient_date
-      ON checkins(patient_id, checkin_date)
-      WHERE status IN ('waiting', 'in_consultation')`);
-    await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_active_admission_bed
-      ON admissions(ward, bed_number)
-      WHERE status = 'admitted' AND ward IS NOT NULL AND bed_number IS NOT NULL`);
-    await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_transaction_reference
-      ON payments(transaction_reference)
-      WHERE transaction_reference IS NOT NULL AND transaction_reference != ''`);
-    // The reconciliation sweep and the bill view both need "which charges are
-    // still awaiting the customer" without scanning the whole table.
-    await conn.query(`CREATE INDEX IF NOT EXISTS idx_payments_pending
-      ON payments(bill_id, created_at)
-      WHERE status = 'pending'`);
-    await conn.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_reference_number
-      ON inventory_transactions(reference_number)
-      WHERE reference_number IS NOT NULL AND reference_number != ''`);
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_refunds_payment ON payment_refunds(payment_id)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_refunds_bill ON payment_refunds(bill_id)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_refunds_date ON payment_refunds(refund_date)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action)');
-    // A reset link is looked up by its hash on every submission.
-    await conn.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_password_reset_hash ON password_reset_tokens(token_hash)');
-    // Lets issuing a new link retire the account's previous outstanding ones
-    // without scanning every token ever created.
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id, created_at)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_appointments_patient ON appointments(patient_id)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_appointments_doctor_date ON appointments(doctor_id, appointment_date)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_medical_records_patient ON medical_records(patient_id)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_lab_orders_patient ON lab_orders(patient_id)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_bills_patient ON bills(patient_id)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_admissions_ward_status ON admissions(ward, status)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_prescription_items_medicine ON prescription_items(medicine_id)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_orders_status ON purchase_orders(status)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_orders_supplier ON purchase_orders(supplier_id)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_orders_created ON purchase_orders(created_at)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_order_items_order ON purchase_order_items(purchase_order_id)');
-    await conn.query('CREATE INDEX IF NOT EXISTS idx_purchase_order_items_medicine ON purchase_order_items(medicine_id)');
+    for (const [table, column, definition] of generatedColumns) {
+      await ensureGeneratedColumn(conn, table, column, definition);
+    }
+    for (const [name, table, columns, unique] of indexes) {
+      await ensureIndex(conn, name, table, columns, unique);
+    }
 
     await pool.isReady();
-    await conn.commit();
     console.log('All tables and indexes created successfully (MySQL)!');
   } catch (error) {
-    try { await conn.rollback(); } catch (_) { /* preserve original error */ }
     console.error('Error creating tables:', error);
     throw error;
   } finally {
@@ -614,8 +166,11 @@ async function setup() {
 }
 
 if (require.main === module) {
-  setup().catch(() => {
+  setup()
+    .then(() => pool.close())
+    .catch(async () => {
     process.exitCode = 1;
+    await pool.close();
   });
 }
 

@@ -420,7 +420,7 @@ router.get('/me', authenticatePortal, asyncHandler(async (req, res) => {
 router.get('/appointments', authenticatePortal, asyncHandler(async (req, res) => {
   const [rows] = await pool.query(
     `SELECT a.id, a.appointment_date, a.appointment_time, a.type, a.status, a.reason, a.notes,
-            u.first_name || ' ' || u.last_name AS doctor_name,
+            CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
             d.name || '' AS specialty
      FROM appointments a JOIN users u ON a.doctor_id = u.id
      LEFT JOIN doctor_profiles dp ON u.id = dp.user_id
@@ -448,7 +448,7 @@ router.get('/lab-results', authenticatePortal, asyncHandler(async (req, res) => 
 router.get('/prescriptions', authenticatePortal, asyncHandler(async (req, res) => {
   const [rows] = await pool.query(
     `SELECT pr.prescription_number, pr.prescribed_date, pr.status,
-            u.first_name || ' ' || u.last_name AS doctor_name,
+            CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
             pi.dosage, pi.frequency, pi.duration, pi.quantity,
             COALESCE(pi.dispensed_quantity, 0) AS dispensed_quantity,
             pi.quantity - COALESCE(pi.dispensed_quantity, 0) AS remaining_quantity,

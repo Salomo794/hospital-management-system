@@ -132,6 +132,10 @@
                   <span v-html="icons.key" />
                   Change password
                 </button>
+                <button class="dropdown-item" @click="openMfaModal">
+                  <span v-html="icons.key" />
+                  {{ authStore.user?.mfa_enabled ? 'MFA settings' : 'Enable MFA' }}
+                </button>
                 <button class="dropdown-item dropdown-item--danger" @click="logout">
                   <span v-html="icons.logout" />
                   Sign out
@@ -340,6 +344,46 @@
             </button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <div class="modal-overlay" v-if="showMfaModal" @click.self="closeMfaModal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mfa-title">
+        <div class="modal-header">
+          <h2 id="mfa-title">{{ authStore.user?.mfa_enabled ? 'Two-factor authentication' : 'Enable MFA' }}</h2>
+          <button class="icon-btn" @click="closeMfaModal" aria-label="Close">
+            <span v-html="icons.close" />
+          </button>
+        </div>
+        <div class="modal-body">
+          <p v-if="authStore.user?.mfa_enabled" class="form-hint">
+            Two-factor authentication is active for this account. Keep your authenticator app available whenever you sign in.
+          </p>
+          <div v-else class="mfa-setup">
+            <p class="form-hint">MFA adds a one-time code from an authenticator app so a stolen password is not enough on its own.</p>
+            <div v-if="mfaSecret" class="mfa-box">
+              <label>Authenticator secret</label>
+              <div class="mfa-secret">{{ mfaSecret }}</div>
+              <small>Enter this secret manually or scan the code in your authenticator app.</small>
+            </div>
+            <div class="form-group">
+              <label for="mfa-code">Verification code</label>
+              <input id="mfa-code" v-model="mfaCodeInput" type="text" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code" />
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" @click="closeMfaModal">Close</button>
+          <button
+            v-if="!authStore.user?.mfa_enabled"
+            type="button"
+            class="btn btn-primary"
+            :disabled="mfaLoading || !mfaSecret || !/^\d{6}$/.test(mfaCodeInput.trim())"
+            @click="submitMfaSetup"
+          >
+            {{ mfaLoading ? 'Verifying…' : 'Enable MFA' }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -639,6 +683,50 @@ export default {
       }
     }
 
+    const showMfaModal = ref(false)
+    const mfaLoading = ref(false)
+    const mfaSecret = ref('')
+    const mfaCodeInput = ref('')
+
+    const openMfaModal = async () => {
+      dropdownOpen.value = false
+      showMfaModal.value = true
+      mfaCodeInput.value = ''
+      if (!authStore.user?.mfa_enabled) {
+        try {
+          const { data } = await axios.post('/api/auth/mfa/setup')
+          mfaSecret.value = data.secret || ''
+          if (data.message) toast.info(data.message)
+        } catch (e) {
+          toast.error(e.response?.data?.message || 'Could not prepare MFA setup.')
+          closeMfaModal()
+        }
+      } else {
+        mfaSecret.value = ''
+      }
+    }
+
+    const closeMfaModal = () => {
+      showMfaModal.value = false
+      mfaCodeInput.value = ''
+      mfaSecret.value = ''
+    }
+
+    const submitMfaSetup = async () => {
+      if (!mfaSecret.value || !/^\d{6}$/.test(mfaCodeInput.value.trim())) return
+      mfaLoading.value = true
+      try {
+        await axios.post('/api/auth/mfa/verify', { code: mfaCodeInput.value.trim() })
+        if (authStore.user) authStore.user.mfa_enabled = true
+        toast.success('Two-factor authentication is now enabled.')
+        closeMfaModal()
+      } catch (e) {
+        toast.error(e.response?.data?.message || 'Could not verify the MFA code.')
+      } finally {
+        mfaLoading.value = false
+      }
+    }
+
     const onResize = () => { isMobile.value = window.innerWidth < 768; if (window.innerWidth >= 768) mobileOpen.value = false }
 
     /* close dropdown/panel on outside click */
@@ -674,6 +762,8 @@ export default {
       openProfileModal, closeProfileModal, submitProfile, profilePhoneProblem, PHONE_MAX_DIGITS,
       passwordProblems, confirmMismatch, strengthLabel, strengthClass, strengthPercent,
       openPasswordModal, closePasswordModal, submitPassword,
+      showMfaModal, mfaLoading, mfaSecret, mfaCodeInput,
+      openMfaModal, closeMfaModal, submitMfaSetup,
       PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH,
       icons,
     }
@@ -1033,6 +1123,32 @@ export default {
 .policy-list { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: var(--gray-600); }
 .policy-list li { margin-bottom: 2px; }
 .form-hint--error { color: var(--danger, #b91c1c); }
+.mfa-box {
+  margin: 12px 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--brand-50, #f0fdfa);
+  border: 1px solid rgba(13, 148, 136, 0.2);
+}
+.mfa-box label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.mfa-secret {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-primary);
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--gray-200, #e5e7eb);
+  word-break: break-word;
+}
+.mfa-box small { display: block; margin-top: 8px; color: var(--text-muted); }
 
 /* Page wrap */
 .page-wrap {

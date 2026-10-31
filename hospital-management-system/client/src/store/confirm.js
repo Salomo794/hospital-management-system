@@ -5,7 +5,6 @@ const title = ref('Confirm')
 const message = ref('')
 const confirmText = ref('Confirm')
 const confirmClass = ref('btn-primary')
-const confirmIcon = ref('')
 let resolvePromise = null
 
 export function useConfirm() {
@@ -15,7 +14,6 @@ export function useConfirm() {
     message.value = opts.message || 'Are you sure?'
     confirmText.value = opts.confirmText || 'Confirm'
     confirmClass.value = opts.confirmClass || 'btn-primary'
-    confirmIcon.value = opts.icon || ''
     show.value = true
     return new Promise((resolve) => {
       resolvePromise = resolve
@@ -34,5 +32,5 @@ export function useConfirm() {
     resolvePromise = null
   }
 
-  return { show, title, message, confirmText, confirmClass, confirmIcon, confirm, handleConfirm, handleCancel }
+  return { show, title, message, confirmText, confirmClass, confirm, handleConfirm, handleCancel }
 }

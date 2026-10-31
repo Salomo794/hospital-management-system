@@ -207,7 +207,7 @@ async function run() {
     await connection.query(
       `INSERT INTO safety_reference
          (id, source, description, reference_name, reference_version, loaded_at, interaction_count)
-       VALUES (1,?,?,?,?,datetime('now'),?)`,
+       VALUES (1,?,?,?,?,CURRENT_TIMESTAMP,?)`,
       [source, options.description || null, options.name || null, options.version || null, valid.length]
     );
   });

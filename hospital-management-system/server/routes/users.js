@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { requireMfa } = require('../middleware/requireMfa');
 const { ApiError, asyncHandler, getPagination, parseInteger } = require('../utils/http');
 const { recordAudit, pick } = require('../utils/audit');
 const { readPatientDataInBulk, writePatientData } = require('../middleware/rateLimit');
@@ -10,16 +11,21 @@ const { phoneDigitsOnly, phoneProblem, normalisePhone } = require('../utils/phon
 const ROLES = ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'lab_technician'];
 const AUDITED_FIELDS = ['email', 'role', 'first_name', 'last_name', 'phone', 'is_active'];
 
-router.get('/', authenticate, authorize('admin'), readPatientDataInBulk, asyncHandler(async (req, res) => {
+router.get('/', authenticate, authorize('admin'), requireMfa(), readPatientDataInBulk, asyncHandler(async (req, res) => {
   const { page, limit, offset } = getPagination(req.query);
-  const { role, search } = req.query;
+  const { role, search, status } = req.query;
   if (role && !ROLES.includes(role)) throw new ApiError(400, 'Invalid role filter');
+  if (status && !['active', 'inactive'].includes(status)) throw new ApiError(400, 'Invalid status filter');
 
   let where = 'WHERE 1=1';
   const params = [];
   if (role) {
     where += ' AND role = ?';
     params.push(role);
+  }
+  if (status) {
+    where += ' AND is_active = ?';
+    params.push(status === 'active' ? 1 : 0);
   }
   if (search) {
     where += ' AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?)';
@@ -49,7 +55,7 @@ router.get('/:id', authenticate, asyncHandler(async (req, res) => {
   res.json(rows[0]);
 }));
 
-router.put('/:id', authenticate, authorize('admin'), writePatientData, asyncHandler(async (req, res) => {
+router.put('/:id', authenticate, authorize('admin'), requireMfa(), writePatientData, asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   const { first_name, last_name, phone, role, is_active } = req.body;
   if (role !== undefined && !ROLES.includes(role)) throw new ApiError(400, 'Invalid role');
@@ -101,7 +107,7 @@ router.put('/:id', authenticate, authorize('admin'), writePatientData, asyncHand
   res.json({ message: 'User updated successfully' });
 }));
 
-router.delete('/:id', authenticate, authorize('admin'), writePatientData, asyncHandler(async (req, res) => {
+router.delete('/:id', authenticate, authorize('admin'), requireMfa(), writePatientData, asyncHandler(async (req, res) => {
   const id = parseInteger(req.params.id, 'id', { min: 1 });
   if (id === req.user.id) throw new ApiError(400, 'You cannot deactivate your own account');
   const [existing] = await pool.query('SELECT * FROM users WHERE id = ?', [id]);

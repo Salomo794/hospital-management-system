@@ -83,8 +83,8 @@ async function loadOrderDetail(id) {
   const [orders] = await pool.query(
     `SELECT po.*, s.name AS supplier_name, s.contact_name AS supplier_contact,
             s.email AS supplier_email, s.phone AS supplier_phone, s.lead_time_days,
-            uo.first_name || ' ' || uo.last_name AS ordered_by_name,
-            ua.first_name || ' ' || ua.last_name AS approved_by_name
+            CONCAT(uo.first_name, ' ', uo.last_name) AS ordered_by_name,
+            CONCAT(ua.first_name, ' ', ua.last_name) AS approved_by_name
      FROM purchase_orders po
      JOIN suppliers s ON s.id = po.supplier_id
      LEFT JOIN users uo ON uo.id = po.ordered_by
@@ -261,12 +261,12 @@ router.get('/suggestions', authenticate, authorize(...PROCUREMENT_ROLES), asyncH
               SELECT SUM(it.quantity) FROM inventory_transactions it
               WHERE it.medicine_id = m.id
                 AND it.transaction_type = 'dispense'
-                AND date(it.created_at) >= date('now', '-30 days')
+                AND date(it.created_at) >= DATE_SUB(CURRENT_DATE, INTERVAL 30 DAY)
             ), 0) AS dispensed_30d
      FROM medicines m
      WHERE m.is_active = 1
        AND (m.stock_quantity <= m.min_stock_level
-         OR (m.expiry_date IS NOT NULL AND date(m.expiry_date) <= date('now', '+30 days')))
+         OR (m.expiry_date IS NOT NULL AND date(m.expiry_date) <= DATE_ADD(CURRENT_DATE, INTERVAL 30 DAY)))
      ORDER BY m.stock_quantity ASC, m.name ASC
      LIMIT 50`
   );
@@ -357,7 +357,7 @@ router.get('/orders', authenticate, authorize(...PROCUREMENT_ROLES), asyncHandle
     `SELECT po.id, po.uuid, po.order_number, po.status, po.total_amount, po.expected_date,
             po.submitted_at, po.approved_at, po.received_at, po.created_at,
             s.name AS supplier_name,
-            uo.first_name || ' ' || uo.last_name AS ordered_by_name,
+            CONCAT(uo.first_name, ' ', uo.last_name) AS ordered_by_name,
             (SELECT COUNT(*) FROM purchase_order_items poi WHERE poi.purchase_order_id = po.id) AS item_count,
             (SELECT COALESCE(SUM(poi.quantity_received), 0) FROM purchase_order_items poi
               WHERE poi.purchase_order_id = po.id) AS units_received
@@ -481,7 +481,7 @@ router.post('/orders/:id/submit', authenticate, authorize(...PROCUREMENT_ROLES),
     if (itemRows[0].count === 0) throw new ApiError(400, 'Cannot submit a purchase order with no items');
 
     await connection.query(
-      "UPDATE purchase_orders SET status = 'submitted', submitted_at = datetime('now') WHERE id = ?", [id]
+      "UPDATE purchase_orders SET status = 'submitted', submitted_at = CURRENT_TIMESTAMP WHERE id = ?", [id]
     );
     // Approvers are administrators. The raiser is deliberately excluded so the
     // notification cannot land back on the person who needs separation from it.
@@ -529,7 +529,7 @@ router.post('/orders/:id/approve', authenticate, authorize('admin'), asyncHandle
 
   await withTransaction(pool, async connection => {
     await connection.query(
-      `UPDATE purchase_orders SET status = 'approved', approved_by = ?, approved_at = datetime('now') WHERE id = ?`,
+      `UPDATE purchase_orders SET status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [req.user.id, id]
     );
     if (order.ordered_by) {
@@ -690,7 +690,7 @@ router.post('/orders/:id/receive', authenticate, authorize(...PROCUREMENT_ROLES)
     const fullyReceived = Number(after[0].received) >= Number(after[0].ordered);
     await connection.query(
       `UPDATE purchase_orders
-       SET status = ?, received_at = CASE WHEN ? THEN datetime('now') ELSE received_at END
+       SET status = ?, received_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE received_at END
        WHERE id = ?`,
       [fullyReceived ? 'received' : 'partially_received', fullyReceived ? 1 : 0, id]
     );
@@ -744,7 +744,7 @@ router.get('/summary', authenticate, authorize(...PROCUREMENT_ROLES), asyncHandl
   );
   const [expiring] = await pool.query(
     `SELECT COUNT(*) AS count FROM medicines
-     WHERE is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+30 days')`
+     WHERE is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= DATE_ADD(CURRENT_DATE, INTERVAL 30 DAY)`
   );
   const [activeSuppliers] = await pool.query('SELECT COUNT(*) AS count FROM suppliers WHERE is_active = 1');
 

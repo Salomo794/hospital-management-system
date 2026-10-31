@@ -74,7 +74,7 @@
         </table>
 
         <div v-else class="empty-state">
-          <div class="empty-icon">🧾</div>
+          <div class="empty-icon"><AppIcon name="receipt" :size="30" /></div>
           <h4>No bills found</h4>
           <p>No bills match your current filters. Try adjusting the filters or create a new bill.</p>
         </div>
@@ -199,6 +199,7 @@
 </template>
 
 <script>
+import AppIcon from '../../components/AppIcon.vue'
 import { ref, reactive, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { formatDate, formatCurrency, getStatusColor } from '../../utils/helpers'
@@ -206,6 +207,7 @@ import { fetchPaymentMethods } from '../../utils/paymentMethods'
 import { useToast } from '../../store/toast'
 
 export default {
+  components: { AppIcon },
   name: 'Billing',
   setup() {
     const toast = useToast()

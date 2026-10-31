@@ -307,7 +307,7 @@ async function seed() {
       for (const m of medicines) {
         const [medicineResult] = await conn.query(
           `INSERT INTO medicines (name, generic_name, category, unit_price, cost_price, stock_quantity, min_stock_level, unit, expiry_date, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, date('now', '+18 months'), 1)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(CURRENT_DATE, INTERVAL 18 MONTH), 1)`,
           [m.name, m.generic, m.category, m.price, m.cost, m.stock, m.min, m.unit]
         );
         await conn.query(
@@ -357,14 +357,20 @@ async function seed() {
           const date = new Date(Date.now() - (daysAgo * 24 * 60 * 60 * 1000));
           return date.toISOString().slice(0, 19).replace('T', ' ');
         };
-        const expectedExpr = (expectedDate === null || expectedDate === undefined)
-          ? 'NULL'
-          : `date('now', '${String(expectedDate).replace(/'/g, "''")}')`;
+        let expectedDateValue = null;
+        if (expectedDate !== null && expectedDate !== undefined) {
+          const offset = String(expectedDate).match(/^([+-])(\d+) days?$/);
+          if (!offset) throw new Error(`Unsupported demo expected date offset: ${expectedDate}`);
+          const delta = Number(offset[2]) * (offset[1] === '-' ? -1 : 1);
+          expectedDateValue = new Date(Date.now() + delta * 24 * 60 * 60 * 1000)
+            .toISOString()
+            .slice(0, 10);
+        }
         const [poResult] = await conn.query(
           `INSERT INTO purchase_orders
            (uuid, order_number, supplier_id, status, total_amount, ordered_by, approved_by,
             expected_date, notes, submitted_at, approved_at, received_at)
-           VALUES (?, ?, ?, ?, 0, ?, ?, ${expectedExpr}, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
           [
             randomUUID(),
             number,
@@ -372,6 +378,7 @@ async function seed() {
             status,
             doctorUserId1,
             received ? adminUserId : null,
+            expectedDateValue,
             note,
             submittedOffsetDays === null ? null : toSqlDateTime(submittedOffsetDays),
             received ? (approvedOffsetDays === null ? null : toSqlDateTime(approvedOffsetDays)) : null,

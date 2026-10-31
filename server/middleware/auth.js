@@ -22,7 +22,7 @@ const authenticate = async (req, res, next) => {
 
   try {
     const [rows] = await pool.query(
-      'SELECT id, uuid, email, role, first_name, last_name, is_active, password_changed_at FROM users WHERE id = ?',
+      'SELECT id, uuid, email, role, first_name, last_name, is_active, password_changed_at, mfa_enabled, mfa_secret FROM users WHERE id = ?',
       [decoded.id]
     );
     if (rows.length === 0 || !rows[0].is_active) {

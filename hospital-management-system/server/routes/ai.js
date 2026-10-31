@@ -5,8 +5,11 @@ const { authenticate } = require('../middleware/auth');
 const { FixedWindowRateLimiter } = require('../utils/rateLimiter');
 const { WARDS: WARD_CAPACITY } = require('../config/wards');
 const { zonedDate, zonedDayRange } = require('../config/time');
+const { generateAssistantReply, isAssistantConfigured } = require('../services/aiAssistant');
 
 const MAX_MESSAGE_LENGTH = 500;
+const MAX_HISTORY_MESSAGES = 12;
+const MAX_HISTORY_LENGTH = 4000;
 const CLINICAL_ROLES = ['admin', 'receptionist', 'doctor', 'nurse'];
 const OPERATIONS_ROLES = ['admin', 'receptionist', 'doctor', 'nurse'];
 const PHARMACY_ROLES = ['admin', 'pharmacist'];
@@ -79,6 +82,10 @@ function helpResponse(role) {
   return `I can help you with:\n\n${items.map((item, index) => `${index + 1}. ${item}`).join('\n')}\n\nJust type your question and I'll help you find the information.`;
 }
 
+router.get('/status', authenticate, (req, res) => {
+  res.json({ enabled: isAssistantConfigured() });
+});
+
 // AI Assistant endpoint - processes natural language queries
 router.post('/chat', authenticate, async (req, res) => {
   try {
@@ -88,6 +95,17 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     if (message.length > MAX_MESSAGE_LENGTH) {
       return res.status(400).json({ response: `Messages must be ${MAX_MESSAGE_LENGTH} characters or fewer.`, data: null });
+    }
+    const history = req.body?.history === undefined ? [] : req.body.history;
+    if (!Array.isArray(history) || history.length > MAX_HISTORY_MESSAGES ||
+        history.some(item =>
+          !item || !['user', 'assistant'].includes(item.role) ||
+          typeof item.content !== 'string' ||
+          !item.content.trim() ||
+          item.content.length > MAX_MESSAGE_LENGTH
+        ) ||
+        history.reduce((total, item) => total + item.content.length, 0) > MAX_HISTORY_LENGTH) {
+      return res.status(400).json({ response: 'Conversation history is invalid or too long. Start a new chat.', data: null });
     }
 
     const userLimit = chatByUser.consume(`user:${req.user.id}`);
@@ -100,6 +118,7 @@ router.post('/chat', authenticate, async (req, res) => {
     const hospitalOverviewRequested = lowerMsg.includes('overview') || lowerMsg.includes('command center') || lowerMsg.includes('live status') || lowerMsg.includes('hospital status');
     let response = '';
     let data = null;
+    let generalAi = false;
 
     // Patient search
     if (lowerMsg.includes('find patient') || lowerMsg.includes('search patient') || lowerMsg.includes('patient named')) {
@@ -116,7 +135,7 @@ router.post('/chat', authenticate, async (req, res) => {
         `SELECT id, mrn, first_name, last_name, date_of_birth, gender, phone, blood_type, status
          FROM patients
          WHERE first_name LIKE ? ESCAPE '!' OR last_name LIKE ? ESCAPE '!'
-            OR first_name || ' ' || last_name LIKE ? ESCAPE '!' OR mrn LIKE ? ESCAPE '!'
+            OR CONCAT(first_name, ' ', last_name) LIKE ? ESCAPE '!' OR mrn LIKE ? ESCAPE '!'
          LIMIT 5`,
         [patientSearch, patientSearch, patientSearch, patientSearch]
       );
@@ -170,10 +189,10 @@ router.post('/chat', authenticate, async (req, res) => {
       if (!OPERATIONS_ROLES.includes(req.user.role)) {
         return res.status(403).json({ response: 'You do not have permission to view appointment schedules.', data: null });
       }
-      const today = new Date().toISOString().split('T')[0];
+      const today = zonedDate();
       let query = `SELECT a.appointment_time, a.status, a.type,
-        p.first_name || ' ' || p.last_name as patient_name,
-        u.first_name || ' ' || u.last_name as doctor_name
+        CONCAT(p.first_name, ' ', p.last_name) as patient_name,
+        CONCAT(u.first_name, ' ', u.last_name) as doctor_name
         FROM appointments a JOIN patients p ON a.patient_id = p.id JOIN users u ON a.doctor_id = u.id
         WHERE a.appointment_date = ?`;
       const params = [today];
@@ -258,7 +277,7 @@ router.post('/chat', authenticate, async (req, res) => {
       if (!OPERATIONS_ROLES.includes(req.user.role)) {
         return res.status(403).json({ response: 'You do not have permission to view operational tasks.', data: null });
       }
-      const today = new Date().toISOString().split('T')[0];
+      const today = zonedDate();
       let appointmentCountQuery = "SELECT COUNT(*) as count FROM appointments WHERE status = 'scheduled' AND appointment_date >= ?";
       const appointmentCountParams = [today];
       if (req.user.role === 'doctor') {
@@ -387,7 +406,7 @@ router.post('/chat', authenticate, async (req, res) => {
           "SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1"
         );
         const [expiring] = await pool.query(
-          "SELECT COUNT(*) as count FROM medicines WHERE expiry_date >= date('now') AND expiry_date <= date('now', '+30 days') AND is_active = 1"
+          "SELECT COUNT(*) as count FROM medicines WHERE expiry_date >= CURRENT_DATE AND expiry_date <= DATE_ADD(CURRENT_DATE, INTERVAL 30 DAY) AND is_active = 1"
         );
         response = 'Pharmacy inventory overview:';
         data = {
@@ -461,7 +480,7 @@ router.post('/chat', authenticate, async (req, res) => {
         const [patients] = await pool.query(
           `SELECT first_name, last_name, mrn, allergies FROM patients
            WHERE first_name LIKE ? ESCAPE '!' OR last_name LIKE ? ESCAPE '!'
-              OR first_name || ' ' || last_name LIKE ? ESCAPE '!' OR mrn LIKE ? ESCAPE '!'
+              OR CONCAT(first_name, ' ', last_name) LIKE ? ESCAPE '!' OR mrn LIKE ? ESCAPE '!'
            LIMIT 5`,
           [patientSearch, patientSearch, patientSearch, patientSearch]
         );
@@ -518,7 +537,7 @@ router.post('/chat', authenticate, async (req, res) => {
       if (!OPERATIONS_ROLES.includes(req.user.role)) {
         return res.status(403).json({ response: 'You do not have permission to view the live hospital overview.', data: null });
       }
-      const today = new Date().toISOString().split('T')[0];
+      const today = zonedDate();
       let appointmentsTodayQuery = 'SELECT COUNT(*) as count FROM appointments WHERE appointment_date = ?';
       const appointmentsTodayParams = [today];
       if (req.user.role === 'doctor') {
@@ -526,7 +545,7 @@ router.post('/chat', authenticate, async (req, res) => {
         appointmentsTodayParams.push(req.user.id);
       }
       const [apptsToday] = await pool.query(appointmentsTodayQuery, appointmentsTodayParams);
-      const [waiting] = await pool.query("SELECT COUNT(*) as count FROM checkins WHERE checkin_date = date('now') AND status IN ('waiting','in_consultation')");
+      const [waiting] = await pool.query("SELECT COUNT(*) as count FROM checkins WHERE checkin_date = CURRENT_DATE AND status IN ('waiting','in_consultation')");
       const [admissions] = await pool.query("SELECT COUNT(*) as count FROM admissions WHERE status = 'admitted'");
       const overview = {
         appointments_today: apptsToday[0].count,
@@ -551,7 +570,7 @@ router.post('/chat', authenticate, async (req, res) => {
         return res.status(403).json({ response: 'You do not have permission to view operational forecasts.', data: null });
       }
       let historyQuery = `SELECT appointment_date, COUNT(*) as count FROM appointments
-        WHERE appointment_date >= date('now', '-42 days') AND appointment_date < date('now')`;
+        WHERE appointment_date >= DATE_SUB(CURRENT_DATE, INTERVAL 42 DAY) AND appointment_date < CURRENT_DATE`;
       const historyParams = [];
       if (req.user.role === 'doctor') {
         historyQuery += ' AND doctor_id = ?';
@@ -593,12 +612,25 @@ router.post('/chat', authenticate, async (req, res) => {
     }
     // Help / Default
     else {
-      response = helpResponse(req.user.role);
+      const generated = await generateAssistantReply(message, history);
+      generalAi = generated !== null;
+      response = generated || helpResponse(req.user.role);
     }
 
-    res.json({ response, data });
+    res.json({
+      response,
+      data,
+      general_ai: generalAi,
+      unverified: true,
+      disclaimer: 'AI-generated summary of system data; verify before clinical use.'
+    });
   } catch (error) {
     console.error('AI Error:', error);
+    if (error.message.startsWith('Could not reach the local Ollama') ||
+        error.message.startsWith('Local AI request timed out') ||
+        error.message.startsWith('Ollama returned')) {
+      return res.status(503).json({ response: error.message, data: null, general_ai: false });
+    }
     res.status(500).json({ response: 'Sorry, I encountered an error processing your request. Please try again.', data: null });
   }
 });

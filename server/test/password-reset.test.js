@@ -168,7 +168,7 @@ test('an expired token is refused', async () => {
   await requestReset(user.email);
   const token = tokenFromLastEmail();
   await pool.query(
-    "UPDATE password_reset_tokens SET expires_at = datetime('now', '-1 minute') WHERE token_hash = ?",
+    "UPDATE password_reset_tokens SET expires_at = DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 MINUTE) WHERE token_hash = ?",
     [hashToken(token)]
   );
   const expired = await request(app)

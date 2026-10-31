@@ -11,6 +11,7 @@ const { FixedWindowRateLimiter } = require('../utils/rateLimiter');
 const { recordAudit, pick } = require('../utils/audit');
 const { appTimezone } = require('../config/time');
 const { validatePassword } = require('../utils/passwordPolicy');
+const otplib = require('otplib');
 const { phoneDigitsOnly, phoneProblem, normalisePhone, PHONE_MIN_DIGITS, PHONE_MAX_DIGITS } = require('../utils/phone');
 const { withTransaction } = require('../utils/http');
 const mailer = require('../services/mailer');
@@ -47,12 +48,46 @@ const resetByIp = new FixedWindowRateLimiter({
 // cares to ask.
 const RESET_REQUESTED_MESSAGE =
   'If an account exists for that address, a password reset link is on its way.';
+const MFA_ISSUER = 'MediCare HMS';
+
+function buildStaffUserPayload(user) {
+  return {
+    id: user.id,
+    uuid: user.uuid,
+    email: user.email,
+    role: user.role,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    phone: user.phone,
+    mfa_enabled: Boolean(user.mfa_enabled),
+    timezone: appTimezone(),
+  };
+}
+
+function issueStaffToken(user) {
+  return jwt.sign(
+    { id: user.id, role: user.role, pwd: user.password_changed_at || '0', jti: randomUUID() },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRE || '7d' }
+  );
+}
 
 // bcrypt is deliberately slow, and this runs only when the account exists. The
 // same work is done for an unknown address so the two take comparable time.
 const DUMMY_HASH = '$2a$12$C6UzMDM.H6dfI/f/IKcEeO1sJ4wvnD5tL1lPqQ0kqXq0hZ9Z9Z9Z9Z';
 async function equalizeTiming(user) {
   await bcrypt.compare('not-a-real-password', user ? user.password : DUMMY_HASH);
+}
+
+async function verifyTotp(secret, code) {
+  if (!secret || !code) return false;
+  const normalised = String(code).replace(/\s+/g, '');
+  try {
+    const result = otplib.verifySync({ secret, token: normalised, window: 1 });
+    return Boolean(result && result.valid);
+  } catch {
+    return false;
+  }
 }
 
 router.post('/forgot-password', asyncHandler(async (req, res) => {
@@ -176,13 +211,13 @@ router.post('/reset-password', asyncHandler(async (req, res) => {
     // authenticate middleware rejects any token carrying an older one.
     const stamp = new Date().toISOString();
     await connection.query(
-      "UPDATE users SET password = ?, password_changed_at = ?, updated_at = datetime('now') WHERE id = ?",
+      "UPDATE users SET password = ?, password_changed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [hashedPassword, stamp, user.id]
     );
     await markUsed(connection, row.id);
     // Every other outstanding link for the account dies with this one.
     await connection.query(
-      "UPDATE password_reset_tokens SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL",
+      "UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE user_id = ? AND used_at IS NULL",
       [user.id]
     );
     await recordAudit({
@@ -250,9 +285,6 @@ router.post('/login', asyncHandler(async (req, res) => {
   const user = rows[0];
   const passwordMatches = user ? await bcrypt.compare(password, user.password) : false;
   if (!user || !passwordMatches || !user.is_active) {
-    // Recorded so repeated attempts against a valid account are visible, even
-    // though the response is deliberately identical for unknown and wrong
-    // credentials. No password is stored.
     await recordAudit({
       req,
       action: 'auth.login.failed',
@@ -260,8 +292,6 @@ router.post('/login', asyncHandler(async (req, res) => {
       recordId: user ? user.id : null,
       summary: `Failed login for ${email}`,
       after: { email, known_account: Boolean(user), account_active: user ? Boolean(user.is_active) : null },
-      // Attributed only when the account actually exists; an unknown email
-      // leaves the actor anonymous so the entry does not imply a real user.
       actor: user ? { userId: user.id, type: 'staff', label: user.email } : undefined,
     });
     throw new ApiError(user && !user.is_active ? 403 : 401, user && !user.is_active ? 'Account deactivated' : 'Invalid credentials');
@@ -269,54 +299,195 @@ router.post('/login', asyncHandler(async (req, res) => {
 
   loginByIdentifier.reset(identifierKey);
   loginByIp.reset(ipKey);
-  await pool.query("UPDATE users SET last_login = datetime('now') WHERE id = ?", [user.id]);
+
+  if (Number(user.mfa_enabled) === 1 && user.mfa_secret) {
+    const challenge = jwt.sign(
+      { sub: user.id, type: 'mfa_challenge', jti: randomUUID() },
+      process.env.JWT_SECRET,
+      { expiresIn: '5m' }
+    );
+    await recordAudit({
+      req,
+      action: 'auth.login.mfa_required',
+      table: 'users',
+      recordId: user.id,
+      summary: `${user.email} requires two-factor authentication`,
+      actor: { userId: user.id, type: 'staff', label: user.email },
+    });
+    return res.status(401).json({
+      message: 'Two-factor authentication is required.',
+      mfa_required: true,
+      challenge,
+      user: {
+        id: user.id,
+        uuid: user.uuid,
+        email: user.email,
+        role: user.role,
+        first_name: user.first_name,
+        last_name: user.last_name,
+      },
+    });
+  }
+
+  await pool.query("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?", [user.id]);
   await recordAudit({
     req,
     action: 'auth.login.succeeded',
     table: 'users',
     recordId: user.id,
     summary: `${user.email} signed in`,
-    // The authenticate middleware has not run on this route, so name the actor
-    // explicitly rather than leaving the entry unattributed.
     actor: { userId: user.id, type: 'staff', label: user.email },
   });
-  const token = jwt.sign(
-    // Carried so the middleware can tell a session issued before the current
-    // password from one issued after it. `0` for an account that has never
-    // changed its password, which is every account predating this field.
-    //
-    // jti is what makes two sign-ins two sessions. Without it every claim here is
-    // derived from the account and the clock, so signing in twice inside the same
-    // second produced byte-identical tokens: the same bearer credential on two
-    // devices, indistinguishable and individually unrevocable. It costs 36
-    // characters and makes a session addressable.
-    { id: user.id, role: user.role, pwd: user.password_changed_at || '0', jti: randomUUID() },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRE || '7d' }
-  );
-  res.json({
-    token,
-    user: {
-      id: user.id,
-      uuid: user.uuid,
-      email: user.email,
-      role: user.role,
-      first_name: user.first_name,
-      last_name: user.last_name,
-      phone: user.phone,
-      // Sent on sign-in so the client can render times correctly straight away.
-      timezone: appTimezone(),
-    },
+  const token = issueStaffToken(user);
+  res.json({ token, user: buildStaffUserPayload(user) });
+}));
+
+router.post('/login/mfa', asyncHandler(async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code : '';
+  const challenge = typeof req.body?.challenge === 'string' ? req.body.challenge : '';
+  if (!email || !code || !challenge) {
+    throw new ApiError(400, 'Email, challenge and MFA code are required');
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(challenge, process.env.JWT_SECRET);
+  } catch {
+    throw new ApiError(401, 'This MFA challenge is no longer valid. Please sign in again.');
+  }
+
+  if (decoded.type !== 'mfa_challenge' || !decoded.sub) {
+    throw new ApiError(401, 'This MFA challenge is invalid.');
+  }
+
+  const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+  const user = rows[0];
+  if (!user || user.id !== decoded.sub || !user.mfa_enabled || !user.mfa_secret) {
+    throw new ApiError(401, 'This account is not ready for multi-factor authentication.');
+  }
+
+  const isValid = await verifyTotp(user.mfa_secret, code);
+  if (!isValid) {
+    await recordAudit({
+      req,
+      action: 'auth.login.mfa_failed',
+      table: 'users',
+      recordId: user.id,
+      summary: `${user.email} submitted an invalid MFA code`,
+      actor: { userId: user.id, type: 'staff', label: user.email },
+    });
+    throw new ApiError(401, 'The MFA code is invalid or expired.');
+  }
+
+  await pool.query("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?", [user.id]);
+  await recordAudit({
+    req,
+    action: 'auth.login.succeeded',
+    table: 'users',
+    recordId: user.id,
+    summary: `${user.email} signed in with MFA verification`,
+    actor: { userId: user.id, type: 'staff', label: user.email },
   });
+  const token = issueStaffToken(user);
+  res.json({ token, user: buildStaffUserPayload(user) });
+}));
+
+router.post('/mfa/setup', authenticate, asyncHandler(async (req, res) => {
+  const [rows] = await pool.query(
+    'SELECT id, email, mfa_enabled, mfa_secret FROM users WHERE id = ?',
+    [req.user.id]
+  );
+  const user = rows[0];
+  if (!user) throw new ApiError(404, 'User not found');
+  if (Number(user.mfa_enabled) === 1 && user.mfa_secret) {
+    return res.json({ enabled: true, message: 'Two-factor authentication is already enabled.' });
+  }
+
+  const secret = otplib.generateSecret({ length: 20 });
+  const otpauthUrl = otplib.generateURI({ issuer: MFA_ISSUER, label: user.email, secret });
+  await pool.query('UPDATE users SET mfa_secret = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [secret, req.user.id]);
+  res.json({
+    enabled: false,
+    secret,
+    otpauth_url: otpauthUrl,
+    issuer: MFA_ISSUER,
+    message: 'Scan the code with your authenticator app, then verify once to finish setup.',
+  });
+}));
+
+router.post('/mfa/verify', authenticate, asyncHandler(async (req, res) => {
+  const code = typeof req.body?.code === 'string' ? req.body.code : '';
+  if (!code) throw new ApiError(400, 'A six-digit MFA code is required.');
+
+  const [rows] = await pool.query(
+    'SELECT id, email, mfa_secret, mfa_enabled FROM users WHERE id = ?',
+    [req.user.id]
+  );
+  const user = rows[0];
+  if (!user || !user.mfa_secret) {
+    throw new ApiError(400, 'Set up MFA first before verifying it.');
+  }
+
+  const isValid = await verifyTotp(user.mfa_secret, code);
+  if (!isValid) {
+    throw new ApiError(401, 'The MFA code is invalid.');
+  }
+
+  await pool.query(
+    "UPDATE users SET mfa_enabled = 1, mfa_verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    [req.user.id]
+  );
+  await recordAudit({
+    req,
+    action: 'auth.mfa.enabled',
+    table: 'users',
+    recordId: req.user.id,
+    summary: `${req.user.email} enabled two-factor authentication`,
+    actor: { userId: req.user.id, type: 'staff', label: req.user.email },
+  });
+  res.json({ enabled: true, message: 'Two-factor authentication is now enabled.' });
+}));
+
+router.post('/mfa/disable', authenticate, asyncHandler(async (req, res) => {
+  const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code : '';
+  if (!currentPassword || !code) throw new ApiError(400, 'Current password and MFA code are required');
+
+  const [rows] = await pool.query(
+    'SELECT id, email, password, mfa_secret, mfa_enabled FROM users WHERE id = ?',
+    [req.user.id]
+  );
+  const user = rows[0];
+  if (!user || !user.mfa_secret || Number(user.mfa_enabled) !== 1) {
+    throw new ApiError(400, 'MFA is not enabled for this account.');
+  }
+  if (!(await bcrypt.compare(currentPassword, user.password))) {
+    throw new ApiError(400, 'Current password is incorrect');
+  }
+  const isValid = await verifyTotp(user.mfa_secret, code);
+  if (!isValid) throw new ApiError(401, 'The MFA code is invalid.');
+
+  await pool.query(
+    "UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_verified_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    [req.user.id]
+  );
+  await recordAudit({
+    req,
+    action: 'auth.mfa.disabled',
+    table: 'users',
+    recordId: req.user.id,
+    summary: `${req.user.email} disabled two-factor authentication`,
+    actor: { userId: req.user.id, type: 'staff', label: req.user.email },
+  });
+  res.json({ enabled: false, message: 'Two-factor authentication has been disabled.' });
 }));
 
 router.get('/me', authenticate, asyncHandler(async (req, res) => {
   const [rows] = await pool.query(
-    'SELECT id, uuid, email, role, first_name, last_name, phone, avatar, created_at FROM users WHERE id = ?',
+    'SELECT id, uuid, email, role, first_name, last_name, phone, avatar, mfa_enabled, created_at FROM users WHERE id = ?',
     [req.user.id]
   );
-  // The client renders every timestamp in the hospital's timezone so two staff
-  // members never disagree about when something happened.
   res.json({ ...rows[0], timezone: appTimezone() });
 }));
 
@@ -408,7 +579,7 @@ router.put('/change-password', authenticate, asyncHandler(async (req, res) => {
   // device that is not this one. A user changing a password they believe was
   // exposed needs that guarantee, not just a working new password.
   await pool.query(
-    "UPDATE users SET password = ?, password_changed_at = ?, updated_at = datetime('now') WHERE id = ?",
+    "UPDATE users SET password = ?, password_changed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
     [hashedPassword, new Date().toISOString(), req.user.id]
   );
   await recordAudit({
