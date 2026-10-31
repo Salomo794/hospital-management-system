@@ -11,6 +11,7 @@
 #   docker run --rm -p 5000:5000 \
 #     -e NODE_ENV=production \
 #     -e DATABASE_URL=mysql://... \
+#     -e DATABASE_SSL=true \
 #     -e JWT_SECRET=... \
 #     -e CORS_ORIGINS=https://... \
 #     -e PUBLIC_URL=https://... \
@@ -50,9 +51,11 @@ COPY package.json package-lock.json ./
 COPY server/package.json server/package-lock.json ./server/
 RUN npm ci --omit=dev && npm --prefix server ci --omit=dev
 
-# Copy the application source.
+# Copy the application source and the client built in stage 1. `client/dist` is
+# not in the repository (and is excluded by .dockerignore), so it has to come from
+# the build stage rather than the build context.
 COPY server/ ./server/
-COPY client/dist ./client/dist
+COPY --from=client-builder /app/client/dist ./client/dist
 
 # Create a non-root user for the runtime process.
 RUN addgroup -S hms && adduser -S hms -G hms
@@ -69,4 +72,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 ENV NODE_ENV=production
 ENV PORT=5000
 
-CMD ["node", "server/index.js"]
+# Apply the schema (idempotent), then start. `exec` makes node PID 1 so it receives
+# SIGTERM and can shut down gracefully. To create the first administrator, run
+#   docker exec -it <container> node server/config/createAdmin.js
+CMD ["sh", "-c", "node server/config/setup.js && exec node server/index.js"]

@@ -26,10 +26,12 @@ function structuredLogger(req, res, next) {
   if (process.env.NODE_ENV !== 'production') return next();
 
   const start = process.hrtime.bigint();
-  const requestId =
-    req.header('X-Request-ID') || res.getHeader('X-Request-ID') || '';
 
   res.on('finish', () => {
+    // Read when the response finishes, not when the request arrives: the request
+    // id is assigned by a middleware that runs after this one, so reading it up
+    // front always logged an empty id for requests that did not send their own.
+    const requestId = req.requestId || res.getHeader('X-Request-ID') || '';
     const durationNs = process.hrtime.bigint() - start;
     const durationMs = Number(durationNs / 1_000_000n);
 

@@ -146,6 +146,7 @@ Refusing in production is the point. Silently not sending would leave a user wai
 | `npm run client` | Run only the client |
 | `npm run db:setup` | Create/apply database schema and indexes |
 | `npm run db:seed` | Load demo fixtures |
+| `npm run admin:create` | Create the first administrator on a fresh (production) database |
 | `npm run db:backup` | Take a verified backup of the database |
 | `npm run db:interactions` | Load a real drug-interaction dataset |
 | `npm run build` | Build the production client |
@@ -418,6 +419,10 @@ NODE_ENV=production npm run server
 ```
 
 Use HTTPS, a strong `JWT_SECRET`, an explicit `CORS_ORIGINS` allowlist, encrypted database backups, and a process supervisor. MySQL credentials and `.env` files are intentionally excluded from Git.
+
+A production database starts empty and demo seeding is refused, so create the first administrator once with `npm run admin:create` (it prompts for a password; it never takes one on the command line). Production also requires MySQL over TLS (`DATABASE_SSL=true`).
+
+For step-by-step instructions covering Render, a self-hosted Docker Compose stack with automatic HTTPS (`docker-compose.yml`), and Vercel + Render, plus the go-live checklist and troubleshooting, see [docs/deployment.md](docs/deployment.md).
 
 ## Known limitations
 

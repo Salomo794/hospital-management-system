@@ -17,6 +17,7 @@
     "db:setup": "node server/config/setup.js",
     "db:seed": "node server/config/seed.js",
     "db:backup": "node server/config/mysqlBackup.js",
+    "admin:create": "node server/config/createAdmin.js",
     "db:interactions": "node server/config/interactions.js",
     "build": "npm run build --prefix client",
     "lint": "npm run lint --prefix client",

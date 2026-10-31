@@ -1,0 +1,22 @@
+# Caddy for the docker-compose deployment (see docker-compose.yml).
+#
+# Caddy obtains and renews the HTTPS certificate itself and forwards everything to
+# the HMS container, which serves both the API and the built client. HMS_DOMAIN and
+# ACME_EMAIL come from deploy/caddy.env. The domain's DNS must already point at
+# this machine, and ports 80 and 443 must be reachable, or certificate issuance fails.
+{
+	email {$ACME_EMAIL}
+}
+
+{$HMS_DOMAIN} {
+	encode zstd gzip
+
+	# X-Forwarded-For/-Proto are set by Caddy; the app trusts one proxy hop.
+	reverse_proxy app:5000
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+}
