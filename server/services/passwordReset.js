@@ -44,8 +44,8 @@ async function issueToken(connection, { userId, ipAddress = null }) {
   const token = generateToken();
   const [result] = await connection.query(
     `INSERT INTO password_reset_tokens (uuid, user_id, token_hash, expires_at, ip_address)
-     VALUES (?, ?, ?, ?, ?)`,
-    [randomUUID(), userId, hashToken(token), expiryStamp(), ipAddress]
+     VALUES (?, ?, ?, ${EXPIRY_INTERVAL_SQL}, ?)`,
+    [randomUUID(), userId, hashToken(token), EXPIRY_MINUTES, ipAddress]
   );
   return { token, tokenId: result.insertId };
 }
