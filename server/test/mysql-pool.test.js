@@ -203,25 +203,43 @@ test('mysqlPool: errors are sanitised and do not leak SQL or values', async t =>
   await probeDone;
   if (!available) return t.skip(skipReason);
 
+  // MySQL's raw duplicate-key message embeds the offending value
+  // ("Duplicate entry 'patient-hiv-status' for key 'PRIMARY'"), so this is a
+  // real leak path: the sanitised error must not carry patient data.
   await withTable(t, 'id INT PRIMARY KEY, secret VARCHAR(64)', async table => {
+    const secret = 'patient-hiv-status';
+    await mysqlPool.query(`INSERT INTO \`${table}\` (id, secret) VALUES (?, ?)`, [1, secret]);
+
     await assert.rejects(
-      () => mysqlPool.query(`INSERT INTO \`${table}\` (id, secret) VALUES (?, ?)`, [1, 'patient-hiv-status']),
+      () => mysqlPool.query(`INSERT INTO \`${table}\` (id, secret) VALUES (?, ?)`, [1, 'another']),
       error => {
-        assert.strictEqual(error.code, 'ER_NO_SUCH_TABLE', 'missing table maps to a stable code');
+        assert.strictEqual(error.code, 'ER_DUP_ENTRY', 'stable code for callers to branch on');
+        assert.strictEqual(error.isUniqueViolation, true);
         const message = String(error.message);
-        assert.ok(!message.includes('patient-hiv-status'), 'message must not leak parameter values');
-        assert.ok(!message.includes('secret'), 'message must not echo the column list');
+        assert.ok(!message.includes(secret), 'message must not leak stored parameter values');
+        assert.ok(!message.includes('another'), 'message must not leak submitted parameter values');
+        assert.ok(!/INSERT INTO/i.test(message), 'message must not echo the SQL statement');
         return true;
       }
     );
   });
 
-  // An unknown table must not surface credentials either.
+  // A missing table still maps to a stable code without echoing the SQL.
+  await assert.rejects(
+    () => mysqlPool.query('SELECT * FROM `definitely_not_a_table` WHERE x = ?', ['secret-value']),
+    error => {
+      assert.strictEqual(error.code, 'ER_NO_SUCH_TABLE');
+      assert.ok(!String(error.message).includes('secret-value'), 'no parameter leak');
+      return true;
+    }
+  );
+
+  // No credentials may ever appear in a serialised error.
   await assert.rejects(
     () => mysqlPool.query('SELECT * FROM `definitely_not_a_table`'),
     error => {
-      const serialized = JSON.stringify({ message: error.message, code: error.code });
-      assert.ok(!/password|hms_local_dev_pw/i.test(serialized), 'no credentials in errors');
+      const serialized = JSON.stringify({ message: error.message, code: error.code, errno: error.errno });
+      assert.ok(!/hms_local_dev_pw|password=/i.test(serialized), 'no credentials in errors');
       return true;
     }
   );
