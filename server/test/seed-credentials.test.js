@@ -10,10 +10,14 @@ const { spawnSync } = require('node:child_process');
 // CI, where logs are public. These tests execute the real script end to end,
 // because the risk lives in exactly what the process prints to stdout.
 
+const { dropTestDatabase } = require('./helpers/mysqlTestDatabase');
+
 const serverDirectory = path.join(__dirname, '..');
 const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'hms-seed-test-'));
+const createdDatabases = [];
 
-after(() => {
+after(async () => {
+  for (const name of createdDatabases) await dropTestDatabase(name);
   fs.rmSync(tempDirectory, { recursive: true, force: true });
 });
 
@@ -22,13 +26,18 @@ after(() => {
 const PORTAL_CREDENTIAL_PATTERN = /MRN-[0-9A-F]{8}\s*:\s*\d{6}/;
 
 function runScript(scriptName, extraEnv = {}) {
-  const dbPath = path.join(tempDirectory, `seed-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
+  // Every run needs a genuinely empty database, because the seed script refuses
+  // to add demo fixtures to existing data. MySQL replaces the throw-away SQLite
+  // file this used to create; the schema is dropped again in after().
+  const databaseName = `hms_test_seed_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`.slice(0, 64);
+  createdDatabases.push(databaseName);
   const env = {
     ...process.env,
-    DB_PATH: dbPath,
+    DB_NAME: databaseName,
     JWT_SECRET: 'test-secret-that-is-at-least-32-characters-long',
     NODE_ENV: 'test',
   };
+  delete env.DB_PATH;
   // An explicit empty value must win over anything inherited from the caller,
   // otherwise these assertions could pass or fail based on the outer shell.
   delete env.SHOW_DEMO_CREDENTIALS;
