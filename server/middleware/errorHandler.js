@@ -1,4 +1,5 @@
 const { ApiError } = require('../utils/http');
+const { isConstraintError, isUniqueViolation } = require('../utils/dbErrors');
 
 function notFound(req, res) {
   res.status(404).json({ message: 'API route not found' });
@@ -23,12 +24,12 @@ function errorHandler(error, req, res, next) {
     return res.status(error.status).json(payload);
   }
 
-  if (String(error.code || '').startsWith('SQLITE_CONSTRAINT')) {
+  if (isConstraintError(error)) {
     const message = String(error.message || '');
     let friendly = 'The request conflicts with existing data';
-    if (/UNIQUE/i.test(message)) friendly = 'A record with these values already exists';
-    else if (/FOREIGN KEY/i.test(message)) friendly = 'A related record was not found';
-    else if (/CHECK/i.test(message)) friendly = 'One or more values are invalid';
+    if (isUniqueViolation(error)) friendly = 'A record with these values already exists';
+    else if (/foreign key/i.test(message)) friendly = 'A related record was not found or is still in use';
+    else if (/check/i.test(message)) friendly = 'One or more values are invalid';
     return res.status(409).json({ message: friendly });
   }
 
