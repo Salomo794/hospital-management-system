@@ -2,7 +2,7 @@
 -- Engine InnoDB, utf8mb4. Applied idempotently by config/setup.js.
 
 CREATE TABLE IF NOT EXISTS users (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       uuid VARCHAR(255) UNIQUE NOT NULL,
       email VARCHAR(255) UNIQUE NOT NULL,
       password TEXT NOT NULL,
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       uuid VARCHAR(255) UNIQUE NOT NULL,
       user_id INT NOT NULL,
       token_hash VARCHAR(255) UNIQUE NOT NULL,
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS patients (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       uuid VARCHAR(255) UNIQUE NOT NULL,
       mrn VARCHAR(255) UNIQUE NOT NULL,
       first_name TEXT NOT NULL,
@@ -62,14 +62,14 @@ CREATE TABLE IF NOT EXISTS patients (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS specialties (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       name VARCHAR(255) UNIQUE NOT NULL,
       description TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS doctor_profiles (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       user_id INT NOT NULL UNIQUE,
       specialty_id INT,
       license_number VARCHAR(255) UNIQUE NOT NULL,
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS doctor_profiles (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS appointments (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       uuid VARCHAR(255) UNIQUE NOT NULL,
       appointment_number VARCHAR(255) UNIQUE NOT NULL,
       patient_id INT NOT NULL,
@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS appointments (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS medical_records (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       uuid VARCHAR(255) UNIQUE NOT NULL,
       patient_id INT NOT NULL,
       doctor_id INT NOT NULL,
@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS medical_records (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS medicines (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       name TEXT NOT NULL,
       generic_name TEXT,
       category TEXT,
@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS medicines (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS prescriptions (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       uuid VARCHAR(255) UNIQUE NOT NULL,
       prescription_number VARCHAR(255) UNIQUE NOT NULL,
       medical_record_id INT,
@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS prescriptions (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS prescription_items (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       prescription_id INT NOT NULL,
       medicine_id INT NOT NULL,
       dosage TEXT NOT NULL,
@@ -181,7 +181,7 @@ CREATE TABLE IF NOT EXISTS prescription_items (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS lab_tests (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       name TEXT NOT NULL,
       category TEXT,
       description TEXT,
@@ -194,7 +194,7 @@ CREATE TABLE IF NOT EXISTS lab_tests (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS lab_orders (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       uuid VARCHAR(255) UNIQUE NOT NULL,
       order_number VARCHAR(255) UNIQUE NOT NULL,
       patient_id INT NOT NULL,
@@ -212,7 +212,7 @@ CREATE TABLE IF NOT EXISTS lab_orders (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS lab_order_items (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       lab_order_id INT NOT NULL,
       lab_test_id INT NOT NULL,
       result_value TEXT,
@@ -229,7 +229,7 @@ CREATE TABLE IF NOT EXISTS lab_order_items (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS bills (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       uuid VARCHAR(255) UNIQUE NOT NULL,
       bill_number VARCHAR(255) UNIQUE NOT NULL,
       patient_id INT NOT NULL,
@@ -253,7 +253,7 @@ CREATE TABLE IF NOT EXISTS bills (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS bill_items (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       bill_id INT NOT NULL,
       description TEXT NOT NULL,
       category TEXT NOT NULL,
@@ -266,7 +266,7 @@ CREATE TABLE IF NOT EXISTS bill_items (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS payments (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       uuid VARCHAR(255) UNIQUE NOT NULL,
       payment_number VARCHAR(255) UNIQUE NOT NULL,
       bill_id INT NOT NULL,
@@ -289,7 +289,7 @@ CREATE TABLE IF NOT EXISTS payments (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS payment_refunds (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       uuid VARCHAR(255) UNIQUE NOT NULL,
       refund_number VARCHAR(255) UNIQUE NOT NULL,
       payment_id INT NOT NULL,
@@ -308,7 +308,7 @@ CREATE TABLE IF NOT EXISTS payment_refunds (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS notifications (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       user_id INT,
       type VARCHAR(64) DEFAULT 'system',
       title TEXT NOT NULL,
@@ -320,7 +320,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS audit_log (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       user_id INT,
       actor_type VARCHAR(64) NOT NULL DEFAULT 'staff',
       actor_label TEXT,
@@ -336,7 +336,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS inventory_transactions (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       medicine_id INT NOT NULL,
       prescription_item_id INT,
       transaction_type TEXT NOT NULL,
@@ -351,7 +351,7 @@ CREATE TABLE IF NOT EXISTS inventory_transactions (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS suppliers (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       name VARCHAR(255) UNIQUE NOT NULL,
       contact_name TEXT,
       email TEXT,
@@ -365,7 +365,7 @@ CREATE TABLE IF NOT EXISTS suppliers (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS purchase_orders (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       uuid VARCHAR(255) UNIQUE NOT NULL,
       order_number VARCHAR(255) UNIQUE NOT NULL,
       supplier_id INT NOT NULL,
@@ -387,7 +387,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS purchase_order_items (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       purchase_order_id INT NOT NULL,
       medicine_id INT NOT NULL,
       quantity INT NOT NULL CHECK(quantity > 0),
@@ -399,7 +399,7 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS admissions (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       uuid VARCHAR(255) UNIQUE NOT NULL,
       admission_number VARCHAR(255) UNIQUE NOT NULL,
       patient_id INT NOT NULL,
@@ -421,7 +421,7 @@ CREATE TABLE IF NOT EXISTS admissions (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS drug_interactions (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       medicine_a_id INT NOT NULL,
       medicine_b_id INT NOT NULL,
       severity TEXT NOT NULL CHECK(severity IN ('mild','moderate','severe','contraindicated')),
@@ -433,7 +433,7 @@ CREATE TABLE IF NOT EXISTS drug_interactions (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS checkins (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       uuid VARCHAR(255) UNIQUE NOT NULL,
       patient_id INT NOT NULL,
       appointment_id INT,
@@ -448,7 +448,7 @@ CREATE TABLE IF NOT EXISTS checkins (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS checkin_tokens (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       patient_id INT NOT NULL,
       appointment_id INT,
       token_hash TEXT NOT NULL UNIQUE,
