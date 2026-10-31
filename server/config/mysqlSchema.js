@@ -317,6 +317,47 @@ const CHECKIN_GUARD_TRIGGERS = [
 ];
 
 /**
+ * `safety_reference` is a singleton table: exactly one row (id = 1) describes the
+ * loaded interaction reference set.
+ *
+ * SQLite expressed this as `CHECK(id = 1)`, which cannot be ported: MariaDB
+ * rejects a CHECK constraint that mentions an AUTO_INCREMENT column
+ * (`ERROR 1901: Function or expression 'AUTO_INCREMENT' cannot be used in the
+ * CHECK clause`), and that blocks the whole schema apply. A BEFORE INSERT
+ * trigger keeps the same guarantee while leaving the id an ordinary
+ * auto-increment primary key, so the documented upsert
+ * (`INSERT ... (id, ...) VALUES (1, ...) ON DUPLICATE KEY UPDATE`) still works.
+ * MySQL assigns the auto-increment value before the trigger body runs, which is
+ * why an insert that omits the id is rejected instead of silently adding row 2.
+ */
+const SAFETY_REFERENCE_TRIGGERS = [
+  {
+    name: 'safety_reference_single_row_before_insert',
+    sql: `CREATE TRIGGER safety_reference_single_row_before_insert
+          BEFORE INSERT ON safety_reference
+          FOR EACH ROW
+          BEGIN
+            IF NEW.id IS NULL OR NEW.id <> 1 THEN
+              SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'safety_reference is a singleton table; only id = 1 is allowed';
+            END IF;
+          END`,
+  },
+  {
+    name: 'safety_reference_single_row_before_update',
+    sql: `CREATE TRIGGER safety_reference_single_row_before_update
+          BEFORE UPDATE ON safety_reference
+          FOR EACH ROW
+          BEGIN
+            IF NEW.id <> 1 THEN
+              SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'safety_reference is a singleton table; id cannot change';
+            END IF;
+          END`,
+  },
+];
+
+/**
  * Create the configured database if it does not exist yet.
  *
  * The pool connects to a specific database, so on a fresh server the very first
