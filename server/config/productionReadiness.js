@@ -68,8 +68,38 @@ function productionReadinessErrors(env = process.env) {
     errors.push('BACKUP_ENCRYPTION_KEY must be a non-placeholder secret of at least 16 characters, stored outside the repository.');
   }
 
-  if (String(env.DB_PATH || '').trim() === ':memory:') {
-    errors.push('DB_PATH must point to a persistent database file in production.');
+  // MySQL is the only supported engine, so production must point at a real,
+  // persistent server rather than an in-memory or loopback-only test database.
+  const dbHost = String(env.DB_HOST || '').trim();
+  if (!dbHost) {
+    errors.push('DB_HOST must name the MySQL server in production.');
+  } else if (dbHost === 'localhost' || dbHost === '127.0.0.1' || dbHost === '::1') {
+    errors.push('DB_HOST must point at the managed MySQL server, not this process\'s loopback address.');
+  }
+
+  const dbName = String(env.DB_NAME || '').trim();
+  if (!dbName) {
+    errors.push('DB_NAME must name the production MySQL database.');
+  } else if (dbName === 'test' || dbName === 'bootstrap') {
+    errors.push(`DB_NAME must not be the throw-away "${dbName}" database in production.`);
+  }
+
+  if (!String(env.DB_USER || '').trim()) {
+    errors.push('DB_USER must be configured for the production MySQL connection.');
+  }
+
+  const dbPassword = String(env.DB_PASSWORD || '');
+  if (!dbPassword.trim()) {
+    errors.push('DB_PASSWORD must be configured; the production database must not accept a passwordless account.');
+  }
+
+  const dbPort = String(env.DB_PORT || '').trim();
+  if (dbPort && !/^\d+$/.test(dbPort)) {
+    errors.push('DB_PORT must be a numeric TCP port.');
+  }
+
+  if (String(env.DB_PATH || '').trim()) {
+    errors.push('DB_PATH is a SQLite setting and must be removed now that MySQL is the only database.');
   }
 
   return errors;
