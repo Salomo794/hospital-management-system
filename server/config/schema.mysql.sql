@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS appointments (
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
       FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT,
+      FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS medical_records (
@@ -225,7 +225,7 @@ CREATE TABLE IF NOT EXISTS lab_order_items (
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (lab_order_id) REFERENCES lab_orders(id) ON DELETE CASCADE,
       FOREIGN KEY (lab_test_id) REFERENCES lab_tests(id) ON DELETE CASCADE,
-      FOREIGN KEY (technician_id) REFERENCES users(id) ON DELETE RESTRICT,
+      FOREIGN KEY (technician_id) REFERENCES users(id) ON DELETE RESTRICT
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS bills (
@@ -249,7 +249,7 @@ CREATE TABLE IF NOT EXISTS bills (
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
       FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL,
-      FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT,
+      FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS bill_items (
@@ -285,7 +285,7 @@ CREATE TABLE IF NOT EXISTS payments (
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
       FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
-      FOREIGN KEY (received_by) REFERENCES users(id) ON DELETE RESTRICT,
+      FOREIGN KEY (received_by) REFERENCES users(id) ON DELETE RESTRICT
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS payment_refunds (
@@ -304,7 +304,7 @@ CREATE TABLE IF NOT EXISTS payment_refunds (
       FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE,
       FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
       FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
-      FOREIGN KEY (refunded_by) REFERENCES users(id) ON DELETE RESTRICT,
+      FOREIGN KEY (refunded_by) REFERENCES users(id) ON DELETE RESTRICT
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS notifications (
@@ -347,7 +347,7 @@ CREATE TABLE IF NOT EXISTS inventory_transactions (
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (medicine_id) REFERENCES medicines(id) ON DELETE CASCADE,
       FOREIGN KEY (prescription_item_id) REFERENCES prescription_items(id) ON DELETE SET NULL,
-      FOREIGN KEY (performed_by) REFERENCES users(id) ON DELETE RESTRICT,
+      FOREIGN KEY (performed_by) REFERENCES users(id) ON DELETE RESTRICT
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS suppliers (
