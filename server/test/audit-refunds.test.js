@@ -6,8 +6,11 @@ const path = require('path');
 const request = require('supertest');
 
 const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'hms-audit-test-'));
-const dbPath = path.join(tempDirectory, 'hospital.test.db');
-process.env.DB_PATH = dbPath;
+const { useTestDatabase, dropTestDatabase } = require('./helpers/mysqlTestDatabase');
+
+// Each test file owns a private MySQL schema (hms_test_*) and never touches a
+// shared or production database.
+const testDatabase = useTestDatabase(__filename);
 process.env.JWT_SECRET = 'test-secret-that-is-at-least-32-characters-long';
 process.env.NODE_ENV = 'test';
 process.env.ALLOW_SIMULATED_PAYMENTS = 'true';
@@ -36,9 +39,7 @@ before(async () => {
 
 after(async () => {
   pool.close();
-  for (const suffix of ['', '-shm', '-wal']) {
-    fs.rmSync(`${dbPath}${suffix}`, { force: true });
-  }
+  await dropTestDatabase(testDatabase);
   fs.rmSync(tempDirectory, { recursive: true, force: true });
 });
 
