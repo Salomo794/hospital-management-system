@@ -143,7 +143,7 @@ test('a patient can be taken from registration to a settled bill, with every rol
 
   // ── Doctor prescribes; pharmacist dispenses and stock falls ──────────────
   const [stocked] = await pool.query(
-    "SELECT id, stock_quantity FROM medicines WHERE is_active = 1 AND stock_quantity >= 20 AND (expiry_date IS NULL OR expiry_date > date('now')) ORDER BY id LIMIT 1"
+    "SELECT id, stock_quantity FROM medicines WHERE is_active = 1 AND stock_quantity >= 20 AND (expiry_date IS NULL OR expiry_date > CURDATE()) ORDER BY id LIMIT 1"
   );
   assert.ok(stocked.length, 'the seed data has an in-date medicine with stock');
   const medicine = stocked[0];

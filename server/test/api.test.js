@@ -1289,7 +1289,7 @@ test('fully dispensed prescriptions are excluded from current-medication safety 
   await pool.query(
     `INSERT INTO prescription_items
      (prescription_id, medicine_id, dosage, frequency, quantity, dispensed_quantity, dispensed, dispensed_date)
-     VALUES (?, ?, '5mg', 'Once daily', 1, 1, 1, datetime('now'))`,
+     VALUES (?, ?, '5mg', 'Once daily', 1, 1, 1, NOW())`,
     [prescription.insertId, warfarin.id]
   );
 
@@ -1496,7 +1496,7 @@ test('a staff-issued single-use token authorises check-in without leaking patien
   assert.ok(used[0].used_at, 'the token must be consumed');
 
   const [checkins] = await pool.query(
-    "SELECT id, qr_token FROM checkins WHERE patient_id = ? AND checkin_date = date('now')",
+    "SELECT id, qr_token FROM checkins WHERE patient_id = ? AND checkin_date = CURDATE()",
     [patient.id]
   );
   assert.equal(checkins.length, 1);
@@ -1674,7 +1674,7 @@ test('a signed-in patient can check themselves in and reception keeps a direct w
     .send({ patient_id: patient.id })
     .expect(200);
   const [secondCheckins] = await pool.query(
-    "SELECT patient_id FROM checkins WHERE checkin_date = date('now') ORDER BY id DESC LIMIT 1"
+    "SELECT patient_id FROM checkins WHERE checkin_date = CURDATE() ORDER BY id DESC LIMIT 1"
   );
   assert.equal(secondCheckins[0].patient_id, second.patient.id, 'the session, not the body, decides who is checked in');
 
