@@ -408,7 +408,6 @@ Use HTTPS, a strong `JWT_SECRET`, an explicit `CORS_ORIGINS` allowlist, encrypte
 
 ## Known limitations
 
-- The folder `hospital-management-system/` inside this repository is a stale duplicate of the root application. Nothing in CI, `render.yaml`, `vercel.json` or `start-hms.cmd` references it. It is retained pending approval to remove it.
 - Drug-interaction screening ships with a small demonstration dataset. Production refuses to start with it unless `ALLOW_DEMO_INTERACTIONS=true` is set. A licensed, maintained dataset must be loaded with `npm run db:interactions` and clinically reviewed before use.
 - Multi-factor authentication is not implemented for admin/doctor accounts despite the schema having `user_mfa` tables. Account lockout is rate-limiter based only.
 - The UI is English only; Kinyarwanda and French are not yet supported. Currency formatting is not yet one configurable setting.

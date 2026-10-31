@@ -1,5 +1,0 @@
-# Normalize text files to LF by default.
-* text=auto eol=lf
-
-# Windows launcher must retain CRLF line endings.
-/start-hms.cmd text eol=crlf
