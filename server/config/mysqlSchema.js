@@ -563,6 +563,7 @@ async function applySchema({ log = () => {}, createDatabase = true } = {}) {
   if (createDatabase) await ensureDatabase();
   await applyBaseSchema(log);
   await assertNoConflictingRows();
+  await applyAddedColumns(log);
   await applyDerivedUniqueKeys(log);
   await applySecondaryIndexes(log);
   await applyUpdatedAtTriggers(log);
