@@ -427,6 +427,10 @@ CREATE TABLE IF NOT EXISTS drug_interactions (
       severity TEXT NOT NULL CHECK(severity IN ('mild','moderate','severe','contraindicated')),
       description TEXT,
       clinical_management TEXT,
+      -- Provenance of the row: the dataset an imported interaction came from.
+      -- The importer writes it and the safety-provenance reader groups by it, so
+      -- the column has to exist in the schema rather than only in code.
+      source VARCHAR(255) DEFAULT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (medicine_a_id) REFERENCES medicines(id) ON DELETE CASCADE,
       FOREIGN KEY (medicine_b_id) REFERENCES medicines(id) ON DELETE CASCADE
