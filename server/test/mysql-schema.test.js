@@ -16,11 +16,15 @@ const path = require('node:path');
 const schemaPath = path.join(__dirname, '..', 'config', 'schema.mysql.sql');
 const schema = fs.readFileSync(schemaPath, 'utf8');
 
-/** Split the file into individual CREATE TABLE statements. */
+/**
+ * Split the file into individual CREATE TABLE statements. Leading `--` comment
+ * lines must be stripped first: the file header sits directly above the first
+ * table, and forgetting that silently drops the `users` table from the parse.
+ */
 function createTableStatements(sql) {
   return sql
     .split(/;\s*(?:\r?\n|$)/)
-    .map((s) => s.trim())
+    .map((s) => s.replace(/^\s*(?:--[^\n]*\n\s*)*/, '').trim())
     .filter((s) => /^CREATE TABLE/i.test(s));
 }
 
