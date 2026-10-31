@@ -460,3 +460,17 @@ CREATE TABLE IF NOT EXISTS checkin_tokens (
       FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
       FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tracks which curated drug-interaction reference dataset is loaded. This table
+-- used to be created only by the old SQLite migrate(); it is part of the schema
+-- of record now. The CHECK keeps it a genuine single-row settings table.
+CREATE TABLE IF NOT EXISTS safety_reference (
+      id INT NOT NULL PRIMARY KEY CHECK(id = 1),
+      source TEXT NOT NULL,
+      description TEXT,
+      reference_name TEXT,
+      reference_version TEXT,
+      loaded_at TEXT,
+      loaded_by INT,
+      interaction_count INT NOT NULL DEFAULT 0
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
