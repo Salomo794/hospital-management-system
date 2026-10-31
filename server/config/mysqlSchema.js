@@ -31,8 +31,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const mysql = require('mysql2/promise');
-const { query, config } = require('./mysqlPool');
+const { query, config, createBootstrapConnection } = require('./mysqlPool');
 
 const SCHEMA_FILE = path.join(__dirname, 'schema.mysql.sql');
 
