@@ -58,11 +58,15 @@ function getPool() {
 }
 
 async function assertDemoFixtureTablesEmpty(conn) {
-  const [tableRows] = await conn.query("SELECT name FROM sqlite_master WHERE type = 'table'");
+  const [tableRows] = await conn.query(
+    `SELECT TABLE_NAME AS name FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'`
+  );
   const existingTables = new Set(tableRows.map(row => row.name));
   const populatedTables = [];
   for (const table of DEMO_FIXTURE_TABLES.filter(name => existingTables.has(name))) {
-    const [rows] = await conn.query(`SELECT COUNT(*) AS count FROM "${table}"`);
+    // Identifiers cannot be parameterised; the names come from the constant list above.
+    const [rows] = await conn.query(`SELECT COUNT(*) AS count FROM \`${table}\``);
     const count = Number(rows[0]?.count || 0);
     if (count > 0) populatedTables.push(`${table} (${count} rows)`);
   }
@@ -71,7 +75,7 @@ async function assertDemoFixtureTablesEmpty(conn) {
     throw new Error(
       'Demo seed requires an empty application database; refusing to add demo fixtures to existing data. '
       + `Non-empty tables: ${populatedTables.join(', ')}. `
-      + 'Set DB_PATH to a fresh empty SQLite file (or back up and clear the existing database), '
+      + 'Drop and recreate the empty MySQL database (or back up and clear the existing database), '
       + 'then run db:setup and db:seed again.'
     );
   }
