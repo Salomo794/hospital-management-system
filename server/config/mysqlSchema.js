@@ -244,11 +244,16 @@ const DERIVED_UNIQUE_KEYS = [
 /** Plain (non-unique) secondary indexes that used to be created in setup.js. */
 const SECONDARY_INDEXES = [
   ['appointments', 'idx_appointments_patient', ['patient_id']],
-  ['appointments', 'idx_appointments_doctor_date', ['doctor_id', 'appointment_date']],
+  // `appointment_date` is stored as TEXT (carried over from the SQLite schema),
+  // so the index needs an explicit prefix length: a full TEXT column would be
+  // 65535*4 bytes and every composite key would fail with ER_TOO_LONG_KEY.
+  // 32 characters covers `YYYY-MM-DD HH:MM:SS` completely, so prefix ordering
+  // is identical to full-value ordering for ISO-formatted stamps.
+  ['appointments', 'idx_appointments_doctor_date', ['doctor_id', 'appointment_date(32)']],
   ['medical_records', 'idx_medical_records_patient', ['patient_id']],
   ['lab_orders', 'idx_lab_orders_patient', ['patient_id']],
   ['bills', 'idx_bills_patient', ['patient_id']],
-  ['admissions', 'idx_admissions_ward_status', ['ward', 'status']],
+  ['admissions', 'idx_admissions_ward_status', ['ward(64)', 'status']],
   ['notifications', 'idx_notifications_user_read', ['user_id', 'is_read']],
   ['prescription_items', 'idx_prescription_items_medicine', ['medicine_id']],
   ['purchase_orders', 'idx_purchase_orders_status', ['status']],
@@ -261,9 +266,9 @@ const SECONDARY_INDEXES = [
   ['payment_refunds', 'idx_refunds_date', ['refund_date']],
   ['audit_log', 'idx_audit_log_created', ['created_at']],
   ['audit_log', 'idx_audit_log_user', ['user_id']],
-  ['audit_log', 'idx_audit_log_action', ['action']],
+  ['audit_log', 'idx_audit_log_action', ['action(64)']],
   ['password_reset_tokens', 'idx_password_reset_user', ['user_id', 'created_at']],
-  ['checkin_tokens', 'idx_checkin_tokens_expires', ['expires_at']],
+  ['checkin_tokens', 'idx_checkin_tokens_expires', ['expires_at(32)']],
   ['checkin_tokens', 'idx_checkin_tokens_patient', ['patient_id']],
 ];
 
@@ -370,12 +375,30 @@ async function applyDerivedUniqueKeys(log) {
   }
 }
 
+/**
+ * Render one index column. Accepts `name` or `name(prefixLength)`; the prefix
+ * form is required for TEXT/BLOB columns. Values are validated rather than
+ * interpolated, because identifiers cannot be bound as parameters.
+ */
+function renderIndexColumn(column) {
+  const match = /^([A-Za-z0-9_$]+)(?:\((\d+)\))?$/.exec(String(column));
+  if (!match) throw new Error(`Unsafe index column specification: ${column}`);
+  return match[2] ? `\`${match[1]}\`(${match[2]})` : `\`${match[1]}\``;
+}
+
 async function applySecondaryIndexes(log) {
   for (const [table, index, columns] of SECONDARY_INDEXES) {
     if (!(await tableExists(table))) continue;
     if (await indexExists(table, index)) continue;
-    const columnList = columns.map(column => `\`${column}\``).join(', ');
-    await query(`ALTER TABLE \`${table}\` ADD INDEX \`${index}\` (${columnList})`);
+    const columnList = columns.map(renderIndexColumn).join(', ');
+    try {
+      await query(`ALTER TABLE \`${table}\` ADD INDEX \`${index}\` (${columnList})`);
+    } catch (error) {
+      // Sanitised database errors drop the SQL text, so name the index here or
+      // the failure is unidentifiable.
+      error.message = `Failed to create index ${index} on ${table}(${columns.join(', ')}): ${error.message}`;
+      throw error;
+    }
     log(`Added index ${index} on ${table}(${columns.join(', ')})`);
   }
 }
