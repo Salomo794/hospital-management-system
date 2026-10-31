@@ -420,6 +420,17 @@ async function applyBaseSchema(log) {
   return statements.length;
 }
 
+async function applyAddedColumns(log) {
+  for (const entry of ADDED_COLUMNS) {
+    if (!(await tableExists(entry.table))) continue;
+    if (await columnExists(entry.table, entry.column)) continue;
+    await query(
+      `ALTER TABLE \`${entry.table}\` ADD COLUMN \`${entry.column}\` ${entry.definition}`
+    );
+    log(`Added column ${entry.table}.${entry.column} (${entry.comment})`);
+  }
+}
+
 async function applyDerivedUniqueKeys(log) {
   for (const key of DERIVED_UNIQUE_KEYS) {
     if (!(await tableExists(key.table))) continue;
