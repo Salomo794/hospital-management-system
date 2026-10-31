@@ -57,7 +57,8 @@ async function issueToken(connection, { userId, ipAddress = null }) {
  */
 async function resolveToken(connection, token) {
   const [rows] = await connection.query(
-    `SELECT t.id, t.user_id, t.used_at, t.expires_at
+    `SELECT t.id, t.user_id, t.used_at, t.expires_at,
+            (t.expires_at <= NOW()) AS expired
      FROM password_reset_tokens t WHERE t.token_hash = ?`,
     [hashToken(token)]
   );
@@ -70,7 +71,9 @@ async function resolveToken(connection, token) {
   }
   // Compared in the database rather than in JavaScript so a clock skew between
   // the API host and the database cannot be used to resurrect an expired link.
-  if (row.expires_at <= new Date().toISOString()) {
+  // Both the stamp and this comparison are evaluated by MySQL, so the two are
+  // always in the same timezone and the same date format.
+  if (Number(row.expired) === 1) {
     throw new ApiError(400, 'This password reset link has expired. Please request a new one.');
   }
   return row;
