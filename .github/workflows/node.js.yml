@@ -64,3 +64,17 @@ jobs:
       run: npm run build
     - name: Audit production dependencies
       run: npm run audit
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build production image
+      run: docker build -t hms:ci .
+    - name: Image contains the built client and server
+      run: docker run --rm --entrypoint sh hms:ci -c 'test -f /app/client/dist/index.html && test -f /app/server/index.js && test -f /app/server/config/createAdmin.js'
+    - name: Validate the Compose stack
+      run: |
+        cp deploy/docker.env.example deploy/docker.env
+        cp deploy/caddy.env.example deploy/caddy.env
+        docker compose config --quiet

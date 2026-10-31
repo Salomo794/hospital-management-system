@@ -14,6 +14,7 @@
     "seed": "node config/seed.js",
     "db:seed": "node config/seed.js",
     "db:backup": "node config/mysqlBackup.js",
+    "admin:create": "node config/createAdmin.js",
     "test": "node --test --test-concurrency=1",
     "check": "node --check index.js"
   },

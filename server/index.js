@@ -75,7 +75,9 @@ app.use(cors({
 }));
 
 morgan.token('safe-url', req => req.path);
-if (process.env.NODE_ENV !== 'test') {
+// Production logs through structuredLogger (one JSON line per request); logging
+// the same request again as text would double every line.
+if (process.env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'production') {
   app.use(morgan(':method :safe-url :status :res[content-length] - :response-time ms'));
 }
 // Paystack signs webhooks with an HMAC over the exact bytes it sent, so the
@@ -95,7 +97,11 @@ app.use(express.urlencoded({ extended: true, limit: process.env.JSON_LIMIT || '1
 // Morgan handles text logging in non-production environments.
 app.use(structuredLogger);
 app.use((req, res, next) => {
-  req.requestId = req.header('X-Request-ID') || crypto.randomUUID();
+  // Honour a caller's id so a request can be traced across a proxy, but only when
+  // it is a plain token: the value is echoed in a response header and written to
+  // the logs, so anything else is replaced rather than trusted.
+  const supplied = req.header('X-Request-ID');
+  req.requestId = supplied && /^[A-Za-z0-9._-]{1,128}$/.test(supplied) ? supplied : crypto.randomUUID();
   res.setHeader('X-Request-ID', req.requestId);
   // Guard against hung requests consuming connections indefinitely.
   res.setTimeout(Number(process.env.REQUEST_TIMEOUT_MS || 30000), () => {

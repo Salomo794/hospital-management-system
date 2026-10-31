@@ -1,0 +1,49 @@
+# Self-hosted deployment: the HMS app behind Caddy, which provides HTTPS.
+#
+#   cp deploy/docker.env.example deploy/docker.env   # then edit it
+#   cp deploy/caddy.env.example deploy/caddy.env     # domain and email for HTTPS
+#   docker compose up -d --build
+#   docker compose exec app node server/config/createAdmin.js   # first administrator
+#
+# The database is NOT part of this file. Use a managed MySQL 8 service (or your own
+# server) reachable over TLS, and put its URL in deploy/docker.env. See
+# docs/deployment.md for the full checklist.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: deploy/docker.env
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      TRUST_PROXY: "true"
+    # Reachable by Caddy on the compose network only, never published to the host.
+    expose:
+      - "5000"
+    volumes:
+      # Encrypted backups land here and survive rebuilds. Copy them off this machine
+      # too: a backup on the same disk as the server does not survive that disk.
+      - hms_backups:/app/server/backups
+      # Uncomment if the database certificate is signed by a private CA, and set
+      # DATABASE_SSL_CA=/run/secrets/db-ca.pem in deploy/docker.env.
+      # - ./deploy/db-ca.pem:/run/secrets/db-ca.pem:ro
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    # Only the domain and email: Caddy has no need of the app's secrets.
+    env_file: deploy/caddy.env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  hms_backups:
+  caddy_data:
+  caddy_config:

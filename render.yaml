@@ -6,6 +6,7 @@ services:
     buildCommand: npm run install:all && npm run build
     preDeployCommand: npm run db:setup
     startCommand: npm run start
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
@@ -17,6 +18,11 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
+      # Production refuses to connect to MySQL without TLS. If the database's
+      # certificate is not from a public CA, add a Secret File with the CA and set
+      # DATABASE_SSL_CA to its path (for example /etc/secrets/db-ca.pem).
+      - key: DATABASE_SSL
+        value: true
       - key: PUBLIC_URL
         sync: false
       - key: APP_TIMEZONE

@@ -36,3 +36,21 @@ test('health endpoint does not disclose internal database errors', async () => {
   });
   assert.doesNotMatch(JSON.stringify(response.body), /ER_ACCESS_DENIED_ERROR|private\/server\/connection|secret-value/i);
 });
+
+test('a caller-supplied request id is echoed only when it is a plain token', async () => {
+  app.pool.isReady = async () => {};
+
+  const accepted = await request(app).get('/api/health').set('X-Request-ID', 'trace-9f2.a_b-1').expect(200);
+  assert.equal(accepted.headers['x-request-id'], 'trace-9f2.a_b-1');
+
+  // Anything else is replaced with a generated id instead of being reflected into
+  // a response header and the logs.
+  for (const unsafe of ['has spaces <script>', 'x'.repeat(129)]) {
+    const replaced = await request(app).get('/api/health').set('X-Request-ID', unsafe).expect(200);
+    assert.notEqual(replaced.headers['x-request-id'], unsafe);
+    assert.match(replaced.headers['x-request-id'], /^[0-9a-f-]{36}$/);
+  }
+
+  const generated = await request(app).get('/api/health').expect(200);
+  assert.match(generated.headers['x-request-id'], /^[0-9a-f-]{36}$/);
+});
