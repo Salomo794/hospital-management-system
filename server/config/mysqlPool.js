@@ -282,10 +282,36 @@ async function close() {
   }
 }
 
+/**
+ * Open a standalone connection that is deliberately NOT part of the pool.
+ *
+ * The schema bootstrap needs this: the pool is bound to one database, so on a
+ * fresh server every pooled query would fail with ER_BAD_DB_ERROR before the
+ * database exists. Credentials come from the internal config object, because
+ * the exported `config` below is redacted (it has no password) on purpose.
+ * Callers own the connection and must close it.
+ */
+async function createBootstrapConnection(overrides = {}) {
+  try {
+    return await mysql.createConnection({
+      host: config.host,
+      port: config.port,
+      user: config.user,
+      password: config.password,
+      connectTimeout: config.connectTimeout,
+      charset: 'utf8mb4_unicode_ci',
+      ...overrides,
+    });
+  } catch (error) {
+    throw sanitizeError(error, 'connection');
+  }
+}
+
 module.exports = {
   query,
   runTransaction,
   getConnection,
+  createBootstrapConnection,
   isReady,
   getEngineInfo,
   close,
