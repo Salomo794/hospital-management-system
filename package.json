@@ -28,7 +28,7 @@
     "audit": "npm audit --omit=dev && npm audit --omit=dev --prefix server && npm audit --omit=dev --prefix client"
   },
   "dependencies": {
-    "concurrently": "^8.2.0",
+    "concurrently": "^10.0.6",
     "validator": "^13.15.35"
   }
 }
