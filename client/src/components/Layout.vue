@@ -79,15 +79,28 @@
 
           <div class="status-pill">
             <span class="status-dot" />
-            Live
+            {{ t('common.live') }}
           </div>
+
+          <!-- Language -->
+          <label class="lang-picker">
+            <span class="visually-hidden">{{ t('common.language') }}</span>
+            <select
+              class="lang-select"
+              :value="uiStore.locale"
+              :aria-label="t('common.language')"
+              @change="uiStore.setLocale($event.target.value)"
+            >
+              <option v-for="l in LOCALES" :key="l.code" :value="l.code">{{ l.label }}</option>
+            </select>
+          </label>
 
           <!-- Theme toggle -->
           <button
             class="icon-btn"
             @click="uiStore.toggleDark()"
-            :aria-label="uiStore.dark ? 'Switch to light mode' : 'Switch to dark mode'"
-            :title="uiStore.dark ? 'Light mode' : 'Dark mode'"
+            :aria-label="uiStore.dark ? t('common.switchToLight') : t('common.switchToDark')"
+            :title="uiStore.dark ? t('common.lightMode') : t('common.darkMode')"
           >
             <span v-html="uiStore.dark ? icons.sun : icons.moon" />
           </button>
@@ -394,6 +407,8 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../store/auth'
 import { useUiStore } from '../store/ui'
+import { useI18n, LOCALES } from '../i18n'
+import { localeTag } from '../i18n/locales'
 import axios from 'axios'
 import { useToast } from '../store/toast'
 import {
@@ -444,20 +459,20 @@ const icons = {
 }
 
 const routeMeta = [
-  { prefix: '/dashboard',    label: 'Dashboard',               section: 'Overview' },
-  { prefix: '/patients',     label: 'Patient Management',       section: 'Clinical' },
-  { prefix: '/doctors',      label: 'Doctor Management',        section: 'Clinical' },
-  { prefix: '/appointments', label: 'Appointments',             section: 'Clinical' },
-  { prefix: '/emr',          label: 'Medical Records',          section: 'Clinical' },
-  { prefix: '/pharmacy',     label: 'Pharmacy',                 section: 'Departments' },
-  { prefix: '/procurement',  label: 'Procurement',              section: 'Departments' },
-  { prefix: '/ward',         label: 'Wards & Beds',             section: 'Departments' },
-  { prefix: '/laboratory',   label: 'Laboratory',               section: 'Departments' },
-  { prefix: '/billing',      label: 'Billing & Payments',       section: 'Departments' },
-  { prefix: '/reports',      label: 'Reports & Analytics',      section: 'Insights' },
-  { prefix: '/ai-assistant', label: 'AI Assistant',             section: 'Insights' },
-  { prefix: '/users',        label: 'User Management',          section: 'Administration' },
-  { prefix: '/audit-log',    label: 'Audit Log',                section: 'Administration' },
+  { prefix: '/dashboard',    label: 'Dashboard',               section: 'Overview', key: 'page.dashboard', sectionKey: 'section.overview' },
+  { prefix: '/patients',     label: 'Patient Management',       section: 'Clinical', key: 'page.patients', sectionKey: 'section.clinical' },
+  { prefix: '/doctors',      label: 'Doctor Management',        section: 'Clinical', key: 'page.doctors', sectionKey: 'section.clinical' },
+  { prefix: '/appointments', label: 'Appointments',             section: 'Clinical', key: 'page.appointments', sectionKey: 'section.clinical' },
+  { prefix: '/emr',          label: 'Medical Records',          section: 'Clinical', key: 'page.records', sectionKey: 'section.clinical' },
+  { prefix: '/pharmacy',     label: 'Pharmacy',                 section: 'Departments', key: 'page.pharmacy', sectionKey: 'section.departments' },
+  { prefix: '/procurement',  label: 'Procurement',              section: 'Departments', key: 'page.procurement', sectionKey: 'section.departments' },
+  { prefix: '/ward',         label: 'Wards & Beds',             section: 'Departments', key: 'page.wards', sectionKey: 'section.departments' },
+  { prefix: '/laboratory',   label: 'Laboratory',               section: 'Departments', key: 'page.laboratory', sectionKey: 'section.departments' },
+  { prefix: '/billing',      label: 'Billing & Payments',       section: 'Departments', key: 'page.billing', sectionKey: 'section.departments' },
+  { prefix: '/reports',      label: 'Reports & Analytics',      section: 'Insights', key: 'page.reports', sectionKey: 'section.insights' },
+  { prefix: '/ai-assistant', label: 'AI Assistant',             section: 'Insights', key: 'page.assistant', sectionKey: 'section.insights' },
+  { prefix: '/users',        label: 'User Management',          section: 'Administration', key: 'page.users', sectionKey: 'section.administration' },
+  { prefix: '/audit-log',    label: 'Audit Log',                section: 'Administration', key: 'page.audit', sectionKey: 'section.administration' },
 ]
 
 export default {
@@ -468,6 +483,8 @@ export default {
     const authStore  = useAuthStore()
     const uiStore    = useUiStore()
     const toast      = useToast()
+    const { t } = useI18n()
+    const tag = computed(() => localeTag(uiStore.locale))
 
     const collapsed = computed({
       get: () => uiStore.sidebarCollapsed,
@@ -486,29 +503,29 @@ export default {
     /* ── nav sections ── */
     const navSections = computed(() => {
       const sections = [
-        { title: 'Overview', items: [
-          { to: '/dashboard', label: 'Dashboard', icon: icons.dashboard, exact: true }
+        { title: t('section.overview'), items: [
+          { to: '/dashboard', label: t('nav.dashboard'), icon: icons.dashboard, exact: true }
         ]},
-        { title: 'Clinical', items: [
-          { to: '/patients', label: 'Patients', icon: icons.patients, roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
-          { to: '/doctors', label: 'Doctors', icon: icons.doctors },
-          { to: '/appointments', label: 'Appointments', icon: icons.appointments, roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
-          { to: '/emr', label: 'Medical Records', icon: icons.records, roles: ['admin', 'doctor', 'nurse'] }
+        { title: t('section.clinical'), items: [
+          { to: '/patients', label: t('nav.patients'), icon: icons.patients, roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+          { to: '/doctors', label: t('nav.doctors'), icon: icons.doctors },
+          { to: '/appointments', label: t('nav.appointments'), icon: icons.appointments, roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+          { to: '/emr', label: t('nav.records'), icon: icons.records, roles: ['admin', 'doctor', 'nurse'] }
         ]},
-        { title: 'Departments', items: [
-          { to: '/pharmacy', label: 'Pharmacy', icon: icons.pharmacy, roles: ['admin', 'pharmacist'] },
-          { to: '/procurement', label: 'Procurement', icon: icons.procurement, roles: ['admin', 'pharmacist'] },
-          { to: '/ward', label: 'Wards & Beds', icon: icons.ward, roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
-          { to: '/laboratory', label: 'Laboratory', icon: icons.laboratory, roles: ['admin', 'doctor', 'nurse', 'lab_technician'] },
-          { to: '/billing', label: 'Billing', icon: icons.billing, roles: ['admin', 'receptionist'] }
+        { title: t('section.departments'), items: [
+          { to: '/pharmacy', label: t('nav.pharmacy'), icon: icons.pharmacy, roles: ['admin', 'pharmacist'] },
+          { to: '/procurement', label: t('nav.procurement'), icon: icons.procurement, roles: ['admin', 'pharmacist'] },
+          { to: '/ward', label: t('nav.wards'), icon: icons.ward, roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+          { to: '/laboratory', label: t('nav.laboratory'), icon: icons.laboratory, roles: ['admin', 'doctor', 'nurse', 'lab_technician'] },
+          { to: '/billing', label: t('nav.billing'), icon: icons.billing, roles: ['admin', 'receptionist'] }
         ]},
-        { title: 'Insights', items: [
-          { to: '/reports', label: 'Reports', icon: icons.reports, roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
-          { to: '/ai-assistant', label: 'AI Assistant', icon: icons.ai }
+        { title: t('section.insights'), items: [
+          { to: '/reports', label: t('nav.reports'), icon: icons.reports, roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+          { to: '/ai-assistant', label: t('nav.assistant'), icon: icons.ai }
         ]},
-        { title: 'Admin', items: [
-          { to: '/users', label: 'Users', icon: icons.users, exact: true, roles: ['admin'] },
-          { to: '/audit-log', label: 'Audit Log', icon: icons.audit, roles: ['admin'] }
+        { title: t('section.admin'), items: [
+          { to: '/users', label: t('nav.users'), icon: icons.users, exact: true, roles: ['admin'] },
+          { to: '/audit-log', label: t('nav.audit'), icon: icons.audit, roles: ['admin'] }
         ]}
       ]
       return sections
@@ -518,13 +535,13 @@ export default {
 
     const currentMeta = computed(() =>
       [...routeMeta].reverse().find(r => route.path.startsWith(r.prefix)) ||
-      { label: 'Home', section: 'Overview' }
+      { key: 'page.home', sectionKey: 'section.overview' }
     )
-    const pageTitle   = computed(() => currentMeta.value.label)
-    const pageSection = computed(() => currentMeta.value.section)
+    const pageTitle   = computed(() => t(currentMeta.value.key))
+    const pageSection = computed(() => t(currentMeta.value.sectionKey))
     const todayLabel  = computed(() => {
       void clockTick.value
-      return new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+      return new Date().toLocaleDateString(tag.value, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
     })
 
     const isActive = item => item.exact ? route.path === item.to : route.path.startsWith(item.to)
@@ -752,7 +769,7 @@ export default {
       route,
       authStore, uiStore, collapsed, mobileOpen, dropdownOpen, panelOpen,
       notifications, unreadCount, isMobile,
-      navSections, pageTitle, pageSection, todayLabel,
+      navSections, pageTitle, pageSection, todayLabel, t, LOCALES,
       isActive, toggleSidebar, closeMobile,
       formatRole, typeColor, relativeTime,
       loadNotifications, markAllRead, openNotification, logout,
@@ -1253,4 +1270,18 @@ export default {
 .page-slide-enter-active,.page-slide-leave-active { transition: opacity .2s ease, transform .2s ease; }
 .page-slide-enter-from { opacity:0; transform:translateY(8px); }
 .page-slide-leave-to   { opacity:0; transform:translateY(-6px); }
+
+.lang-picker { display: inline-flex; }
+.lang-select {
+  height: 34px; padding: 0 28px 0 10px;
+  border: 1px solid var(--gray-200); border-radius: 8px;
+  background: var(--surface); color: var(--gray-700);
+  font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;
+}
+.lang-select:hover { border-color: var(--gray-300); }
+.lang-select:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 </style>

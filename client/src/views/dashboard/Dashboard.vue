@@ -4,15 +4,15 @@
     <!-- ── Page header ────────────────────────────────────── -->
     <header class="page-header">
       <div class="page-identity">
-        <h1 class="page-title">Good {{ greeting }}, {{ firstName }}</h1>
+        <h1 class="page-title">{{ greetingText }}</h1>
         <p class="page-sub">{{ todayLong }} · {{ roleLabel }}</p>
       </div>
 
       <div class="page-actions">
         <span class="updated" role="status">
           <span class="status-dot" :class="{ busy: refreshing }" aria-hidden="true" />
-          <template v-if="refreshing">Refreshing…</template>
-          <template v-else>Updated {{ updatedLabel }}</template>
+          <template v-if="refreshing">{{ t('dash.refreshing') }}</template>
+          <template v-else>{{ t('dash.updated', { when: updatedLabel }) }}</template>
         </span>
         <button
           type="button"
@@ -21,19 +21,19 @@
           :disabled="refreshing"
           @click="refresh"
         >
-          <AppIcon name="refresh" :size="15" /> Refresh
+          <AppIcon name="refresh" :size="15" /> {{ t('dash.refresh') }}
         </button>
         <router-link to="/ai-assistant" class="btn btn-secondary btn-compact">
-          <AppIcon name="sparkles" :size="15" /> AI Assistant
+          <AppIcon name="sparkles" :size="15" /> {{ t('dash.aiAssistant') }}
         </router-link>
         <router-link v-if="canViewReports" to="/reports" class="btn btn-primary btn-compact">
-          <AppIcon name="bar-chart" :size="15" /> View Reports
+          <AppIcon name="bar-chart" :size="15" /> {{ t('dash.viewReports') }}
         </router-link>
       </div>
     </header>
 
     <!-- ── KPI strip ──────────────────────────────────────── -->
-    <section class="kpi-wrap" aria-label="Key hospital metrics">
+    <section class="kpi-wrap" :aria-label="t('dash.kpiLabel')">
       <div class="kpi-grid" :style="{ '--kpi-cols': loading ? 4 : kpiColumns }">
         <template v-if="loading">
           <div v-for="i in 4" :key="i" class="kpi-cell kpi-skeleton">
@@ -66,7 +66,7 @@
         <!-- Insights -->
         <section v-if="!loading && canViewClinical && insights.length" class="panel">
           <div class="panel-header">
-            <div class="panel-title"><span class="panel-title-icon"><AppIcon name="sparkles" :size="16" /></span> Insights</div>
+            <div class="panel-title"><span class="panel-title-icon"><AppIcon name="sparkles" :size="16" /></span> {{ t('dash.insights') }}</div>
           </div>
           <div class="insights-grid">
             <template v-for="(ins, i) in insights" :key="i">
@@ -99,21 +99,21 @@
           <div class="panel-header">
             <div class="panel-title">
               <span class="panel-title-icon"><AppIcon name="calendar" :size="16" /></span>
-              Today's Appointments
+              {{ t('dash.appointments') }}
               <span class="count-pill" v-if="recentAppointments.length">{{ recentAppointments.length }}</span>
             </div>
             <router-link to="/appointments" class="panel-link">
-              View all <AppIcon name="chevron-right" :size="14" />
+              {{ t('common.viewAll') }} <AppIcon name="chevron-right" :size="14" />
             </router-link>
           </div>
           <div class="table-wrap">
             <table class="appt-table" v-if="recentAppointments.length">
               <thead>
                 <tr>
-                  <th>Time</th>
-                  <th>Patient</th>
-                  <th>Doctor</th>
-                  <th>Status</th>
+                  <th>{{ t('dash.col.time') }}</th>
+                  <th>{{ t('dash.col.patient') }}</th>
+                  <th>{{ t('dash.col.doctor') }}</th>
+                  <th>{{ t('dash.col.status') }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -125,7 +125,7 @@
                       <span class="person-name">{{ a.patient_first_name }} {{ a.patient_last_name }}</span>
                     </div>
                   </td>
-                  <td class="text-muted">Dr. {{ a.doctor_last_name }}</td>
+                  <td class="text-muted">{{ t('dash.doctorPrefix', { name: a.doctor_last_name }) }}</td>
                   <td>
                     <span class="badge" :class="`badge-${getStatusColor(a.status)}`">
                       {{ a.status?.replace(/_/g, ' ') }}
@@ -136,8 +136,8 @@
             </table>
             <div class="empty-state" v-else>
               <span class="empty-state-icon"><AppIcon name="inbox" :size="28" /></span>
-              <h3>No appointments today</h3>
-              <p>Nothing scheduled for today yet.</p>
+              <h3>{{ t('dash.noAppointments') }}</h3>
+              <p>{{ t('dash.noAppointments.hint') }}</p>
             </div>
           </div>
         </section>
@@ -147,18 +147,18 @@
           <div class="panel-header">
             <div class="panel-title">
               <span class="panel-title-icon"><AppIcon name="bar-chart" :size="16" /></span>
-              Weekly Overview
+              {{ t('dash.weekly') }}
             </div>
-            <span class="chip">Last 7 days</span>
+            <span class="chip">{{ t('dash.last7') }}</span>
           </div>
           <div class="card-body">
             <div class="chart-container" v-if="weeklyStats.length">
-              <BarChart :key="uiStore.dark ? 'dark' : 'light'" :data="weeklyChartData" :options="chartOptions" />
+              <BarChart :key="`${uiStore.dark ? 'dark' : 'light'}-${uiStore.locale}`" :data="weeklyChartData" :options="chartOptions" />
             </div>
             <div class="empty-state" v-else>
               <span class="empty-state-icon"><AppIcon name="bar-chart" :size="28" /></span>
-              <h3>No data yet</h3>
-              <p>Weekly appointment data will appear here.</p>
+              <h3>{{ t('dash.noWeekly') }}</h3>
+              <p>{{ t('dash.noWeekly.hint') }}</p>
             </div>
           </div>
         </section>
@@ -169,9 +169,9 @@
         <!-- Recent patients -->
         <section class="panel" v-if="canViewClinical">
           <div class="panel-header">
-            <div class="panel-title"><span class="panel-title-icon"><AppIcon name="users" :size="16" /></span> Recent Patients</div>
+            <div class="panel-title"><span class="panel-title-icon"><AppIcon name="users" :size="16" /></span> {{ t('dash.recentPatients') }}</div>
             <router-link to="/patients" class="panel-link">
-              View all <AppIcon name="chevron-right" :size="14" />
+              {{ t('common.viewAll') }} <AppIcon name="chevron-right" :size="14" />
             </router-link>
           </div>
           <div v-if="recentPatients.length" class="patients-list">
@@ -184,22 +184,22 @@
               <span class="patient-avatar" aria-hidden="true">{{ initials(p.first_name, p.last_name) }}</span>
               <span class="patient-details">
                 <span class="patient-name">{{ p.first_name }} {{ p.last_name }}</span>
-                <span class="patient-meta">{{ p.mrn }} · {{ p.phone || 'No phone' }}</span>
+                <span class="patient-meta">{{ p.mrn }} · {{ p.phone || t('dash.noPhone') }}</span>
               </span>
               <span class="badge" :class="p.status === 'active' ? 'badge-success' : 'badge-gray'">{{ p.status }}</span>
             </router-link>
           </div>
           <div class="empty-state" v-else>
             <span class="empty-state-icon"><AppIcon name="users" :size="28" /></span>
-            <h3>No recent patients</h3>
-            <p>Newly registered patients appear here.</p>
+            <h3>{{ t('dash.noPatients') }}</h3>
+            <p>{{ t('dash.noPatients.hint') }}</p>
           </div>
         </section>
 
         <!-- Quick actions -->
         <section class="panel">
           <div class="panel-header">
-            <div class="panel-title"><span class="panel-title-icon"><AppIcon name="activity" :size="16" /></span> Quick Actions</div>
+            <div class="panel-title"><span class="panel-title-icon"><AppIcon name="activity" :size="16" /></span> {{ t('dash.quickActions') }}</div>
           </div>
           <div class="quick-grid">
             <router-link v-for="q in quickActions" :key="q.to" :to="q.to" class="quick-item">
@@ -220,6 +220,9 @@ import { useToast } from '../../store/toast'
 import { useAuthStore } from '../../store/auth'
 import { useUiStore } from '../../store/ui'
 import { formatTime, getStatusColor } from '../../utils/helpers'
+import { formatMoney } from '../../utils/currency'
+import { useI18n } from '../../i18n'
+import { localeTag } from '../../i18n/locales'
 import AppIcon from '../../components/AppIcon.vue'
 
 export default {
@@ -229,6 +232,8 @@ export default {
     const toast      = useToast()
     const authStore  = useAuthStore()
     const uiStore    = useUiStore()
+    const { t } = useI18n()
+    const tag = computed(() => localeTag(uiStore.locale))
     const stats      = ref({})
     const insights   = ref([])
     const recentAppointments = ref([])
@@ -242,28 +247,31 @@ export default {
     const clockTick = ref(Date.now())
     let clockTimer = null
 
-    const greeting = computed(() => {
+    const firstName = computed(() => authStore.user?.first_name || authStore.userName || '')
+    const greetingText = computed(() => {
       void clockTick.value
       const h = new Date().getHours()
-      return h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening'
+      const period = h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening'
+      // With no name on file, drop the ", name" tail instead of printing "there".
+      const text = t(`dash.greeting.${period}`, { name: firstName.value })
+      return firstName.value ? text : text.replace(/[,\s]*$/, '').replace(/,\s*$/, '')
     })
-    const firstName = computed(() => authStore.user?.first_name || authStore.userName || 'there')
     const roleLabel = computed(() => {
       const role = authStore.user?.role
       return role ? role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Staff'
     })
     const todayLong = computed(() => {
       void clockTick.value
-      return new Date().toLocaleDateString('en-US', {
+      return new Date().toLocaleDateString(tag.value, {
         weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
       })
     })
     const updatedLabel = computed(() => {
-      if (!lastUpdated.value) return 'just now'
+      if (!lastUpdated.value) return t('dash.justNow')
       const seconds = Math.max(0, Math.round((clockTick.value - lastUpdated.value.getTime()) / 1000))
-      if (seconds < 60) return 'just now'
+      if (seconds < 60) return t('dash.justNow')
       const minutes = Math.floor(seconds / 60)
-      return minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ago`
+      return minutes < 60 ? t('dash.minAgo', { n: minutes }) : t('dash.hoursAgo', { n: Math.floor(minutes / 60) })
     })
 
     const clinicalRoles = ['admin', 'receptionist', 'doctor', 'nurse']
@@ -291,15 +299,15 @@ export default {
     // `attention` marks the figures that mean "something needs doing" when they
     // are above zero. Everything else stays neutral so those few stand out.
     const statCards = computed(() => [
-      { key: 'patients', label: 'Total Patients', caption: 'Active records', value: stats.value.totalPatients || 0, icon: 'users', tone: 'teal', format: 'number', roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
-      { key: 'doctors', label: 'Active Doctors', caption: 'On staff', value: stats.value.totalDoctors || 0, icon: 'stethoscope', tone: 'blue', format: 'number' },
-      { key: 'today', label: "Today's Appointments", caption: 'Scheduled for today', value: stats.value.todayAppointments || 0, icon: 'calendar', tone: 'violet', format: 'number', roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
-      { key: 'pending', label: 'Pending Appointments', caption: 'Awaiting confirmation', value: stats.value.pendingAppointments || 0, icon: 'clock', tone: 'amber', format: 'number', roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
-      { key: 'todayRevenue', label: "Today's Revenue", caption: 'Collected today', value: stats.value.todayRevenue || 0, icon: 'dollar', tone: 'green', format: 'currency', roles: ['admin', 'receptionist'] },
-      { key: 'monthlyRevenue', label: 'Monthly Revenue', caption: 'Month to date', value: stats.value.monthlyRevenue || 0, icon: 'trending-up', tone: 'cyan', format: 'currency', roles: ['admin', 'receptionist'] },
-      { key: 'bills', label: 'Unpaid Bills', caption: 'Outstanding balance', value: stats.value.pendingBills || 0, icon: 'receipt', tone: 'red', attention: true, format: 'number', roles: ['admin', 'receptionist'] },
-      { key: 'lab', label: 'Pending Lab Orders', caption: 'Awaiting results', value: stats.value.pendingLabOrders || 0, icon: 'flask', tone: 'violet', format: 'number', roles: ['admin', 'doctor', 'nurse', 'lab_technician'] },
-      { key: 'stock', label: 'Low Stock Alerts', caption: 'Needs restocking', value: stats.value.lowStockMedications || 0, icon: 'alert-triangle', tone: 'orange', attention: true, format: 'number', roles: ['admin', 'pharmacist'] }
+      { key: 'patients', label: t('kpi.patients'), caption: t('kpi.patients.caption'), value: stats.value.totalPatients || 0, icon: 'users', tone: 'teal', format: 'number', roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+      { key: 'doctors', label: t('kpi.doctors'), caption: t('kpi.doctors.caption'), value: stats.value.totalDoctors || 0, icon: 'stethoscope', tone: 'blue', format: 'number' },
+      { key: 'today', label: t('kpi.today'), caption: t('kpi.today.caption'), value: stats.value.todayAppointments || 0, icon: 'calendar', tone: 'violet', format: 'number', roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+      { key: 'pending', label: t('kpi.pending'), caption: t('kpi.pending.caption'), value: stats.value.pendingAppointments || 0, icon: 'clock', tone: 'amber', format: 'number', roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+      { key: 'todayRevenue', label: t('kpi.todayRevenue'), caption: t('kpi.todayRevenue.caption'), value: stats.value.todayRevenue || 0, icon: 'dollar', tone: 'green', format: 'currency', roles: ['admin', 'receptionist'] },
+      { key: 'monthlyRevenue', label: t('kpi.monthlyRevenue'), caption: t('kpi.monthlyRevenue.caption'), value: stats.value.monthlyRevenue || 0, icon: 'trending-up', tone: 'cyan', format: 'currency', roles: ['admin', 'receptionist'] },
+      { key: 'bills', label: t('kpi.bills'), caption: t('kpi.bills.caption'), value: stats.value.pendingBills || 0, icon: 'receipt', tone: 'red', attention: true, format: 'number', roles: ['admin', 'receptionist'] },
+      { key: 'lab', label: t('kpi.lab'), caption: t('kpi.lab.caption'), value: stats.value.pendingLabOrders || 0, icon: 'flask', tone: 'violet', format: 'number', roles: ['admin', 'doctor', 'nurse', 'lab_technician'] },
+      { key: 'stock', label: t('kpi.stock'), caption: t('kpi.stock.caption'), value: stats.value.lowStockMedications || 0, icon: 'alert-triangle', tone: 'orange', attention: true, format: 'number', roles: ['admin', 'pharmacist'] }
     ].filter(card => !card.roles || authStore.can(...card.roles)))
 
     // Pick a column count that divides the cards evenly so the last row is never
@@ -320,17 +328,17 @@ export default {
         : ins.severity === 'success' ? 'check-circle' : 'info')
 
     // Money on a dashboard is read at a glance, so whole units only; exact
-    // amounts with cents live on the billing screens.
-    const formatMoney = value => '$' + Math.round(Number(value) || 0).toLocaleString('en-US')
+    // amounts with cents live on the billing screens. The currency itself is
+    // configurable (VITE_CURRENCY), see utils/currency.js.
     const formatValue = card => card.format === 'currency'
-      ? formatMoney(card.value)
-      : Math.round(Number(card.value) || 0).toLocaleString('en-US')
+      ? formatMoney(card.value, { whole: true })
+      : Math.round(Number(card.value) || 0).toLocaleString(tag.value)
 
     const weeklyChartData = computed(() => ({
       labels: weeklyStats.value.map(d => fmtDay(d.date)),
       datasets: [
         {
-          label: 'Completed',
+          label: t('dash.chart.completed'),
           data: weeklyStats.value.map(d => d.completed || 0),
           backgroundColor: '#0f766e',
           hoverBackgroundColor: '#0d9488',
@@ -340,7 +348,7 @@ export default {
           stack: 'appointments'
         },
         {
-          label: 'Other',
+          label: t('dash.chart.other'),
           data: weeklyStats.value.map(d => Math.max(0, (d.count || 0) - (d.completed || 0) - (d.cancelled || 0))),
           backgroundColor: '#94a3b8',
           hoverBackgroundColor: '#64748b',
@@ -350,7 +358,7 @@ export default {
           stack: 'appointments'
         },
         {
-          label: 'Cancelled',
+          label: t('dash.chart.cancelled'),
           data: weeklyStats.value.map(d => d.cancelled || 0),
           backgroundColor: '#dc2626',
           hoverBackgroundColor: '#b91c1c',
@@ -386,15 +394,15 @@ export default {
     })
 
     const quickActions = computed(() => [
-      { to: '/patients', icon: 'users', label: 'Patients', roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
-      { to: '/appointments', icon: 'calendar', label: 'Appointments', roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
-      { to: '/emr', icon: 'clipboard', label: 'Medical Records', roles: ['admin', 'doctor', 'nurse'] },
-      { to: '/pharmacy', icon: 'pill', label: 'Pharmacy', roles: ['admin', 'pharmacist'] },
-      { to: '/laboratory', icon: 'flask', label: 'Laboratory', roles: ['admin', 'doctor', 'nurse', 'lab_technician'] },
-      { to: '/billing', icon: 'credit-card', label: 'Billing', roles: ['admin', 'receptionist'] }
+      { to: '/patients', icon: 'users', label: t('nav.patients'), roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+      { to: '/appointments', icon: 'calendar', label: t('nav.appointments'), roles: ['admin', 'receptionist', 'doctor', 'nurse'] },
+      { to: '/emr', icon: 'clipboard', label: t('nav.records'), roles: ['admin', 'doctor', 'nurse'] },
+      { to: '/pharmacy', icon: 'pill', label: t('nav.pharmacy'), roles: ['admin', 'pharmacist'] },
+      { to: '/laboratory', icon: 'flask', label: t('nav.laboratory'), roles: ['admin', 'doctor', 'nurse', 'lab_technician'] },
+      { to: '/billing', icon: 'credit-card', label: t('nav.billing'), roles: ['admin', 'receptionist'] }
     ].filter(action => authStore.can(...action.roles)))
 
-    const fmtDay = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })
+    const fmtDay = d => new Date(d + 'T00:00:00').toLocaleDateString(tag.value, { weekday: 'short' })
 
     const loadDashboard = async (silent = false) => {
       if (silent) refreshing.value = true
@@ -415,7 +423,7 @@ export default {
           : (Array.isArray(insRes.data) ? insRes.data : [])
         lastUpdated.value = new Date()
       } catch {
-        toast.error('Failed to load dashboard data')
+        toast.error(t('dash.loadFailed'))
       } finally {
         loading.value = false
         refreshing.value = false
@@ -440,7 +448,7 @@ export default {
       loading, refreshing, stats, statCards, kpiColumns, insightIcon, insights,
       recentAppointments, recentPatients,
       weeklyStats, weeklyChartData, chartOptions,
-      quickActions, greeting, firstName, roleLabel, todayLong, updatedLabel,
+      quickActions, greetingText, firstName, roleLabel, todayLong, updatedLabel, t,
       uiStore, canViewClinical, canViewReports,
       canAccessInsight, formatTime, getStatusColor, formatValue, initials, refresh,
     }
@@ -645,7 +653,7 @@ a.insight-card:hover { border-color: var(--gray-300); background: var(--gray-50)
 }
 .quick-item:hover { border-color: var(--brand-600); background: var(--gray-50); }
 .quick-icon { display: inline-flex; color: var(--brand-700); flex-shrink: 0; }
-.quick-label { font-size: 13px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quick-label { font-size: 13px; font-weight: 500; line-height: 1.3; min-width: 0; overflow-wrap: anywhere; }
 
 /* ── Empty state ────────────────────────────────────── */
 .empty-state { text-align: center; color: var(--text-muted); padding: 36px 24px; }
