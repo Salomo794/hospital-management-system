@@ -27,9 +27,9 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
       uuid VARCHAR(255) UNIQUE NOT NULL,
       user_id INT NOT NULL,
       token_hash VARCHAR(255) UNIQUE NOT NULL,
-      expires_at TEXT NOT NULL,
-      used_at TEXT,
-      ip_address TEXT,
+      expires_at DATETIME NOT NULL,
+      used_at DATETIME,
+      ip_address VARCHAR(64),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
