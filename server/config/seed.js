@@ -732,9 +732,15 @@ async function seed() {
 }
 
 if (require.main === module) {
-  seed().catch(() => {
-    process.exitCode = 1;
-  });
+  // A CLI run must release the connection pool before it exits. Releasing the
+  // single connection is not enough: the pool keeps idle sockets open, so Node's
+  // event loop never drains and the process hangs after printing success, which
+  // a CI job sees as a timeout rather than a finished seed.
+  seed()
+    .catch(() => {
+      process.exitCode = 1;
+    })
+    .finally(() => getPool().close());
 }
 
 module.exports = seed;
