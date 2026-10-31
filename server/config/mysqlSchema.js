@@ -464,6 +464,15 @@ async function applyUpdatedAtTriggers(log) {
   }
 }
 
+async function applySingletonTriggers(log) {
+  if (!(await tableExists('safety_reference'))) return;
+  for (const trigger of SAFETY_REFERENCE_TRIGGERS) {
+    if (await triggerExists(trigger.name)) continue;
+    await query(trigger.sql);
+    log(`Added trigger ${trigger.name}`);
+  }
+}
+
 async function applyCheckinTriggers(log) {
   if (!(await tableExists('checkins'))) return;
   for (const trigger of CHECKIN_GUARD_TRIGGERS) {
@@ -528,6 +537,7 @@ async function applySchema({ log = () => {}, createDatabase = true } = {}) {
   await applyDerivedUniqueKeys(log);
   await applySecondaryIndexes(log);
   await applyUpdatedAtTriggers(log);
+  await applySingletonTriggers(log);
   await applyCheckinTriggers(log);
   return {
     statements: splitStatements(fs.readFileSync(SCHEMA_FILE, 'utf8')).length,
