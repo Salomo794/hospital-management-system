@@ -234,7 +234,7 @@ router.get('/insights', authenticate, authorize('admin', 'receptionist', 'doctor
     // Pharmacy inventory
     if (canViewPharmacy) {
       const [[expiring], [lowStock]] = await Promise.all([
-        pool.query("SELECT COUNT(*) as count FROM medicines WHERE expiry_date >= date('now') AND expiry_date <= date('now', '+30 days') AND is_active = 1"),
+        pool.query("SELECT COUNT(*) as count FROM medicines WHERE expiry_date >= CURRENT_DATE AND expiry_date <= DATE_ADD(CURRENT_DATE, INTERVAL 30 DAY) AND is_active = 1"),
         pool.query("SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1"),
       ]);
       if (expiring[0].count > 0) {
@@ -263,7 +263,7 @@ router.get('/insights', authenticate, authorize('admin', 'receptionist', 'doctor
         FROM patients p
         WHERE EXISTS (
           SELECT 1 FROM appointments c
-          WHERE c.patient_id = p.id AND c.status = 'cancelled' AND c.appointment_date >= date('now', '-90 days')`;
+          WHERE c.patient_id = p.id AND c.status = 'cancelled' AND c.appointment_date >= DATE_SUB(CURRENT_DATE, INTERVAL 90 DAY)`;
       const noShowParams = [];
       if (req.user.role === 'doctor') {
         noShowQuery += ' AND c.doctor_id = ?';
@@ -272,7 +272,7 @@ router.get('/insights', authenticate, authorize('admin', 'receptionist', 'doctor
       noShowQuery += `)
         AND EXISTS (
           SELECT 1 FROM appointments a
-          WHERE a.patient_id = p.id AND a.status = 'scheduled' AND a.appointment_date >= date('now')`;
+          WHERE a.patient_id = p.id AND a.status = 'scheduled' AND a.appointment_date >= CURRENT_DATE`;
       if (req.user.role === 'doctor') {
         noShowQuery += ' AND a.doctor_id = ?';
         noShowParams.push(req.user.id);
@@ -382,10 +382,10 @@ router.get('/financial', authenticate, authorize('admin'), async (req, res) => {
       groupBy = 'DATE(payment_date)';
       dateFormat = '%Y-%m-%d';
     } else if (period === 'weekly') {
-      groupBy = "strftime('%Y%W', payment_date)";
+      groupBy = "DATE_FORMAT(payment_date, '%Y%u')";
       dateFormat = '%x-W%v';
     } else {
-      groupBy = "strftime('%Y-%m', payment_date)";
+      groupBy = "DATE_FORMAT(payment_date, '%Y-%m')";
       dateFormat = '%Y-%m';
     }
     const expenseGroupBy = groupBy.replace(/payment_date/g, 'it.created_at');
@@ -402,14 +402,14 @@ router.get('/financial', authenticate, authorize('admin'), async (req, res) => {
           SELECT refund_date AS event_date, payment_method, -amount AS movement, -1 AS direction
             FROM payment_refunds
         )
-        WHERE CAST(strftime('%Y', event_date) AS INTEGER) = ?
+        WHERE YEAR(event_date) = ?
         GROUP BY ${cashGroupBy}, payment_method ORDER BY period`,
       [reportYear]
     );
     const [expenses] = await pool.query(
       `SELECT ${expenseGroupBy} as period, SUM(it.quantity * m.cost_price) as expenses, category
         FROM inventory_transactions it JOIN medicines m ON it.medicine_id = m.id
-        WHERE it.transaction_type = 'purchase' AND CAST(strftime('%Y', it.created_at) AS INTEGER) = ?
+        WHERE it.transaction_type = 'purchase' AND YEAR(it.created_at) = ?
         GROUP BY ${expenseGroupBy}, category ORDER BY period`,
       [reportYear]
     );
@@ -423,7 +423,7 @@ router.get('/financial', authenticate, authorize('admin'), async (req, res) => {
               ), 2) AS collected_revenue,
               COUNT(*) AS count
        FROM bill_items bi JOIN bills b ON bi.bill_id = b.id
-       WHERE CAST(strftime('%Y', b.created_at) AS INTEGER) = ?
+       WHERE YEAR(b.created_at) = ?
        GROUP BY bi.category ORDER BY collected_revenue DESC`,
       [reportYear]
     );
@@ -440,8 +440,8 @@ router.get('/patients', authenticate, authorize('admin', 'receptionist', 'doctor
     const [byGender] = await pool.query('SELECT gender, COUNT(*) as count FROM patients GROUP BY gender');
     const [byAge] = await pool.query(
       `WITH patient_ages AS (
-        SELECT CAST(strftime('%Y', 'now') AS INTEGER) - CAST(strftime('%Y', date_of_birth) AS INTEGER)
-          - CASE WHEN strftime('%m-%d', 'now') < strftime('%m-%d', date_of_birth) THEN 1 ELSE 0 END AS age
+        SELECT CAST(YEAR(CURRENT_DATE) AS INTEGER) - YEAR(date_of_birth)
+          - CASE WHEN DATE_FORMAT(CURRENT_DATE, '%m-%d') < DATE_FORMAT(date_of_birth, '%m-%d') THEN 1 ELSE 0 END AS age
         FROM patients
       )
       SELECT CASE
@@ -455,7 +455,7 @@ router.get('/patients', authenticate, authorize('admin', 'receptionist', 'doctor
     );
     const [byBloodType] = await pool.query('SELECT blood_type, COUNT(*) as count FROM patients WHERE blood_type IS NOT NULL GROUP BY blood_type');
     const [monthlyAdmissions] = await pool.query(
-      `SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count
+      `SELECT DATE_FORMAT(created_at, '%Y-%m') as month, COUNT(*) as count
         FROM patients GROUP BY month ORDER BY month DESC LIMIT 12`
     );
     const [topDiagnoses] = await pool.query(

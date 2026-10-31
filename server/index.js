@@ -29,6 +29,7 @@ const aiRoutes = require('./routes/ai');
 const smartRoutes = require('./routes/smart');
 const portalRoutes = require('./routes/portal');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
+const { structuredLogger } = require('./middleware/structuredLogger');
 
 const app = express();
 
@@ -89,6 +90,10 @@ app.use(express.json({
   },
 }));
 app.use(express.urlencoded({ extended: true, limit: process.env.JSON_LIMIT || '1mb' }));
+
+// Structured JSON request logging in production (stdout, log-aggregator ready).
+// Morgan handles text logging in non-production environments.
+app.use(structuredLogger);
 app.use((req, res, next) => {
   req.requestId = req.header('X-Request-ID') || crypto.randomUUID();
   res.setHeader('X-Request-ID', req.requestId);

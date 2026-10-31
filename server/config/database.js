@@ -3,20 +3,23 @@ loadEnvironment();
 
 const fs = require('fs');
 const mysql = require('mysql2/promise');
-const { translateSql } = require('./mysqlSql');
 const isTestEnvironment = process.env.NODE_ENV === 'test';
 if (isTestEnvironment) require('./testDatabase');
 
 function toMysqlDateTime(value) {
   if (value instanceof Date) {
     if (Number.isNaN(value.getTime())) return null;
-    return value.toISOString().slice(0, 19).replace('T', ' ');
+    return value.toISOString().replace('T', ' ').replace('Z', '000');
   }
   if (typeof value === 'string') {
-    return value.replace(
-      /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d+)?Z$/,
-      '$1 $2'
-    );
+    const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.(\d+))?Z$/);
+    if (match) {
+      const fraction = match[3] || '';
+      if (fraction.length > 6) {
+        throw new Error('UTC datetime values may have no more than six fractional digits.');
+      }
+      return `${match[1]} ${match[2]}.${fraction.padEnd(6, '0')}`;
+    }
   }
   return value;
 }
@@ -52,6 +55,9 @@ function mysqlDatabaseOptions(connectionUrl) {
   }
 
   const sslEnabled = process.env.DATABASE_SSL === 'true';
+  if (process.env.NODE_ENV === 'production' && !sslEnabled) {
+    throw new Error('DATABASE_SSL=true is required for MySQL connections in production.');
+  }
   const sslCaPath = String(process.env.DATABASE_SSL_CA || '').trim();
   return {
     host: url.hostname,
@@ -91,7 +97,7 @@ async function setUtcTimezone(connection) {
 function wrapConnection(connection) {
   return {
     query(sql, params = []) {
-      return connection.query(translateSql(sql), normalizeParams(params));
+      return connection.query(sql, normalizeParams(params));
     },
     beginTransaction() {
       return connection.beginTransaction();
@@ -116,7 +122,7 @@ const pool = {
     const connection = await mysqlPool.getConnection();
     try {
       await setUtcTimezone(connection);
-      return await connection.query(translateSql(sql), normalizeParams(params));
+      return await connection.query(sql, normalizeParams(params));
     } finally {
       connection.release();
     }

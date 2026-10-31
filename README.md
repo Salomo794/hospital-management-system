@@ -58,11 +58,10 @@ Important optional settings:
 | `TEST_DATABASE_URL` | none | Optional dedicated MySQL database for isolated test runs |
 | `APP_TIMEZONE` | `Africa/Kigali` | IANA zone the hospital operates in; see [Timezones](#timezones) |
 | `ALLOW_SIMULATED_PAYMENTS` | `false` | Enables demo portal payments only when `NODE_ENV` is `development` or `test` |
-| `AI_PROVIDER_ENABLED` | `false` | Explicit opt-in before general prompts are sent to an AI provider |
-| `AI_API_KEY` | none | Provider key; keep it only in `server/.env` or the hosting secret store |
-| `AI_MODEL` | `gpt-4o-mini` | Model name for an OpenAI-compatible chat-completions API |
-| `AI_CHAT_COMPLETIONS_URL` | OpenAI chat completions | Full provider endpoint URL |
-| `AI_TIMEOUT_MS` | `15000` | Maximum wait for a general AI response |
+| `AI_PROVIDER_ENABLED` | `false` | Explicit opt-in before general messages are sent to local Ollama |
+| `AI_OLLAMA_URL` | `http://127.0.0.1:11434` | Base URL for the local Ollama service |
+| `AI_MODEL` | `qwen2.5:1.5b` | Ollama model name; pull it with `ollama pull qwen2.5:1.5b` |
+| `AI_TIMEOUT_MS` | `60000` | Maximum wait for a local AI response |
 | `PUBLIC_URL` | `http://localhost:3000` | Public client address used to build password reset links |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | none / `587` / `false` | Outbound mail server; `SMTP_USER` and `SMTP_PASS` are also required |
 | `SMTP_FROM` | derived from `SMTP_HOST` | Optional `From` address for reset email |
@@ -76,7 +75,7 @@ To use a non-default API port during client development, create `client/.env.loc
 VITE_API_PROXY_TARGET=http://localhost:5001
 ```
 
-The assistant's hospital lookups continue to run through the app's authenticated, role-checked database queries. To enable general conversational responses, set `AI_PROVIDER_ENABLED=true`, `AI_API_KEY`, and (if needed) `AI_MODEL` / `AI_CHAT_COMPLETIONS_URL` in `server/.env`. Only the user's typed message is sent to that provider; patient records and lookup results are not included. Do not enter patient identifiers or clinical details. Review the provider's privacy and regulatory terms before enabling this with real hospital data. General AI responses are not for clinical decisions.
+The assistant's hospital lookups continue to run through the app's authenticated, role-checked database queries. To enable conversational responses, install Ollama, pull the configured model (`ollama pull qwen2.5:1.5b`), and set `AI_PROVIDER_ENABLED=true` in `server/.env`. The assistant uses local Ollama and keeps recent general-chat messages for follow-ups. Hospital database results are excluded from chat history and are never sent to the model. Do not enter patient identifiers or clinical details. General AI responses are not for clinical decisions.
 
 ### 3. Initialize the database
 
@@ -422,7 +421,6 @@ Use HTTPS, a strong `JWT_SECRET`, an explicit `CORS_ORIGINS` allowlist, encrypte
 
 ## Known limitations
 
-- The folder `hospital-management-system/` inside this repository is a stale duplicate of the root application. Nothing in CI, `render.yaml`, `vercel.json` or `start-hms.cmd` references it. It is retained pending approval to remove it.
 - Drug-interaction screening ships with a small demonstration dataset. Production refuses to start with it unless `ALLOW_DEMO_INTERACTIONS=true` is set. A licensed, maintained dataset must be loaded with `npm run db:interactions` and clinically reviewed before use.
 - Multi-factor authentication exists but is opt-in; it is not enforced for admin or doctor accounts. Account lockout is rate-limiter based only.
 - Only the sidebar, page header and dashboard are translated into French and Kinyarwanda (see [Language and currency](#language-and-currency)); every other screen is still English, as is text sent by the API. The Kinyarwanda strings need review by a native speaker before go-live.

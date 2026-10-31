@@ -9,6 +9,8 @@ _old_modules/
 *.db.bak-*
 *.sqlite
 *.sqlite3
+*.pre-mysql-*.bak
+*.mysql-migration-*.json
 backups/
 pre-restore-*.db
 dist/
@@ -17,3 +19,4 @@ dist/
 .vscode/
 coverage/
 npm-debug.log*
+.aider*

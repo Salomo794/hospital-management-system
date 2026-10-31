@@ -1,8 +1,9 @@
-const DEFAULT_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
-const DEFAULT_MODEL = 'gpt-4o-mini';
+const DEFAULT_BASE_URL = 'http://127.0.0.1:11434';
+const DEFAULT_MODEL = 'qwen2.5:1.5b';
 const SYSTEM_PROMPT = [
-  'You are a general-purpose assistant inside a hospital management system.',
-  'Help with general writing, explanations, and non-clinical administrative questions only.',
+  'You are a helpful general-purpose assistant inside a hospital management system.',
+  'Help with general questions, writing, explanations, and non-clinical administrative work. Keep answers concise.',
+  'Use the conversation history to understand references and follow-up questions. Answer directly and naturally.',
   'Do not diagnose, interpret test results, recommend treatments, medicines, doses, or triage.',
   'Do not claim to access or change hospital records; no records are provided to you.',
   'Do not ask for patient identifiers or sensitive health information.',
@@ -10,49 +11,47 @@ const SYSTEM_PROMPT = [
 ].join(' ');
 
 function isAssistantConfigured() {
-  return process.env.AI_PROVIDER_ENABLED === 'true' && Boolean(process.env.AI_API_KEY?.trim());
+  return process.env.AI_PROVIDER_ENABLED === 'true';
 }
 
-async function generateAssistantReply(message) {
+async function generateAssistantReply(message, history = []) {
   if (!isAssistantConfigured()) return null;
 
-  const endpoint = process.env.AI_CHAT_COMPLETIONS_URL || DEFAULT_ENDPOINT;
+  const baseUrl = (process.env.AI_OLLAMA_URL || DEFAULT_BASE_URL).replace(/\/+$/, '');
   const model = process.env.AI_MODEL || DEFAULT_MODEL;
-  const timeoutMs = Math.max(1000, Math.min(Number(process.env.AI_TIMEOUT_MS) || 15000, 60000));
+  const timeoutMs = Math.max(1000, Math.min(Number(process.env.AI_TIMEOUT_MS) || 60000, 120000));
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(endpoint, {
+    const response = await fetch(`${baseUrl}/api/chat`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.AI_API_KEY.trim()}`,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
+          ...history.map(({ role, content }) => ({ role, content })),
           { role: 'user', content: message }
         ],
-        temperature: 0.3,
-        max_tokens: 500
+        stream: false,
+        options: { temperature: 0.3, num_predict: 96 }
       }),
       signal: controller.signal
     });
 
-    if (!response.ok) throw new Error(`AI provider returned HTTP ${response.status}`);
+    if (!response.ok) throw new Error(`Ollama returned HTTP ${response.status}`);
 
     const result = await response.json();
-    const reply = result.choices?.[0]?.message?.content;
+    const reply = result.message?.content;
     if (typeof reply !== 'string' || !reply.trim()) {
-      throw new Error('AI provider returned an empty response');
+      throw new Error('Ollama returned an empty response');
     }
     return reply.trim();
   } catch (error) {
-    if (error.name === 'AbortError') throw new Error('AI provider request timed out');
-    if (error.message.startsWith('AI provider')) throw error;
-    throw new Error('AI provider request failed');
+    if (error.name === 'AbortError') throw new Error('Local AI request timed out');
+    if (error.message.startsWith('Ollama returned')) throw error;
+    throw new Error('Could not reach the local Ollama service');
   } finally {
     clearTimeout(timeout);
   }

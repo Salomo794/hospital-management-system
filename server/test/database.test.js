@@ -7,7 +7,6 @@ process.env.NODE_ENV = 'test';
 
 const pool = require('../config/database');
 const setupDatabase = require('../config/setup');
-const { translateSql } = require('../config/mysqlSql');
 
 before(async () => {
   await setupDatabase();
@@ -25,22 +24,15 @@ test('database adapter requires and connects only to MySQL', async () => {
 test('normalizes UTC dates to MySQL DATETIME values', async () => {
   const date = new Date('2026-10-30T16:33:14.162Z');
   assert.deepEqual(pool.normalizeParams([date, '2026-10-30T16:33:14.162Z']), [
-    '2026-10-30 16:33:14',
-    '2026-10-30 16:33:14',
+    '2026-10-30 16:33:14.162000',
+    '2026-10-30 16:33:14.162000',
   ]);
   const [rows] = await pool.query('SELECT ? AS date_from_object, ? AS date_from_string', [
     date,
     '2026-10-30T16:33:14.162Z',
   ]);
-  assert.equal(rows[0].date_from_object, '2026-10-30 16:33:14');
-  assert.equal(rows[0].date_from_string, '2026-10-30 16:33:14');
-});
-
-test('translates legacy string concatenation to MySQL CONCAT', () => {
-  assert.equal(
-    translateSql("SELECT first_name || ' ' || last_name AS full_name FROM users"),
-    "SELECT CONCAT(first_name, ' ', last_name) AS full_name FROM users"
-  );
+  assert.equal(rows[0].date_from_object, '2026-10-30 16:33:14.162000');
+  assert.equal(rows[0].date_from_string, '2026-10-30 16:33:14.162000');
 });
 
 test('schema setup creates MySQL tables with the payment constraints', async () => {
@@ -61,4 +53,52 @@ test('schema setup creates MySQL tables with the payment constraints', async () 
        AND tc.CONSTRAINT_TYPE = 'CHECK'`
   );
   assert.ok(constraints.some(row => row.check_clause.includes('mobile_money')));
+
+  const [tables] = await pool.query(
+    `SELECT COUNT(*) AS count FROM information_schema.tables
+     WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE' AND engine = 'InnoDB'`
+  );
+  assert.equal(Number(tables[0].count), 27);
+
+  const [amountColumns] = await pool.query(
+    `SELECT DATA_TYPE AS data_type FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'payments' AND column_name = 'amount'`
+  );
+  assert.equal(amountColumns[0].data_type, 'decimal');
+});
+
+test('conditional unique indexes allow history but protect active records', async () => {
+  const [user] = await pool.query(
+    `INSERT INTO users (uuid, email, password, role, first_name, last_name)
+     VALUES (?, ?, 'hash', 'admin', 'Test', 'User')`,
+    [`${Date.now()}-user`, `${Date.now()}@example.test`]
+  );
+  const [patient] = await pool.query(
+    `INSERT INTO patients (uuid, mrn, first_name, last_name, date_of_birth, gender)
+     VALUES (?, ?, 'Test', 'Patient', '2000-01-01', 'other')`,
+    [`${Date.now()}-patient`, `${Date.now()}`]
+  );
+  const appointmentValues = [patient.insertId, user.insertId, '2030-01-01', '09:00:00'];
+  await pool.query(
+    `INSERT INTO appointments
+     (uuid, appointment_number, patient_id, doctor_id, appointment_date, appointment_time, status)
+     VALUES (?, ?, ?, ?, ?, ?, 'cancelled'), (?, ?, ?, ?, ?, ?, 'cancelled')`,
+    [`${Date.now()}-a1`, `${Date.now()}-n1`, ...appointmentValues,
+      `${Date.now()}-a2`, `${Date.now()}-n2`, ...appointmentValues]
+  );
+  await pool.query(
+    `INSERT INTO appointments
+     (uuid, appointment_number, patient_id, doctor_id, appointment_date, appointment_time)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [`${Date.now()}-a3`, `${Date.now()}-n3`, ...appointmentValues]
+  );
+  await assert.rejects(
+    pool.query(
+      `INSERT INTO appointments
+       (uuid, appointment_number, patient_id, doctor_id, appointment_date, appointment_time)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [`${Date.now()}-a4`, `${Date.now()}-n4`, ...appointmentValues]
+    ),
+    error => error.code === 'ER_DUP_ENTRY'
+  );
 });

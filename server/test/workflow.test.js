@@ -10,7 +10,7 @@ const { after, before, test } = require('node:test');
 const assert = require('node:assert/strict');
 const request = require('supertest');
 
-process.env.TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || 'mysql://root:rootpass@127.0.0.1:3306/hms_test';
+process.env.TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || 'mysql://root:root@127.0.0.1:3306/hms_test';
 process.env.JWT_SECRET = 'test-secret-that-is-at-least-32-characters-long';
 process.env.NODE_ENV = 'test';
 
@@ -133,7 +133,7 @@ test('a patient can be taken from registration to a settled bill, with every rol
 
   // ── Doctor prescribes; pharmacist dispenses and stock falls ──────────────
   const [stocked] = await pool.query(
-    "SELECT id, stock_quantity FROM medicines WHERE is_active = 1 AND stock_quantity >= 20 AND (expiry_date IS NULL OR expiry_date > date('now')) ORDER BY id LIMIT 1"
+    "SELECT id, stock_quantity FROM medicines WHERE is_active = 1 AND stock_quantity >= 20 AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE) ORDER BY id LIMIT 1"
   );
   assert.ok(stocked.length, 'the seed data has an in-date medicine with stock');
   const medicine = stocked[0];

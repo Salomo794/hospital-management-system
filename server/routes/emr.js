@@ -57,7 +57,7 @@ router.get('/prescriptions/:medicalRecordId', authenticate, authorize(...EMR_ROL
   }
   const [rows] = await pool.query(
     `SELECT p.*, u.first_name as doctor_first_name, u.last_name as doctor_last_name,
-            GROUP_CONCAT(m.name || ' - ' || pi.dosage || ' ' || pi.frequency || ' for ' || pi.duration || ' x' || pi.quantity, '\n') AS items
+            GROUP_CONCAT(CONCAT(m.name, ' - ', pi.dosage, ' ', pi.frequency, ' for ', pi.duration, ' x', pi.quantity), '\n') AS items
      FROM prescriptions p JOIN users u ON p.doctor_id = u.id
      LEFT JOIN prescription_items pi ON p.id = pi.prescription_id
      LEFT JOIN medicines m ON pi.medicine_id = m.id

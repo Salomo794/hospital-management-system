@@ -36,7 +36,7 @@ function expiryStamp(minutes = EXPIRY_MINUTES) {
  */
 async function issueToken(connection, { userId, ipAddress = null }) {
   await connection.query(
-    "UPDATE password_reset_tokens SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL",
+    "UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE user_id = ? AND used_at IS NULL",
     [userId]
   );
   const token = generateToken();
@@ -80,7 +80,7 @@ async function resolveToken(connection, token) {
 
 async function markUsed(connection, tokenId) {
   await connection.query(
-    "UPDATE password_reset_tokens SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL",
+    "UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = ? AND used_at IS NULL",
     [tokenId]
   );
 }
