@@ -176,13 +176,13 @@ router.post('/reset-password', asyncHandler(async (req, res) => {
     // authenticate middleware rejects any token carrying an older one.
     const stamp = new Date().toISOString();
     await connection.query(
-      "UPDATE users SET password = ?, password_changed_at = ?, updated_at = datetime('now') WHERE id = ?",
+      "UPDATE users SET password = ?, password_changed_at = ?, updated_at = NOW() WHERE id = ?",
       [hashedPassword, stamp, user.id]
     );
     await markUsed(connection, row.id);
     // Every other outstanding link for the account dies with this one.
     await connection.query(
-      "UPDATE password_reset_tokens SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL",
+      "UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL",
       [user.id]
     );
     await recordAudit({
@@ -269,7 +269,7 @@ router.post('/login', asyncHandler(async (req, res) => {
 
   loginByIdentifier.reset(identifierKey);
   loginByIp.reset(ipKey);
-  await pool.query("UPDATE users SET last_login = datetime('now') WHERE id = ?", [user.id]);
+  await pool.query("UPDATE users SET last_login = NOW() WHERE id = ?", [user.id]);
   await recordAudit({
     req,
     action: 'auth.login.succeeded',
@@ -408,7 +408,7 @@ router.put('/change-password', authenticate, asyncHandler(async (req, res) => {
   // device that is not this one. A user changing a password they believe was
   // exposed needs that guarantee, not just a working new password.
   await pool.query(
-    "UPDATE users SET password = ?, password_changed_at = ?, updated_at = datetime('now') WHERE id = ?",
+    "UPDATE users SET password = ?, password_changed_at = ?, updated_at = NOW() WHERE id = ?",
     [hashedPassword, new Date().toISOString(), req.user.id]
   );
   await recordAudit({

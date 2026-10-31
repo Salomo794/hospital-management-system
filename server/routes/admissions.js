@@ -167,7 +167,7 @@ router.post('/', authenticate, authorize(...ADMISSION_ROLES), asyncHandler(async
       `INSERT INTO admissions
        (uuid, admission_number, patient_id, doctor_id, ward, bed_number, diagnosis,
         treatment_plan, chief_complaint, triage_severity, status, notes, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?, datetime('now'))`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?, NOW())`,
       [
         randomUUID(), `ADM-${Date.now().toString(36).toUpperCase()}-${randomToken(5)}`,
         patientId, doctorId, ward, freeBed, diagnosis || null, treatment_plan || null,
@@ -250,7 +250,7 @@ router.put('/:id', authenticate, authorize(...ADMISSION_ROLES), asyncHandler(asy
     if (status !== undefined) {
       updates.push('status = ?');
       values.push(status);
-      updates.push(`discharge_date = ${status === 'discharged' ? "datetime('now')" : 'NULL'}`);
+      updates.push(`discharge_date = ${status === 'discharged' ? "NOW()" : 'NULL'}`);
     }
     if (updates.length === 0) throw new ApiError(400, 'Nothing to update');
     values.push(id);
@@ -274,7 +274,7 @@ router.post('/:id/discharge', authenticate, authorize(...ADMISSION_ROLES), async
     throw new ApiError(403, 'You may only discharge admissions assigned to you.');
   }
   if (existing[0].status === 'discharged') throw new ApiError(409, 'Patient is already discharged');
-  await pool.query("UPDATE admissions SET status = 'discharged', discharge_date = datetime('now') WHERE id = ?", [id]);
+  await pool.query("UPDATE admissions SET status = 'discharged', discharge_date = NOW() WHERE id = ?", [id]);
   res.json({ message: 'Patient discharged successfully', id });
 }));
 

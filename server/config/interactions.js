@@ -203,17 +203,19 @@ async function run() {
         [row.a, row.b, row.severity, row.description, row.management, sourceLabel]
       );
     }
+    // MySQL upsert. The row is a singleton (id = 1, enforced by a CHECK), so
+    // ON DUPLICATE KEY UPDATE replaces SQLite's ON CONFLICT ... excluded.*.
     await connection.query(
       `INSERT INTO safety_reference
          (id, source, description, reference_name, reference_version, loaded_at, interaction_count)
-       VALUES (1,?,?,?,?,datetime('now'),?)
-       ON CONFLICT(id) DO UPDATE SET
-         source = excluded.source,
-         description = excluded.description,
-         reference_name = excluded.reference_name,
-         reference_version = excluded.reference_version,
-         loaded_at = excluded.loaded_at,
-         interaction_count = excluded.interaction_count`,
+       VALUES (1,?,?,?,?,NOW(),?)
+       ON DUPLICATE KEY UPDATE
+         source = VALUES(source),
+         description = VALUES(description),
+         reference_name = VALUES(reference_name),
+         reference_version = VALUES(reference_version),
+         loaded_at = VALUES(loaded_at),
+         interaction_count = VALUES(interaction_count)`,
       [source, options.description || null, options.name || null, options.version || null, valid.length]
     );
   });

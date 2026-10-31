@@ -481,7 +481,7 @@ router.post('/orders/:id/submit', authenticate, authorize(...PROCUREMENT_ROLES),
     if (itemRows[0].count === 0) throw new ApiError(400, 'Cannot submit a purchase order with no items');
 
     await connection.query(
-      "UPDATE purchase_orders SET status = 'submitted', submitted_at = datetime('now') WHERE id = ?", [id]
+      "UPDATE purchase_orders SET status = 'submitted', submitted_at = NOW() WHERE id = ?", [id]
     );
     // Approvers are administrators. The raiser is deliberately excluded so the
     // notification cannot land back on the person who needs separation from it.
@@ -529,7 +529,7 @@ router.post('/orders/:id/approve', authenticate, authorize('admin'), asyncHandle
 
   await withTransaction(pool, async connection => {
     await connection.query(
-      `UPDATE purchase_orders SET status = 'approved', approved_by = ?, approved_at = datetime('now') WHERE id = ?`,
+      `UPDATE purchase_orders SET status = 'approved', approved_by = ?, approved_at = NOW() WHERE id = ?`,
       [req.user.id, id]
     );
     if (order.ordered_by) {
@@ -690,7 +690,7 @@ router.post('/orders/:id/receive', authenticate, authorize(...PROCUREMENT_ROLES)
     const fullyReceived = Number(after[0].received) >= Number(after[0].ordered);
     await connection.query(
       `UPDATE purchase_orders
-       SET status = ?, received_at = CASE WHEN ? THEN datetime('now') ELSE received_at END
+       SET status = ?, received_at = CASE WHEN ? THEN NOW() ELSE received_at END
        WHERE id = ?`,
       [fullyReceived ? 'received' : 'partially_received', fullyReceived ? 1 : 0, id]
     );

@@ -291,7 +291,7 @@ router.post('/dispense', authenticate, authorize('pharmacist'), asyncHandler(asy
     const newDispensedQuantity = dispensedQuantity + quantity;
     const [itemUpdate] = await connection.query(
       `UPDATE prescription_items
-       SET dispensed_quantity = ?, dispensed = ?, dispensed_date = CASE WHEN ? >= quantity THEN datetime('now') ELSE dispensed_date END
+       SET dispensed_quantity = ?, dispensed = ?, dispensed_date = CASE WHEN ? >= quantity THEN NOW() ELSE dispensed_date END
        WHERE id = ? AND prescription_id = ? AND dispensed_quantity = ?`,
       [newDispensedQuantity, newDispensedQuantity >= prescriptionQuantity ? 1 : 0, newDispensedQuantity, prescriptionItemId, item.prescription_id, dispensedQuantity]
     );
