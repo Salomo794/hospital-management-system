@@ -362,18 +362,32 @@ async function seed() {
         const usable = lines.filter(line => medByName[line.medicine]);
         if (usable.length === 0) return;
         const received = status === 'received';
-        // Timestamps are SQLite expressions rather than bound values, because
-        // datetime('now', ?) is not evaluated in a parameter slot.
+        // Timestamps are computed in JavaScript and bound as values. SQLite could
+        // evaluate datetime('now', ?) inline, but MySQL will not accept a modifier
+        // such as '-5 days' in a parameter slot, so the arithmetic happens here.
+        const daysAgo = (days) => {
+          if (days === null || days === undefined) return null;
+          const value = new Date();
+          value.setDate(value.getDate() - days);
+          return value;
+        };
+        const dateFromModifier = (modifier) => {
+          if (!modifier) return null;
+          const match = String(modifier).trim().match(/^([+-]?\d+)\s*(day|month|year)s?$/i);
+          if (!match) throw new Error(`Unsupported demo seed date modifier: ${modifier}`);
+          const amount = Number(match[1]);
+          const unit = match[2].toLowerCase();
+          const value = new Date();
+          if (unit === 'day') value.setDate(value.getDate() + amount);
+          if (unit === 'month') value.setMonth(value.getMonth() + amount);
+          if (unit === 'year') value.setFullYear(value.getFullYear() + amount);
+          return value;
+        };
         const [poResult] = await conn.query(
           `INSERT INTO purchase_orders
            (uuid, order_number, supplier_id, status, total_amount, ordered_by, approved_by,
             expected_date, notes, submitted_at, approved_at, received_at)
-           VALUES (?, ?, ?, ?, 0, ?, ?,
-                   CASE WHEN ? IS NULL THEN NULL ELSE date('now', ?) END,
-                   ?,
-                   datetime('now', ?),
-                   CASE WHEN ? THEN datetime('now', ?) ELSE NULL END,
-                   CASE WHEN ? THEN datetime('now', ?) ELSE NULL END)`,
+           VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
           [
             randomUUID(),
             number,
@@ -381,14 +395,11 @@ async function seed() {
             status,
             doctorUserId1,
             received ? adminUserId : null,
-            expectedDate || null,
-            expectedDate || null,
+            dateFromModifier(expectedDate),
             note,
-            submittedOffsetDays === null ? null : `-${submittedOffsetDays} days`,
-            received ? 1 : 0,
-            approvedOffsetDays === null ? null : `-${approvedOffsetDays} days`,
-            received ? 1 : 0,
-            receivedOffsetDays === null ? null : `-${receivedOffsetDays} days`,
+            daysAgo(submittedOffsetDays),
+            received ? daysAgo(approvedOffsetDays) : null,
+            received ? daysAgo(receivedOffsetDays) : null,
           ]
         );
         for (const line of usable) {
