@@ -231,7 +231,10 @@ async function runTransaction(callback) {
         console.error('[database] rollback failed:', sanitizeError(rollbackError).message);
       }
     }
-    throw error && error.isDatabaseError ? error : sanitizeError(error);
+    // Driver failures arrive already sanitised (isDatabaseError). Anything the
+    // callback itself threw is an application error and must reach the caller
+    // untouched, otherwise route handlers lose their business-rule messages.
+    throw error;
   } finally {
     connection.release();
   }
