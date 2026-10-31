@@ -325,13 +325,10 @@ async function ensureDatabase() {
   if (!/^[A-Za-z0-9_$]+$/.test(name)) {
     throw new Error(`Refusing to create a database with an unsafe name: ${name}`);
   }
-  const connection = await mysql.createConnection({
-    host: config.host,
-    port: config.port,
-    user: config.user,
-    password: config.password,
-    connectTimeout: config.connectTimeout,
-  });
+  // Use the pool's standalone connection factory: the exported `config` above is
+  // redacted (no password), so building the options here would connect
+  // anonymously and fail with "Access denied ... (using password: NO)".
+  const connection = await createBootstrapConnection();
   try {
     await connection.query(
       `CREATE DATABASE IF NOT EXISTS \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
