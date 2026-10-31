@@ -83,8 +83,8 @@ async function loadOrderDetail(id) {
   const [orders] = await pool.query(
     `SELECT po.*, s.name AS supplier_name, s.contact_name AS supplier_contact,
             s.email AS supplier_email, s.phone AS supplier_phone, s.lead_time_days,
-            uo.first_name || ' ' || uo.last_name AS ordered_by_name,
-            ua.first_name || ' ' || ua.last_name AS approved_by_name
+            CONCAT(uo.first_name, ' ', uo.last_name) AS ordered_by_name,
+            CONCAT(ua.first_name, ' ', ua.last_name) AS approved_by_name
      FROM purchase_orders po
      JOIN suppliers s ON s.id = po.supplier_id
      LEFT JOIN users uo ON uo.id = po.ordered_by
@@ -357,7 +357,7 @@ router.get('/orders', authenticate, authorize(...PROCUREMENT_ROLES), asyncHandle
     `SELECT po.id, po.uuid, po.order_number, po.status, po.total_amount, po.expected_date,
             po.submitted_at, po.approved_at, po.received_at, po.created_at,
             s.name AS supplier_name,
-            uo.first_name || ' ' || uo.last_name AS ordered_by_name,
+            CONCAT(uo.first_name, ' ', uo.last_name) AS ordered_by_name,
             (SELECT COUNT(*) FROM purchase_order_items poi WHERE poi.purchase_order_id = po.id) AS item_count,
             (SELECT COALESCE(SUM(poi.quantity_received), 0) FROM purchase_order_items poi
               WHERE poi.purchase_order_id = po.id) AS units_received

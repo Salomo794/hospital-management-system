@@ -198,8 +198,8 @@ router.get('/command-center', authenticate, authorize(...OPERATIONS_ROLES), asyn
     // Today's appointment timeline
     const [timeline] = await pool.query(
       `SELECT a.id, a.appointment_time, a.status, a.type, a.reason,
-         p.first_name || ' ' || p.last_name as patient_name, p.mrn,
-         u.first_name || ' ' || u.last_name as doctor_name
+         CONCAT(p.first_name, ' ', p.last_name) as patient_name, p.mrn,
+         CONCAT(u.first_name, ' ', u.last_name) as doctor_name
        FROM appointments a
        JOIN patients p ON a.patient_id = p.id
        JOIN users u ON a.doctor_id = u.id

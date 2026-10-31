@@ -116,7 +116,7 @@ router.post('/chat', authenticate, async (req, res) => {
         `SELECT id, mrn, first_name, last_name, date_of_birth, gender, phone, blood_type, status
          FROM patients
          WHERE first_name LIKE ? ESCAPE '!' OR last_name LIKE ? ESCAPE '!'
-            OR first_name || ' ' || last_name LIKE ? ESCAPE '!' OR mrn LIKE ? ESCAPE '!'
+            OR CONCAT(first_name, ' ', last_name) LIKE ? ESCAPE '!' OR mrn LIKE ? ESCAPE '!'
          LIMIT 5`,
         [patientSearch, patientSearch, patientSearch, patientSearch]
       );
@@ -172,8 +172,8 @@ router.post('/chat', authenticate, async (req, res) => {
       }
       const today = zonedDate();
       let query = `SELECT a.appointment_time, a.status, a.type,
-        p.first_name || ' ' || p.last_name as patient_name,
-        u.first_name || ' ' || u.last_name as doctor_name
+        CONCAT(p.first_name, ' ', p.last_name) as patient_name,
+        CONCAT(u.first_name, ' ', u.last_name) as doctor_name
         FROM appointments a JOIN patients p ON a.patient_id = p.id JOIN users u ON a.doctor_id = u.id
         WHERE a.appointment_date = ?`;
       const params = [today];
@@ -461,7 +461,7 @@ router.post('/chat', authenticate, async (req, res) => {
         const [patients] = await pool.query(
           `SELECT first_name, last_name, mrn, allergies FROM patients
            WHERE first_name LIKE ? ESCAPE '!' OR last_name LIKE ? ESCAPE '!'
-              OR first_name || ' ' || last_name LIKE ? ESCAPE '!' OR mrn LIKE ? ESCAPE '!'
+              OR CONCAT(first_name, ' ', last_name) LIKE ? ESCAPE '!' OR mrn LIKE ? ESCAPE '!'
            LIMIT 5`,
           [patientSearch, patientSearch, patientSearch, patientSearch]
         );
