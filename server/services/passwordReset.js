@@ -25,9 +25,11 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(String(token)).digest('hex');
 }
 
-function expiryStamp(minutes = EXPIRY_MINUTES) {
-  return new Date(Date.now() + minutes * 60 * 1000).toISOString();
-}
+// The expiry stamp is deliberately computed by MySQL, not by Node. Every
+// comparison against it happens in SQL too, so a clock skew or a timezone
+// difference between the API host and the database can never resurrect an
+// expired link or kill a fresh one.
+const EXPIRY_INTERVAL_SQL = 'DATE_ADD(NOW(), INTERVAL ? MINUTE)';
 
 /**
  * Issues a token for a user, retiring any that are still outstanding. Only one
