@@ -261,12 +261,12 @@ router.get('/suggestions', authenticate, authorize(...PROCUREMENT_ROLES), asyncH
               SELECT SUM(it.quantity) FROM inventory_transactions it
               WHERE it.medicine_id = m.id
                 AND it.transaction_type = 'dispense'
-                AND date(it.created_at) >= date('now', '-30 days')
+                AND DATE(it.created_at) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
             ), 0) AS dispensed_30d
      FROM medicines m
      WHERE m.is_active = 1
        AND (m.stock_quantity <= m.min_stock_level
-         OR (m.expiry_date IS NOT NULL AND date(m.expiry_date) <= date('now', '+30 days')))
+         OR (m.expiry_date IS NOT NULL AND DATE(m.expiry_date) <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)))
      ORDER BY m.stock_quantity ASC, m.name ASC
      LIMIT 50`
   );
@@ -744,7 +744,7 @@ router.get('/summary', authenticate, authorize(...PROCUREMENT_ROLES), asyncHandl
   );
   const [expiring] = await pool.query(
     `SELECT COUNT(*) AS count FROM medicines
-     WHERE is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+30 days')`
+     WHERE is_active = 1 AND expiry_date IS NOT NULL AND DATE(expiry_date) <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)`
   );
   const [activeSuppliers] = await pool.query('SELECT COUNT(*) AS count FROM suppliers WHERE is_active = 1');
 

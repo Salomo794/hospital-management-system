@@ -234,7 +234,7 @@ router.get('/insights', authenticate, authorize('admin', 'receptionist', 'doctor
     // Pharmacy inventory
     if (canViewPharmacy) {
       const [[expiring], [lowStock]] = await Promise.all([
-        pool.query("SELECT COUNT(*) as count FROM medicines WHERE expiry_date >= date('now') AND expiry_date <= date('now', '+30 days') AND is_active = 1"),
+        pool.query("SELECT COUNT(*) as count FROM medicines WHERE expiry_date >= CURDATE() AND expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY) AND is_active = 1"),
         pool.query("SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1"),
       ]);
       if (expiring[0].count > 0) {
@@ -263,7 +263,7 @@ router.get('/insights', authenticate, authorize('admin', 'receptionist', 'doctor
         FROM patients p
         WHERE EXISTS (
           SELECT 1 FROM appointments c
-          WHERE c.patient_id = p.id AND c.status = 'cancelled' AND c.appointment_date >= date('now', '-90 days')`;
+          WHERE c.patient_id = p.id AND c.status = 'cancelled' AND c.appointment_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)`;
       const noShowParams = [];
       if (req.user.role === 'doctor') {
         noShowQuery += ' AND c.doctor_id = ?';
@@ -272,7 +272,7 @@ router.get('/insights', authenticate, authorize('admin', 'receptionist', 'doctor
       noShowQuery += `)
         AND EXISTS (
           SELECT 1 FROM appointments a
-          WHERE a.patient_id = p.id AND a.status = 'scheduled' AND a.appointment_date >= date('now')`;
+          WHERE a.patient_id = p.id AND a.status = 'scheduled' AND a.appointment_date >= CURDATE()`;
       if (req.user.role === 'doctor') {
         noShowQuery += ' AND a.doctor_id = ?';
         noShowParams.push(req.user.id);

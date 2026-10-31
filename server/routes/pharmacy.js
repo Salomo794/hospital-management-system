@@ -37,7 +37,7 @@ router.get('/alerts', authenticate, authorize(...PHARMACY_ROLES), asyncHandler(a
     'SELECT * FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1 ORDER BY stock_quantity ASC'
   );
   const [expired] = await pool.query(
-    "SELECT * FROM medicines WHERE expiry_date < date('now') AND is_active = 1"
+    "SELECT * FROM medicines WHERE expiry_date < CURDATE() AND is_active = 1"
   );
   res.json({ low_stock: lowStock, expired });
 }));

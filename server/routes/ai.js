@@ -387,7 +387,7 @@ router.post('/chat', authenticate, async (req, res) => {
           "SELECT COUNT(*) as count FROM medicines WHERE stock_quantity <= min_stock_level AND is_active = 1"
         );
         const [expiring] = await pool.query(
-          "SELECT COUNT(*) as count FROM medicines WHERE expiry_date >= date('now') AND expiry_date <= date('now', '+30 days') AND is_active = 1"
+          "SELECT COUNT(*) as count FROM medicines WHERE expiry_date >= CURDATE() AND expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY) AND is_active = 1"
         );
         response = 'Pharmacy inventory overview:';
         data = {
@@ -526,7 +526,7 @@ router.post('/chat', authenticate, async (req, res) => {
         appointmentsTodayParams.push(req.user.id);
       }
       const [apptsToday] = await pool.query(appointmentsTodayQuery, appointmentsTodayParams);
-      const [waiting] = await pool.query("SELECT COUNT(*) as count FROM checkins WHERE checkin_date = date('now') AND status IN ('waiting','in_consultation')");
+      const [waiting] = await pool.query("SELECT COUNT(*) as count FROM checkins WHERE checkin_date = CURDATE() AND status IN ('waiting','in_consultation')");
       const [admissions] = await pool.query("SELECT COUNT(*) as count FROM admissions WHERE status = 'admitted'");
       const overview = {
         appointments_today: apptsToday[0].count,
@@ -551,7 +551,7 @@ router.post('/chat', authenticate, async (req, res) => {
         return res.status(403).json({ response: 'You do not have permission to view operational forecasts.', data: null });
       }
       let historyQuery = `SELECT appointment_date, COUNT(*) as count FROM appointments
-        WHERE appointment_date >= date('now', '-42 days') AND appointment_date < date('now')`;
+        WHERE appointment_date >= DATE_SUB(CURDATE(), INTERVAL 42 DAY) AND appointment_date < CURDATE()`;
       const historyParams = [];
       if (req.user.role === 'doctor') {
         historyQuery += ' AND doctor_id = ?';

@@ -308,7 +308,7 @@ async function assertAppointmentBelongsTo(connection, appointmentId, patientId) 
 async function createCheckin(connection, patient, appointmentId, purpose, qrToken) {
   const [existing] = await connection.query(
     `SELECT id FROM checkins
-     WHERE patient_id = ? AND checkin_date = date('now') AND status != 'cancelled'
+     WHERE patient_id = ? AND checkin_date = CURDATE() AND status != 'cancelled'
      LIMIT 1`,
     [patient.id]
   );
@@ -325,7 +325,7 @@ async function createCheckin(connection, patient, appointmentId, purpose, qrToke
 
   const [positionRows] = await connection.query(
     `SELECT COUNT(*) AS count FROM checkins
-     WHERE checkin_date = date('now') AND status IN ('waiting', 'in_consultation')`
+     WHERE checkin_date = CURDATE() AND status IN ('waiting', 'in_consultation')`
   );
 
   return { checkin: created[0], queuePosition: Number(positionRows[0].count) };

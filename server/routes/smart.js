@@ -102,7 +102,7 @@ router.get('/forecast', authenticate, authorize(...OPERATIONS_ROLES), async (req
                   FROM inventory_transactions it
                   WHERE it.medicine_id = m.id
                     AND it.transaction_type = 'dispense'
-                    AND date(it.created_at) >= date('now', '-30 days')
+                    AND DATE(it.created_at) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
                 ), 0) AS dispensed_30d
          FROM medicines m
          WHERE m.is_active = 1
