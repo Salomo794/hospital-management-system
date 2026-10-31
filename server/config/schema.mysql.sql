@@ -465,7 +465,7 @@ CREATE TABLE IF NOT EXISTS checkin_tokens (
 -- used to be created only by the old SQLite migrate(); it is part of the schema
 -- of record now. The CHECK keeps it a genuine single-row settings table.
 CREATE TABLE IF NOT EXISTS safety_reference (
-      id INT NOT NULL PRIMARY KEY CHECK(id = 1),
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY CHECK(id = 1),
       source TEXT NOT NULL,
       description TEXT,
       reference_name TEXT,
