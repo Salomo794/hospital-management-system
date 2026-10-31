@@ -317,7 +317,7 @@ async function seed() {
       for (const m of medicines) {
         const [medicineResult] = await conn.query(
           `INSERT INTO medicines (name, generic_name, category, unit_price, cost_price, stock_quantity, min_stock_level, unit, expiry_date, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, date('now', '+18 months'), 1)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(CURDATE(), INTERVAL 18 MONTH), 1)`,
           [m.name, m.generic, m.category, m.price, m.cost, m.stock, m.min, m.unit]
         );
         await conn.query(
@@ -666,10 +666,10 @@ async function seed() {
         const admNum = `ADM-${Date.now().toString(36).toUpperCase()}-${i + 1}`;
         await conn.query(
           `INSERT INTO admissions (uuid, admission_number, patient_id, doctor_id, ward, bed_number, diagnosis, treatment_plan, status, notes, admission_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?, datetime('now', ?))`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?, DATE_SUB(NOW(), INTERVAL ? DAY))`,
           [uuid, admNum, patientIdList[w.patientIdx % patientIdList.length], i % 2 === 0 ? doctorUserId1 : doctorUserId2,
            w.ward, w.bed, w.diagnosis, w.plan,
-           `${w.bed} days stay, review daily`, `-${i % 5} days`]
+           `${w.bed} days stay, review daily`, i % 5]
         );
       }
       const dischargedUuid = randomUUID();
