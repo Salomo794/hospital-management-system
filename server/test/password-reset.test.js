@@ -55,7 +55,7 @@ beforeEach(() => {
   });
 });
 
-after(() => {
+after(async () => {
   mailer.resetTransport();
   pool.close();
   await dropTestDatabase(testDatabase);

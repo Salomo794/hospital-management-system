@@ -60,7 +60,7 @@ before(async () => {
   await seedDatabase();
 });
 
-after(() => {
+after(async () => {
   pool.close();
   await dropTestDatabase(testDatabase);
   fs.rmSync(tempDirectory, { recursive: true, force: true });
